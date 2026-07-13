@@ -12,10 +12,8 @@ export default function SOSRequests({ eventData, onSosCountChange }) {
   useEffect(() => {
     if (!eventData) return
     loadRequests()
-    const sub = supabase.channel('sos-channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sos_requests', filter: 'event_id=eq.' + eventData.id }, () => loadRequests())
-      .subscribe()
-    return () => supabase.removeChannel(sub)
+    const interval = setInterval(loadRequests, 5000)
+    return () => clearInterval(interval)
   }, [eventData])
 
   async function loadRequests() {

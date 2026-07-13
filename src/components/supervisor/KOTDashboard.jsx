@@ -14,10 +14,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange }) {
   useEffect(() => {
     if (!eventData) return
     loadOrders()
-    const sub = supabase.channel('kot-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: 'event_id=eq.' + eventData.id }, () => { loadOrders() })
-      .subscribe()
-    return () => supabase.removeChannel(sub)
+    const interval = setInterval(loadOrders, 5000)
+    return () => clearInterval(interval)
   }, [eventData])
 
   async function loadOrders() {
