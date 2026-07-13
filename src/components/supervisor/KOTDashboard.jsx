@@ -14,7 +14,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange }) {
   useEffect(() => {
     if (!eventData) return
     loadOrders()
-    const interval = setInterval(loadOrders, 5000)
+    const interval = setInterval(loadOrders, 4000)
     return () => clearInterval(interval)
   }, [eventData])
 
@@ -31,7 +31,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange }) {
   async function updateStatus(order) {
     const next = STATUS_FLOW[order.status]
     if (!next) return
-    await supabase.from('orders').update({ status: next }).eq('id', order.id)
+    const { error } = await supabase.from('orders').update({ status: next }).eq('id', order.id)
+    if (error) { alert('Update failed: ' + error.message); return }
     loadOrders()
   }
 

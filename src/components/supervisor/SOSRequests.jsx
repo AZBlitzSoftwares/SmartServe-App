@@ -12,7 +12,7 @@ export default function SOSRequests({ eventData, onSosCountChange }) {
   useEffect(() => {
     if (!eventData) return
     loadRequests()
-    const interval = setInterval(loadRequests, 5000)
+    const interval = setInterval(loadRequests, 4000)
     return () => clearInterval(interval)
   }, [eventData])
 
