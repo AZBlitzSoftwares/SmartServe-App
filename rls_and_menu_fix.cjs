@@ -1,4 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+const fs = require('fs')
+const BASE = '/Users/asayyed/SmartServe/src'
+
+// Fix MenuManager — show existing items with edit, better import error display
+fs.writeFileSync(BASE + '/components/supervisor/MenuManager.jsx', `import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
 export default function MenuManager({ eventData }) {
@@ -76,8 +80,8 @@ export default function MenuManager({ eventData }) {
     const file = e.target.files[0]; if (!file) return
     setImporting(true); setImportResult(null)
     let text = await file.text()
-    text = text.replace(/^\uFEFF/, '').replace(/\r\n/g,'\n').replace(/\r/g,'\n')
-    const lines = text.split('\n').map(l=>l.trim()).filter(Boolean)
+    text = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g,'\\n').replace(/\\r/g,'\\n')
+    const lines = text.split('\\n').map(l=>l.trim()).filter(Boolean)
     if (lines.length < 2) { setImportResult({ error:'File is empty or has no data rows.' }); setImporting(false); e.target.value=''; return }
 
     const rawHeaders = lines[0].split(',').map(h=>h.trim().replace(/^"|"$/g,'').toLowerCase().replace(/[^a-z_]/g,'_'))
@@ -250,3 +254,6 @@ export default function MenuManager({ eventData }) {
     </div>
   )
 }
+`)
+console.log('✅ MenuManager — edit/delete existing items, better CSV import, clear errors')
+console.log('Push: git add . && git commit -m "Fix RLS menu_items, edit dishes, CSV import" && git push')
