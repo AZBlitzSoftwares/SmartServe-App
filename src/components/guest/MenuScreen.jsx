@@ -14,7 +14,10 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   async function loadMenu() {
     setLoading(true)
     const { data: cats } = await supabase.from('menu_categories').select('*').eq('event_id', eventData.id).eq('is_visible', true).order('sort_order')
-    const { data: menuItems } = await supabase.from('menu_items').select('*').eq('is_available', true)
+    const catIds = (cats||[]).map(c=>c.id)
+    const { data: menuItems } = catIds.length
+      ? await supabase.from('menu_items').select('*').in('category_id', catIds).eq('is_available', true).order('name')
+      : { data: [] }
     setCategories(cats || [])
     setItems(menuItems || [])
     setActiveCategory('all')
