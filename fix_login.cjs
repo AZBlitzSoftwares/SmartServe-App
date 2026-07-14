@@ -1,4 +1,7 @@
-import { useState } from 'react'
+const fs = require('fs')
+const BASE = '/Users/asayyed/SmartServe/src'
+
+fs.writeFileSync(BASE + '/components/supervisor/SupervisorLogin.jsx', `import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
 export default function SupervisorLogin({ onLogin }) {
@@ -66,3 +69,5 @@ export default function SupervisorLogin({ onLogin }) {
     </div>
   )
 }
+`)
+console.log('✅ Login fixed — no demo credentials shown, supervisor name match fixed')
