@@ -11,29 +11,29 @@ export default function SOSRequests({ eventData, onSosCountChange }) {
 
   useEffect(() => {
     if (!eventData) return
-    loadRequests()
-    const interval = setInterval(loadRequests, 4000)
+    loadRequests(true)
+    const interval = setInterval(() => loadRequests(false), 4000)
     return () => clearInterval(interval)
   }, [eventData])
 
-  async function loadRequests() {
+  async function loadRequests(showSpinner = false) {
     if (!eventData) return
-    setLoading(true)
+    if (showSpinner) setLoading(true)
     const { data } = await supabase.from('sos_requests').select('*, tables(table_number)').eq('event_id', eventData.id).order('created_at', { ascending: false })
     const reqs = data || []
     setRequests(reqs)
     onSosCountChange(reqs.filter(r => r.status === 'open').length)
-    setLoading(false)
+    if (showSpinner) setLoading(false)
   }
 
   async function acknowledge(id) {
     await supabase.from('sos_requests').update({ status: 'acknowledged', acknowledged_at: new Date().toISOString() }).eq('id', id)
-    loadRequests()
+    loadRequests(false)
   }
 
   async function resolve(id) {
     await supabase.from('sos_requests').update({ status: 'resolved', resolved_at: new Date().toISOString() }).eq('id', id)
-    loadRequests()
+    loadRequests(false)
   }
 
   const open = requests.filter(r => r.status === 'open')

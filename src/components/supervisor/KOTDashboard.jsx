@@ -13,19 +13,19 @@ export default function KOTDashboard({ eventData, onOrderCountChange }) {
 
   useEffect(() => {
     if (!eventData) return
-    loadOrders()
-    const interval = setInterval(loadOrders, 4000)
+    loadOrders(true)
+    const interval = setInterval(() => loadOrders(false), 4000)
     return () => clearInterval(interval)
   }, [eventData])
 
-  async function loadOrders() {
+  async function loadOrders(showSpinner = false) {
     if (!eventData) return
-    setLoading(true)
+    if (showSpinner) setLoading(true)
     const { data } = await supabase.from('orders').select('*, tables(table_number), order_items(quantity, menu_items(name, is_live_counter))').eq('event_id', eventData.id).order('created_at', { ascending: false })
     const all = data || []
     setOrders(all)
     onOrderCountChange(all.filter(o => !['delivered','cancelled'].includes(o.status)).length)
-    setLoading(false)
+    if (showSpinner) setLoading(false)
   }
 
   async function updateStatus(order) {
@@ -33,7 +33,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange }) {
     if (!next) return
     const { error } = await supabase.from('orders').update({ status: next }).eq('id', order.id)
     if (error) { alert('Update failed: ' + error.message); return }
-    loadOrders()
+    loadOrders(false)
   }
 
   async function cancelOrder(id) {
