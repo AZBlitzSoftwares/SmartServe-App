@@ -1,78 +1,114 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
-const STATUS_STEPS = ['pending', 'in_preparation', 'ready', 'delivered']
-const STATUS_LABELS = { pending: 'Order Placed', in_preparation: 'In Preparation', ready: 'Ready for Delivery', delivered: 'Delivered' }
-const STATUS_ICONS = { pending: '📋', in_preparation: '👨‍🍳', ready: '✅', delivered: '🎉' }
-const STATUS_DESC = { pending: 'Your order has been received', in_preparation: 'The kitchen is preparing your food', ready: 'Your food is ready - waiter is on the way', delivered: 'Enjoy your meal!' }
+
+const STEPS = [
+  { key:'in_progress', label:'In Progress',  icon:'👨‍🍳', desc:'Your order is being prepared and will be delivered shortly' },
+  { key:'delivered',   label:'Delivered',    icon:'🎉', desc:'Enjoy your meal!' },
+]
+const STATUS_ORDER = ['in_progress', 'delivered']
+
 export default function OrderStatus({ orderId, tableNumber, onBack }) {
   const [order, setOrder] = useState(null)
-  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+
   useEffect(() => {
-    if (!orderId || orderId.startsWith('offline-')) return
-    loadOrder()
-    const sub = supabase.channel('order-' + orderId)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: 'id=eq.' + orderId }, payload => {
+    if (!orderId || orderId.startsWith('offline-')) { setLoading(false); return }
+    fetchOrder()
+    const sub = supabase.channel('order-status-' + orderId)
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'orders', filter:'id=eq.'+orderId }, payload => {
         setOrder(prev => ({ ...prev, ...payload.new }))
       }).subscribe()
-    return () => supabase.removeChannel(sub)
+    const interval = setInterval(fetchOrder, 6000)
+    return () => { supabase.removeChannel(sub); clearInterval(interval) }
   }, [orderId])
-  async function loadOrder() {
-    const { data } = await supabase.from('orders').select('*').eq('id', orderId).single()
+
+  async function fetchOrder() {
+    if (!orderId) return
+    const { data } = await supabase.from('orders')
+      .select('*, order_items(quantity, menu_items(name))')
+      .eq('id', orderId).single()
     if (data) setOrder(data)
-    const { data: oi } = await supabase.from('order_items').select('*, menu_items(name)').eq('order_id', orderId)
-    if (oi) setItems(oi)
+    setLoading(false)
   }
-  const isOffline = orderId?.startsWith('offline-')
-  const currentStatus = order?.status || 'pending'
-  const currentStep = STATUS_STEPS.indexOf(currentStatus)
-  return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: '20px 20px 40px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
-        <button onClick={onBack} style={{ background: '#fff', border: '1.5px solid var(--line)', borderRadius: 12, padding: '8px 16px', fontWeight: 700, fontSize: 14 }}>Back</button>
-        <h2 style={{ fontSize: 20, fontWeight: 800 }}>Order Status</h2>
-        <div style={{ background: 'rgba(42,27,46,0.08)', fontSize: 13, fontWeight: 700, padding: '6px 14px', borderRadius: 999, marginLeft: 'auto' }}>TABLE {tableNumber}</div>
+
+  if (orderId?.startsWith('offline-')) return (
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', flexDirection:'column' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:16, padding:'16px 20px', background:'#fff', borderBottom:'1px solid var(--line)' }}>
+        <button onClick={onBack} style={{ background:'var(--bg)', border:'1.5px solid var(--line)', borderRadius:10, padding:'8px 14px', fontSize:14, fontWeight:600, cursor:'pointer' }}>← Back</button>
+        <h2 style={{ fontSize:18, fontWeight:800 }}>Order Status</h2>
+        <div style={{ marginLeft:'auto', background:'rgba(255,255,255,0.15)', color:'var(--ink)', fontSize:12, fontWeight:700, padding:'5px 12px', borderRadius:999, border:'1px solid var(--line)' }}>TABLE {tableNumber}</div>
       </div>
-      {isOffline ? (
-        <div style={{ background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 16, padding: 24, textAlign: 'center' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>📶</div>
-          <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Order queued offline</div>
-          <div style={{ fontSize: 14, color: '#92400E' }}>Will sync automatically when internet is restored</div>
+      <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24, textAlign:'center' }}>
+        <div style={{ fontSize:64, marginBottom:16 }}>📶</div>
+        <h3 style={{ fontSize:20, fontWeight:800, marginBottom:8 }}>Order Queued Offline</h3>
+        <p style={{ color:'var(--ink2)', fontSize:14, lineHeight:1.6 }}>Will sync automatically when internet is restored</p>
+      </div>
+    </div>
+  )
+
+  if (loading) return <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center' }}><div style={{ color:'var(--ink2)' }}>Loading...</div></div>
+
+  // Map old statuses to new 2-step display
+  const displayStatus = ['pending','placed','in_preparation','ready'].includes(order?.status) ? 'in_progress' : order?.status
+  const currentStep = STATUS_ORDER.indexOf(displayStatus)
+
+  return (
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', flexDirection:'column' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:16, padding:'16px 20px', background:'#fff', borderBottom:'1px solid var(--line)' }}>
+        <button onClick={onBack} style={{ background:'var(--bg)', border:'1.5px solid var(--line)', borderRadius:10, padding:'8px 14px', fontSize:14, fontWeight:600, cursor:'pointer' }}>← Back</button>
+        <h2 style={{ fontSize:18, fontWeight:800 }}>Order Status</h2>
+        <div style={{ marginLeft:'auto', background:'rgba(255,255,255,0.15)', color:'var(--ink)', fontSize:12, fontWeight:700, padding:'5px 12px', borderRadius:999, border:'1px solid var(--line)' }}>TABLE {tableNumber}</div>
+      </div>
+
+      <div style={{ padding:24, flex:1 }}>
+        {/* Status timeline */}
+        <div style={{ background:'#fff', borderRadius:20, padding:24, marginBottom:20, boxShadow:'var(--shadow)' }}>
+          {STEPS.map((step, idx) => {
+            const done = currentStep > idx
+            const active = currentStep === idx
+            return (
+              <div key={step.key} style={{ display:'flex', gap:16, alignItems:'flex-start', marginBottom: idx < STEPS.length-1 ? 8 : 0 }}>
+                <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
+                  <div style={{ width:48, height:48, borderRadius:'50%', background: done?'#16A34A': active?'#E8890C':'#F3F4F6', display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, border: active?'3px solid #E8890C':'3px solid transparent', transition:'all 0.4s' }}>
+                    {done ? '✓' : step.icon}
+                  </div>
+                  {idx < STEPS.length-1 && <div style={{ width:2, height:40, background: done?'#16A34A':'#E5E7EB', marginTop:4, transition:'background 0.4s' }}></div>}
+                </div>
+                <div style={{ paddingTop:10, flex:1 }}>
+                  <div style={{ fontWeight: active||done ? 800 : 500, fontSize:16, color: done?'#16A34A': active?'#E8890C':'#9CA3AF' }}>{step.label}</div>
+                  {active && <div style={{ fontSize:13, color:'#888', marginTop:4, lineHeight:1.5 }}>{step.desc}</div>}
+                </div>
+              </div>
+            )
+          })}
         </div>
-      ) : (
-        <>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 24, marginBottom: 20, boxShadow: 'var(--shadow)' }}>
-            {STATUS_STEPS.map((step, i) => {
-              const done = i <= currentStep
-              const active = i === currentStep
-              return (
-                <div key={step} style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: i < STATUS_STEPS.length - 1 ? 24 : 0 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: done ? (active ? 'var(--marigold)' : 'var(--ink)') : '#E8E0F0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, boxShadow: active ? '0 0 0 4px rgba(232,137,12,0.25)' : 'none' }}>
-                      {STATUS_ICONS[step]}
-                    </div>
-                    {i < STATUS_STEPS.length - 1 && <div style={{ width: 2, height: 24, background: i < currentStep ? 'var(--ink)' : '#E8E0F0', marginTop: 4 }}></div>}
-                  </div>
-                  <div style={{ paddingTop: 8 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: done ? 'var(--ink)' : '#999' }}>{STATUS_LABELS[step]}</div>
-                    {active && <div style={{ fontSize: 13, color: 'var(--ink2)', marginTop: 4 }}>{STATUS_DESC[step]}</div>}
-                  </div>
-                </div>
-              )
-            })}
+
+        {/* Items */}
+        {order?.order_items?.length > 0 && (
+          <div style={{ background:'#fff', borderRadius:16, padding:20, boxShadow:'var(--shadow)' }}>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>Items Ordered</div>
+            {order.order_items.map((oi, i) => (
+              <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:'1px solid var(--line)', fontSize:15 }}>
+                <span style={{ fontWeight:500 }}>{oi.menu_items?.name}</span>
+                <span style={{ fontWeight:700 }}>x{oi.quantity}</span>
+              </div>
+            ))}
           </div>
-          {items.length > 0 && (
-            <div style={{ background: '#fff', borderRadius: 20, padding: 20, boxShadow: 'var(--shadow)' }}>
-              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 16 }}>Items Ordered</div>
-              {items.map(oi => (
-                <div key={oi.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--line)', fontSize: 14 }}>
-                  <span style={{ fontWeight: 600 }}>{oi.menu_items?.name}</span>
-                  <span style={{ color: 'var(--ink2)', fontWeight: 700 }}>x{oi.quantity}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+        )}
+
+        {/* Delivered message */}
+        {displayStatus === 'delivered' && (
+          <div style={{ background:'#F0FDF4', border:'1.5px solid #BBF7D0', borderRadius:16, padding:20, marginTop:16, textAlign:'center' }}>
+            <div style={{ fontSize:40, marginBottom:8 }}>🎉</div>
+            <div style={{ fontWeight:800, fontSize:18, color:'#16A34A', marginBottom:4 }}>Order Delivered!</div>
+            <div style={{ fontSize:14, color:'#888' }}>Thank you for ordering with Janu's Smart Serve</div>
+          </div>
+        )}
+
+        <button onClick={onBack} style={{ width:'100%', marginTop:20, background:'var(--ink)', color:'#fff', border:'none', borderRadius:14, padding:'16px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
+          ← Back to Menu
+        </button>
+      </div>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 
-const TYPE_LABELS = { sos:'Call Waiter', clean_table:'Clean Table', extra_cutlery:'Extra Cutlery', water_refill:'Water Refill' }
+const TYPE_LABELS = { sos:'Call Waiter', call_waiter:'Call Waiter', clean_table:'Clean Table', extra_cutlery:'Extra Cutlery', water_refill:'Water Refill' }
 const TYPE_EMOJI  = { sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', water_refill:'💧' }
 const TYPE_COLOR  = { sos:'#DC2626', clean_table:'#2563EB', extra_cutlery:'#7C3AED', water_refill:'#0891B2' }
 
@@ -96,7 +96,7 @@ export default function SOSRequests({ eventData, onSosCountChange }) {
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-        <h2 style={{ fontSize:20, fontWeight:800 }}>Service Requests</h2>
+        <h2 style={{ fontSize:20, fontWeight:800 }}>Call Waiter Requests</h2>
         <button onClick={()=>loadRequests(true)} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700 }}>Refresh</button>
       </div>
       {loading ? <div style={{ textAlign:'center', padding:60, color:'var(--ink2)' }}>Loading...</div>

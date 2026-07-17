@@ -8,9 +8,36 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
   const [error, setError] = useState('')
   const total = cart.reduce((s, i) => s + i.quantity, 0)
 
+  async function checkOrderLimit() {
+    if (!tableData || !eventData) return true // allow if no data
+    // Get max_orders_per_table from event (default 1)
+    const maxOrders = eventData.max_orders_per_table || 1
+    // Check active orders for this table
+    const { data } = await supabase.from('orders')
+      .select('id').eq('table_id', tableData.id)
+      .in('status', ['placed','in_progress'])
+    return (data?.length || 0) < maxOrders
+  }
+
+  const [orderLimitMsg, setOrderLimitMsg] = useState('')
+
   async function placeOrder() {
     setError('')
+    setOrderLimitMsg('')
     if (placing) return
+
+    // Check order limit
+    if (tableData && eventData) {
+      const maxOrders = eventData.max_orders_per_table || 1
+      const { data: activeOrders } = await supabase.from('orders')
+        .select('id').eq('table_id', tableData.id)
+        .in('status', ['pending','placed','in_progress'])
+      const activeCount = activeOrders?.length || 0
+      if (activeCount >= maxOrders) {
+        setOrderLimitMsg('Your order is being prepared. Once it\'s delivered, you can place your next order. Feel free to browse and add to cart in the meantime!')
+        return
+      }
+    }
 
     // Offline fallback
     if (isOnline === false) {
@@ -104,6 +131,13 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
               </div>
             )}
 
+            {orderLimitMsg && (
+              <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:12, padding:'14px 16px', fontSize:14, color:'#92400E', marginBottom:12, lineHeight:1.6, textAlign:'center' }}>
+                <div style={{ fontSize:28, marginBottom:8 }}>🍽️</div>
+                <div style={{ fontWeight:700, marginBottom:4 }}>Order in Progress!</div>
+                {orderLimitMsg}
+              </div>
+            )}
             {error && (
               <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:10, padding:'10px 14px', fontSize:13, color:'#DC2626', marginBottom:12, fontWeight:600 }}>
                 ⚠️ {error}

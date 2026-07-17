@@ -39,18 +39,38 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
       <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.55)', zIndex:1 }} />
 
       {/* Main content */}
-      <div style={{ position:'relative', zIndex:2, color:'#fff', width:'100%', maxWidth:400 }}>
-        <div style={{ fontSize:56, marginBottom:12 }}>🍽️</div>
-        <h1 style={{ fontSize:32, fontWeight:800, marginBottom:4, letterSpacing:'-0.02em' }}>
-          Janu's <span style={{ color:'#E8890C' }}>Smart Serve</span>
-        </h1>
+      <div style={{ position:'relative', zIndex:2, color:'#fff', width:'100%', maxWidth:420 }}>
+
+        {/* CATERING LOGO — large, prominent */}
+        {eventData?.catering_logo_url ? (
+          <img
+            src={eventData.catering_logo_url}
+            alt={eventData.catering_company||'Catering'}
+            style={{ width:120, height:120, objectFit:'contain', borderRadius:20, marginBottom:16,
+              background:'rgba(255,255,255,0.12)', padding:10,
+              boxShadow:'0 8px 32px rgba(0,0,0,0.3)', border:'2px solid rgba(255,255,255,0.2)' }}
+            onError={e=>{ e.target.style.display='none'; e.target.nextSibling.style.display='flex' }} />
+        ) : null}
+        {/* Fallback plate icon shown only if no logo */}
+        <div style={{ fontSize:64, marginBottom:12, display: eventData?.catering_logo_url ? 'none' : 'block' }}>🍽️</div>
+
+        {/* CATERING NAME — biggest text on screen */}
+        {eventData?.catering_company ? (
+          <div style={{ fontSize:36, fontWeight:900, color:'#fff', marginBottom:6, letterSpacing:'0.5px', lineHeight:1.2, textShadow:'0 2px 12px rgba(0,0,0,0.5)' }}>
+            {eventData.catering_company}
+          </div>
+        ) : null}
 
         {/* Event name */}
-        {eventData?.name
-          ? <p style={{ fontSize:15, opacity:0.85, marginBottom:4 }}>{eventData.name}</p>
-          : <p style={{ fontSize:13, opacity:0.6, marginBottom:4 }}>No event selected</p>
-        }
-        {eventData?.venue && <p style={{ fontSize:13, opacity:0.6, marginBottom:0 }}>📍 {eventData.venue}</p>}
+        {eventData?.name && (
+          <p style={{ fontSize:15, opacity:0.75, marginBottom:2 }}>{eventData.name}</p>
+        )}
+        {eventData?.venue && (
+          <p style={{ fontSize:13, opacity:0.55, marginBottom:0 }}>📍 {eventData.venue}</p>
+        )}
+        {!eventData && (
+          <p style={{ fontSize:13, opacity:0.6, marginBottom:4 }}>No event selected</p>
+        )}
 
         {/* Table badge */}
         <div style={{ display:'inline-flex', alignItems:'center', gap:8, background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.25)', borderRadius:999, padding:'10px 24px', margin:'20px 0 28px', fontSize:16, fontWeight:700 }}>
@@ -81,7 +101,7 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
           {eventData ? '🔄 Change Event' : '📋 Select Event'}
         </button>
 
-        <p style={{ marginTop:24, fontSize:11, opacity:0.35 }}>Powered by Janu's Smart Serve · Table {tableNumber}</p>
+        <p style={{ marginTop:24, fontSize:11, opacity:0.3 }}>Technology by Janu's Smart Serve · Table {tableNumber}</p>
       </div>
 
       {/* Event picker modal */}

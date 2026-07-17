@@ -36,9 +36,33 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   return (
     <div style={{ minHeight:'100vh', background:'#f5f5f5', display:'flex', flexDirection:'column', paddingBottom: cartCount > 0 ? 100 : 24 }}>
 
-      <div style={{ background:'#1a0a0a', padding:'12px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', position:'sticky', top:0, zIndex:40 }}>
-        <div style={{ color:'#fff', fontWeight:800, fontSize:17 }}>Janu's <span style={{ color:'#E8890C' }}>Smart Serve</span></div>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+      <div style={{ background:'#1a0a0a', padding:'10px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', position:'sticky', top:0, zIndex:40, gap:10 }}>
+        {/* Left: Catering logo + name — PROMINENT. Janu's brand is NOT shown here */}
+        <div style={{ display:'flex', alignItems:'center', gap:10, flex:1, minWidth:0 }}>
+          {eventData?.catering_logo_url && (
+            <img src={eventData.catering_logo_url} alt={eventData.catering_company||''}
+              style={{ width:40, height:40, objectFit:'contain', borderRadius:8, background:'rgba(255,255,255,0.1)', padding:4, flexShrink:0, border:'1px solid rgba(255,255,255,0.15)' }}
+              onError={e=>e.target.style.display='none'} />
+          )}
+          <div style={{ minWidth:0 }}>
+            {eventData?.catering_company ? (
+              <>
+                <div style={{ color:'#fff', fontWeight:800, fontSize:16, lineHeight:1.2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {eventData.catering_company}
+                </div>
+                <div style={{ color:'rgba(255,255,255,0.4)', fontSize:10, marginTop:1 }}>
+                  by Janu's Smart Serve
+                </div>
+              </>
+            ) : (
+              <div style={{ color:'#fff', fontWeight:800, fontSize:17 }}>
+                Janu's <span style={{ color:'#E8890C' }}>Smart Serve</span>
+              </div>
+            )}
+          </div>
+        </div>
+        {/* Right: offline + table */}
+        <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
           {isOnline === false && <span style={{ background:'#DC2626', color:'#fff', fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:999 }}>OFFLINE</span>}
           <div style={{ background:'rgba(255,255,255,0.15)', color:'#fff', fontSize:12, fontWeight:700, padding:'5px 12px', borderRadius:999 }}>TABLE {tableNumber}</div>
         </div>
@@ -47,7 +71,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff', borderBottom:'1px solid #eee', overflowX:'auto', alignItems:'center' }}>
         {currentOrderId && <button onClick={onShowStatus} style={{ flexShrink:0, background:'#16A34A', color:'#fff', border:'none', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>📦 Track Order</button>}
         <button onClick={onShowHistory} style={{ flexShrink:0, background:'#fff', color:'#333', border:'1.5px solid #ddd', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:600, cursor:'pointer' }}>📋 History</button>
-        <button onClick={onShowSOS} style={{ flexShrink:0, background:'#FEF3C7', color:'#92400E', border:'1.5px solid #FCD34D', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>🆘 Need Help?</button>
+        <button onClick={onShowSOS} style={{ flexShrink:0, background:'#FEF3C7', color:'#92400E', border:'1.5px solid #FCD34D', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>🛎️ Call Waiter</button>
         <button onClick={onShowFeedback} style={{ flexShrink:0, background:'#FFF7ED', color:'#C2410C', border:'1.5px solid #FED7AA', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>⭐ Feedback</button>
       </div>
 

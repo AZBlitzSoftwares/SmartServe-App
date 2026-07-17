@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
+import FoodMaster from './FoodMaster'
 import { supabase } from '../../lib/supabase'
 
 export default function MenuManager({ eventData }) {
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
-  const [activeCategory, setActiveCategory] = useState(null)
+  const [activeCategory, setActiveCategory] = useState('all')
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [showAddCat, setShowAddCat] = useState(false)
@@ -12,11 +13,19 @@ export default function MenuManager({ eventData }) {
   const [newCatName, setNewCatName] = useState('')
   const [newItem, setNewItem] = useState({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'' })
   const [saving, setSaving] = useState(false)
+  const [uploadingImg, setUploadingImg] = useState(false)
+  const imgFileRef = useRef()
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
+  const [showFoodMaster, setShowFoodMaster] = useState(false)
+  const [showCopyEvent, setShowCopyEvent] = useState(false)
+  const [allEvents, setAllEvents] = useState([])
   const fileRef = useRef()
 
   useEffect(() => { if (eventData) loadMenu() }, [eventData])
+  useEffect(() => {
+    supabase.from('events').select('id,name').order('created_at',{ascending:false}).then(({data})=>setAllEvents(data||[]))
+  }, [])
 
   async function loadMenu() {
     setLoading(true)
@@ -27,7 +36,7 @@ export default function MenuManager({ eventData }) {
       : { data: [] }
     setCategories(cats||[])
     setItems(menuItems||[])
-    if (cats?.length && !activeCategory) setActiveCategory(cats[0].id)
+    // Keep 'all' as default, only switch if activeCategory is null
     setLoading(false)
   }
 
@@ -59,6 +68,23 @@ export default function MenuManager({ eventData }) {
     setNewItem({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'' })
     setEditItem(null); setShowAdd(false); setSaving(false)
     loadMenu()
+  }
+
+  async function uploadFoodImage(file) {
+    if (!file) return
+    const ext = file.name.split('.').pop().toLowerCase()
+    const allowed = ['jpg','jpeg','png','webp']
+    if (!allowed.includes(ext)) { alert('Only JPG, PNG, or WebP images supported'); return }
+    if (file.size > 5 * 1024 * 1024) { alert('Image too large. Max size is 5MB.'); return }
+    setUploadingImg(true)
+    try {
+      const path = 'food-images/' + Date.now() + '-' + file.name.replace(/[^a-zA-Z0-9.]/g,'_')
+      const { error: upErr } = await supabase.storage.from('smartserve').upload(path, file, { upsert:true })
+      if (upErr) { alert('Upload failed: ' + upErr.message); return }
+      const { data: urlData } = supabase.storage.from('smartserve').getPublicUrl(path)
+      setNewItem(p => ({ ...p, photo_url: urlData.publicUrl }))
+    } catch(e) { alert('Upload error: ' + e.message) }
+    finally { setUploadingImg(false) }
   }
 
   function startEdit(item) {
@@ -94,6 +120,14 @@ export default function MenuManager({ eventData }) {
     const { data: freshCats } = await supabase.from('menu_categories').select('*').eq('event_id', eventData.id)
     const catCache = {}; (freshCats||[]).forEach(c => { catCache[c.name.toLowerCase()] = c.id })
 
+    // Load ALL existing item names for this event upfront for fast dedup check
+    const { data: freshCatsFull } = await supabase.from('menu_categories').select('id').eq('event_id', eventData.id)
+    const allCatIds = (freshCatsFull||[]).map(c=>c.id)
+    const { data: existingItemsFull } = allCatIds.length
+      ? await supabase.from('menu_items').select('name').in('category_id', allCatIds)
+      : { data: [] }
+    const existingNames = new Set((existingItemsFull||[]).map(i=>i.name.toLowerCase().trim()))
+
     let added=0, skipped=0, errors=[]
     function splitLine(line) { const r=[]; let cur=''; let q=false; for(let i=0;i<line.length;i++){if(line[i]==='"'){q=!q}else if(line[i]===','&&!q){r.push(cur.trim());cur=''}else{cur+=line[i]}} r.push(cur.trim()); return r }
 
@@ -101,6 +135,10 @@ export default function MenuManager({ eventData }) {
       try {
         const cols = splitLine(lines[i])
         const itemName = cols[nameIdx]?.replace(/^"|"$/g,'').trim(); if (!itemName) { skipped++; continue }
+
+        // DEDUP CHECK — skip if item already exists in this event (case-insensitive)
+        if (existingNames.has(itemName.toLowerCase().trim())) { skipped++; continue }
+
         const desc    = descIdx>=0 ? cols[descIdx]?.replace(/^"|"$/g,'').trim()||'' : ''
         const catName = catIdx>=0  ? cols[catIdx]?.replace(/^"|"$/g,'').trim()||'General' : 'General'
         const isLive  = liveIdx>=0 ? ['yes','true','1','y'].includes((cols[liveIdx]?.replace(/^"|"$/g,'')||'').toLowerCase().trim()) : false
@@ -115,7 +153,8 @@ export default function MenuManager({ eventData }) {
           catCache[catKey] = nc.id
         }
         const { error: ie } = await supabase.from('menu_items').insert({ category_id:catCache[catKey], name:itemName, description:desc, is_live_counter:isLive, is_veg:isVeg, photo_url:imgUrl||null, is_available:true })
-        if (ie) { errors.push(itemName+': '+ie.message); skipped++ } else added++
+        if (ie) { errors.push(itemName+': '+ie.message); skipped++ }
+        else { added++; existingNames.add(itemName.toLowerCase().trim()) } // track newly added too
       } catch(err) { errors.push('Row '+(i+1)+': '+err.message); skipped++ }
     }
     setImportResult({ added, skipped, errors:errors.slice(0,5) })
@@ -129,7 +168,7 @@ export default function MenuManager({ eventData }) {
     setActiveCategory(null); loadMenu()
   }
 
-  const filtered = items.filter(i => i.category_id === activeCategory)
+  const filtered = activeCategory === 'all' ? items : items.filter(i => i.category_id === activeCategory)
   const INP = { width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:14, marginBottom:10, fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }
 
   return (
@@ -137,6 +176,8 @@ export default function MenuManager({ eventData }) {
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
         <h2 style={{ fontSize:20, fontWeight:800 }}>Menu Manager</h2>
         <div style={{ display:'flex', gap:8 }}>
+          <button onClick={()=>setShowFoodMaster(true)} style={{ background:'#F5F3FF', border:'1px solid #DDD6FE', color:'#7C3AED', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>📚 Food Master</button>
+          <button onClick={()=>setShowCopyEvent(true)} style={{ background:'#EFF6FF', border:'1px solid #BFDBFE', color:'#2563EB', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>📋 Copy from Event</button>
           <button onClick={()=>fileRef.current?.click()} disabled={importing} style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#16A34A', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
             {importing?'⏳ Importing...':'📥 Import CSV'}
           </button>
@@ -172,6 +213,9 @@ export default function MenuManager({ eventData }) {
 
       {/* Category tabs */}
       <div style={{ display:'flex', gap:8, marginBottom:12, overflowX:'auto', flexWrap:'nowrap', paddingBottom:4 }}>
+        <button onClick={()=>setActiveCategory('all')} style={{ flexShrink:0, background:activeCategory==='all'?'var(--ink)':'#fff', color:activeCategory==='all'?'#fff':'var(--ink)', border:'1.5px solid', borderColor:activeCategory==='all'?'var(--ink)':'var(--line)', borderRadius:999, padding:'8px 18px', fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
+          All ({items.length})
+        </button>
         {categories.map(cat => (
           <button key={cat.id} onClick={()=>setActiveCategory(cat.id)} style={{ flexShrink:0, background:activeCategory===cat.id?'var(--ink)':'#fff', color:activeCategory===cat.id?'#fff':'var(--ink)', border:'1.5px solid', borderColor:activeCategory===cat.id?'var(--ink)':'var(--line)', borderRadius:999, padding:'8px 18px', fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
             {cat.name} ({items.filter(i=>i.category_id===cat.id).length})
@@ -200,7 +244,24 @@ export default function MenuManager({ eventData }) {
             <option value="">Select category *</option>
             {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <input value={newItem.photo_url} onChange={e=>setNewItem(p=>({...p,photo_url:e.target.value}))} placeholder="Image URL (optional) — paste any direct image link" style={INP} />
+          {/* Image — URL or Upload */}
+          <div style={{ marginBottom:10 }}>
+            <label style={{ fontSize:13, fontWeight:600, color:'var(--ink2)', display:'block', marginBottom:6 }}>Food Image (optional)</label>
+            <input ref={imgFileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>uploadFoodImage(e.target.files[0])} style={{ display:'none' }} />
+            <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+              <input value={newItem.photo_url} onChange={e=>setNewItem(p=>({...p,photo_url:e.target.value}))}
+                placeholder="Paste image URL, or upload below"
+                style={{ flex:1, border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 12px', fontSize:13, fontFamily:'Manrope', outline:'none' }} />
+              {newItem.photo_url && <img src={newItem.photo_url} alt="preview" style={{ width:44, height:44, objectFit:'cover', borderRadius:8, border:'1px solid var(--line)', flexShrink:0 }} onError={e=>e.target.style.display='none'} />}
+            </div>
+            <button type="button" onClick={()=>imgFileRef.current?.click()} disabled={uploadingImg}
+              style={{ width:'100%', background:uploadingImg?'#999':'#F0FDF4', border:'1.5px solid #BBF7D0', color:uploadingImg?'#fff':'#16A34A', borderRadius:10, padding:'9px', fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:6 }}>
+              {uploadingImg ? '⏳ Uploading...' : '📷 Upload from Device'}
+            </button>
+            <div style={{ fontSize:11, color:'var(--ink2)', lineHeight:1.7 }}>
+              ✅ Formats: <strong>JPG, PNG, WebP</strong> &nbsp;·&nbsp; Max: <strong>5MB</strong> &nbsp;·&nbsp; Recommended: <strong>400×300px or square</strong>
+            </div>
+          </div>
           <div style={{ display:'flex', gap:10, marginBottom:12 }}>
             <button onClick={()=>setNewItem(p=>({...p,is_veg:true}))} style={{ flex:1, background:newItem.is_veg?'#16A34A':'#fff', color:newItem.is_veg?'#fff':'#333', border:'1.5px solid', borderColor:newItem.is_veg?'#16A34A':'#ddd', borderRadius:10, padding:'10px', fontSize:13, fontWeight:700, cursor:'pointer' }}>🟢 Veg</button>
             <button onClick={()=>setNewItem(p=>({...p,is_veg:false}))} style={{ flex:1, background:!newItem.is_veg?'#DC2626':'#fff', color:!newItem.is_veg?'#fff':'#333', border:'1.5px solid', borderColor:!newItem.is_veg?'#DC2626':'#ddd', borderRadius:10, padding:'10px', fontSize:13, fontWeight:700, cursor:'pointer' }}>🔴 Non-Veg</button>
@@ -247,6 +308,55 @@ export default function MenuManager({ eventData }) {
           </div>
         </div>
       ))}
+      {showFoodMaster && <FoodMaster eventData={eventData} onClose={()=>{ setShowFoodMaster(false); loadMenu() }} />}
+
+      {showCopyEvent && (
+        <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center',padding:24 }}>
+          <div style={{ background:'#fff',borderRadius:20,padding:24,width:'100%',maxWidth:380 }}>
+            <h3 style={{ fontSize:18,fontWeight:800,marginBottom:8 }}>Copy Menu from Event</h3>
+            <p style={{ fontSize:13,color:'#888',marginBottom:16 }}>All items from the selected event will be added to <strong>{eventData?.name}</strong></p>
+            <select onChange={async e => {
+              if (!e.target.value) return
+              const srcId = e.target.value
+              const { data: srcCats } = await supabase.from('menu_categories').select('*').eq('event_id', srcId)
+              const srcCatIds = (srcCats||[]).map(c=>c.id)
+              if (!srcCatIds.length) { alert('No menu found in that event'); return }
+              const { data: srcItems } = await supabase.from('menu_items').select('*').in('category_id', srcCatIds)
+              if (!srcItems?.length) { alert('No items found'); return }
+              if (!confirm('Copy ' + srcItems.length + ' items to ' + eventData.name + '?')) return
+              const catCache = {}
+              const { data: existingCats } = await supabase.from('menu_categories').select('*').eq('event_id', eventData.id)
+              existingCats?.forEach(c => { catCache[c.name.toLowerCase()] = c.id })
+              // Load existing names for dedup
+              const { data: destCatsFull } = await supabase.from('menu_categories').select('id').eq('event_id', eventData.id)
+              const destCatIds = (destCatsFull||[]).map(c=>c.id)
+              const { data: destItemsFull } = destCatIds.length ? await supabase.from('menu_items').select('name').in('category_id', destCatIds) : { data:[] }
+              const destNames = new Set((destItemsFull||[]).map(i=>i.name.toLowerCase().trim()))
+              let copyAdded=0, copySkipped=0
+
+              for (const item of srcItems) {
+                // Skip duplicates
+                if (destNames.has(item.name.toLowerCase().trim())) { copySkipped++; continue }
+                const srcCat = srcCats.find(c=>c.id===item.category_id)
+                const catKey = (srcCat?.name||'General').toLowerCase()
+                if (!catCache[catKey]) {
+                  const { data: nc } = await supabase.from('menu_categories').insert({ event_id:eventData.id, name:srcCat?.name||'General', sort_order:Object.keys(catCache).length+1, is_visible:true }).select().single()
+                  if (nc) catCache[catKey] = nc.id
+                }
+                await supabase.from('menu_items').insert({ category_id:catCache[catKey], name:item.name, description:item.description, is_veg:item.is_veg, is_live_counter:item.is_live_counter, photo_url:item.photo_url, is_available:true })
+                destNames.add(item.name.toLowerCase().trim())
+                copyAdded++
+              }
+              alert('✅ Copied ' + copyAdded + ' items!' + (copySkipped>0?' Skipped '+copySkipped+' duplicates.':''))
+              setShowCopyEvent(false); loadMenu()
+            }} style={{ width:'100%',border:'1.5px solid var(--line)',borderRadius:10,padding:'10px 14px',fontSize:14,fontFamily:'Manrope',outline:'none',background:'#fff',marginBottom:16 }}>
+              <option value="">Select source event...</option>
+              {allEvents.filter(e=>e.id!==eventData?.id).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+            <button onClick={()=>setShowCopyEvent(false)} style={{ width:'100%',background:'var(--bg)',border:'1.5px solid var(--line)',borderRadius:12,padding:'12px',fontSize:14,fontWeight:700 }}>Cancel</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -7,7 +7,7 @@ import MenuManager from '../components/supervisor/MenuManager'
 import ReportsDashboard from '../components/supervisor/ReportsDashboard'
 import EventManager from '../components/supervisor/EventManager'
 
-const TYPE_LABELS = { sos:'Call Waiter', clean_table:'Clean Table', extra_cutlery:'Extra Cutlery', water_refill:'Water Refill' }
+const TYPE_LABELS = { sos:'Call Waiter', call_waiter:'Call Waiter', clean_table:'Clean Table', extra_cutlery:'Extra Cutlery', water_refill:'Water Refill' }
 const TYPE_EMOJI  = { sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', water_refill:'💧' }
 
 export default function SupervisorApp() {
@@ -186,7 +186,7 @@ export default function SupervisorApp() {
 
       {/* ── CONTENT ── */}
       <div style={{ padding:'16px' }}>
-        {activeTab==='kot'     && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} />}
+        {activeTab==='kot'     && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={(order) => { setNewOrderAlert(order); setOrderCount(c=>c+1) }} />}
         {activeTab==='sos'     && <SOSRequests eventData={eventData} onSosCountChange={setSosCount} />}
         {activeTab==='menu'    && <MenuManager eventData={eventData} />}
         {activeTab==='reports' && <ReportsDashboard eventData={eventData} onEventChange={setEventData} />}

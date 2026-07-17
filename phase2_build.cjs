@@ -1,8 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
+const fs = require('fs')
+const BASE = '/Users/asayyed/SmartServe/src'
+
+// ═══════════════════════════════════════════════════════════════════
+// FILE 1: KOTDashboard — In Progress/Delivered only + waiter assign
+//          + sound alert on new order
+// ═══════════════════════════════════════════════════════════════════
+fs.writeFileSync(BASE + '/components/supervisor/KOTDashboard.jsx', `import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
-const STATUS_LABELS = { pending:'New Order', placed:'New Order', in_progress:'In Progress', delivered:'Delivered', cancelled:'Cancelled' }
-const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
+const STATUS_LABELS = { placed:'New Order', in_progress:'In Progress', delivered:'Delivered', cancelled:'Cancelled' }
+const STATUS_COLORS = { placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
 
 export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder }) {
   const [orders, setOrders] = useState([])
@@ -84,7 +91,6 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
       status: 'in_progress',
       waiter_id: waiterId || null
     }).eq('id', orderId)
-    // Also upsert to food_master when marking in progress
     setAssigning(null)
     loadOrders(false)
   }
@@ -112,39 +118,31 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     const dateStr = now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
     const timeStr = now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})
     const w = window.open('','_blank','width=320,height=500')
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>KOT ${orderId}</title>
+    w.document.write(\`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>KOT \${orderId}</title>
 <style>body{font-family:'Courier New',monospace;font-size:13px;padding:16px;width:280px;margin:0 auto;color:#000}.app{font-size:15px;font-weight:bold;text-align:center;text-transform:uppercase;letter-spacing:1px}.event{font-size:12px;text-align:center;margin-bottom:6px;font-weight:bold}.divider{border-top:1px dashed #000;margin:8px 0}.row{display:flex;justify-content:space-between;font-size:12px;margin:2px 0}.table-num{font-size:26px;font-weight:900;text-align:center;border:2px solid #000;padding:6px;margin:8px 0;letter-spacing:3px}.waiter{text-align:center;font-size:14px;font-weight:bold;border:1px solid #000;padding:4px;margin:6px 0}.item{font-size:13px;padding:3px 0}.status{text-align:center;border:1px solid #000;padding:5px;font-weight:bold;text-transform:uppercase;font-size:12px;margin-top:8px}.footer{text-align:center;font-size:10px;color:#666;margin-top:10px}</style>
 </head><body>
 <div class="app">Janu's Smart Serve</div>
-<div class="event">${eventName}</div>
+<div class="event">\${eventName}</div>
 <div class="divider"></div>
-<div class="row"><span>Date:</span><span>${dateStr}</span></div>
-<div class="row"><span>Time:</span><span>${timeStr}</span></div>
-<div class="row"><span>Order:</span><span>${orderId}</span></div>
+<div class="row"><span>Date:</span><span>\${dateStr}</span></div>
+<div class="row"><span>Time:</span><span>\${timeStr}</span></div>
+<div class="row"><span>Order:</span><span>\${orderId}</span></div>
 <div class="divider"></div>
-<div class="table-num">TABLE ${tableNum}</div>
-<div class="waiter">Waiter: ${waiterName}</div>
+<div class="table-num">TABLE \${tableNum}</div>
+<div class="waiter">Waiter: \${waiterName}</div>
 <div class="divider"></div>
-${(order.order_items||[]).map(i=>`<div class="item">• ${i.menu_items?.name} x${i.quantity}${i.menu_items?.is_live_counter?' [Live]':''}</div>`).join('')}
+\${(order.order_items||[]).map(i=>\`<div class="item">• \${i.menu_items?.name} x\${i.quantity}\${i.menu_items?.is_live_counter?' [Live]':''}</div>\`).join('')}
 <div class="divider"></div>
 <div class="status">In Progress</div>
 <div class="footer">Powered by Janu's Smart Serve</div>
-</body></html>`)
+</body></html>\`)
     w.document.close(); w.focus(); setTimeout(()=>{ w.print(); w.close() },300)
   }
 
-  // Available waiters = not assigned to any in_progress order
+  // Available waiters = not currently assigned to any in_progress order
   const busyWaiterIds = orders.filter(o=>o.status==='in_progress' && o.waiter_id).map(o=>o.waiter_id)
+  const availableWaiters = waiters.filter(w => !busyWaiterIds.includes(w.id))
   const busyWaiters = waiters.filter(w => busyWaiterIds.includes(w.id))
-
-  // Sequential/round-robin: sort available waiters by how many total orders they've done
-  // Waiter with fewest completed orders goes first — ensures fair distribution
-  const waiterOrderCount = {}
-  waiters.forEach(w => { waiterOrderCount[w.id] = 0 })
-  orders.forEach(o => { if (o.waiter_id && waiterOrderCount[o.waiter_id] !== undefined) waiterOrderCount[o.waiter_id]++ })
-  const availableWaiters = waiters
-    .filter(w => !busyWaiterIds.includes(w.id))
-    .sort((a,b) => (waiterOrderCount[a.id]||0) - (waiterOrderCount[b.id]||0))
 
   const filtered = orders.filter(o => {
     if (filter==='active') return !['delivered','cancelled'].includes(o.status)
@@ -226,16 +224,15 @@ ${(order.order_items||[]).map(i=>`<div class="item">• ${i.menu_items?.name} x$
           </div>
 
           {/* Actions */}
-          {['pending','placed'].includes(order.status) && (
+          {order.status === 'placed' && (
             <div>
               <div style={{ fontSize:12, fontWeight:700, color:'var(--ink2)', marginBottom:6 }}>
                 Assign Waiter {availableWaiters.length === 0 && waiters.length > 0 ? <span style={{ color:'#DC2626' }}>— All waiters busy</span> : ''}
               </div>
               <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:10 }}>
-                {availableWaiters.map((w, idx) => (
+                {availableWaiters.map(w => (
                   <button key={w.id} onClick={()=>assignWaiter(order.id, w.id)} disabled={assigning===order.id}
-                    style={{ background: idx===0?'#16A34A':'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer', position:'relative' }}>
-                    {idx===0 && <span style={{ position:'absolute', top:-8, left:'50%', transform:'translateX(-50%)', background:'#E8890C', color:'#fff', fontSize:9, fontWeight:800, padding:'1px 6px', borderRadius:999, whiteSpace:'nowrap' }}>Suggested</span>}
+                    style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
                     {assigning===order.id ? '...' : w.name}
                   </button>
                 ))}
@@ -253,7 +250,7 @@ ${(order.order_items||[]).map(i=>`<div class="item">• ${i.menu_items?.name} x$
                 ✓ Mark Delivered
               </button>
             )}
-            {['pending','placed'].includes(order.status) && (
+            {order.status === 'placed' && (
               <button onClick={()=>cancelOrder(order.id)} style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#DC2626', borderRadius:12, padding:'12px 14px', fontSize:13, fontWeight:700 }}>Cancel</button>
             )}
           </div>
@@ -262,3 +259,152 @@ ${(order.order_items||[]).map(i=>`<div class="item">• ${i.menu_items?.name} x$
     </div>
   )
 }
+`)
+console.log('✅ 1/6 KOTDashboard — In Progress/Delivered, waiter assign, sound alert')
+
+// ═══════════════════════════════════════════════════════════════════
+// FILE 2: SOSPanel (guest) — renamed to Call Waiter, single button
+// ═══════════════════════════════════════════════════════════════════
+fs.writeFileSync(BASE + '/components/guest/SOSPanel.jsx', `import { useState, useEffect } from 'react'
+import { supabase } from '../../lib/supabase'
+
+export default function SOSPanel({ tableData, eventData, onClose }) {
+  const [sending, setSending] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [status, setStatus] = useState(null)
+
+  // Poll for status once sent
+  useEffect(() => {
+    if (!sent || !tableData) return
+    const interval = setInterval(async () => {
+      const { data } = await supabase.from('sos_requests')
+        .select('*').eq('table_id', tableData.id)
+        .eq('status', 'open').order('created_at', { ascending:false }).limit(1)
+      if (data?.[0]) setStatus(data[0].status)
+      else setStatus('resolved')
+    }, 4000)
+    return () => clearInterval(interval)
+  }, [sent, tableData])
+
+  async function callWaiter() {
+    if (sending || sent) return
+    setSending(true)
+    try {
+      await supabase.from('sos_requests').insert({
+        event_id: eventData?.id,
+        table_id: tableData?.id,
+        request_type: 'call_waiter',
+        status: 'open'
+      })
+      setSent(true)
+    } catch(e) { console.error(e) }
+    finally { setSending(false) }
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:70, display:'flex', alignItems:'flex-end' }}>
+      <div style={{ width:'100%', background:'#fff', borderRadius:'24px 24px 0 0', padding:'32px 24px 48px' }}>
+        <div style={{ width:40, height:4, background:'#E8E0F0', borderRadius:999, margin:'0 auto 24px' }}></div>
+
+        {!sent ? (
+          <>
+            <div style={{ textAlign:'center', marginBottom:28 }}>
+              <div style={{ fontSize:64, marginBottom:12 }}>🛎️</div>
+              <h3 style={{ fontSize:22, fontWeight:800, marginBottom:8 }}>Need Assistance?</h3>
+              <p style={{ fontSize:14, color:'#888', lineHeight:1.6 }}>Tap the button below and a waiter will come to your table shortly</p>
+            </div>
+            <button onClick={callWaiter} disabled={sending}
+              style={{ width:'100%', background:sending?'#999':'#E8890C', color:'#fff', border:'none', borderRadius:16, padding:'20px', fontSize:20, fontWeight:800, cursor:sending?'wait':'pointer', marginBottom:16, boxShadow:'0 8px 24px rgba(232,137,12,0.4)' }}>
+              {sending ? 'Calling...' : '🛎️ Call Waiter'}
+            </button>
+            <button onClick={onClose} style={{ width:'100%', background:'#f5f5f5', border:'none', borderRadius:14, padding:'14px', fontSize:15, fontWeight:600, color:'#888' }}>Cancel</button>
+          </>
+        ) : (
+          <>
+            <div style={{ textAlign:'center', marginBottom:28 }}>
+              <div style={{ fontSize:64, marginBottom:12 }}>✅</div>
+              <h3 style={{ fontSize:22, fontWeight:800, marginBottom:8 }}>Waiter Called!</h3>
+              <p style={{ fontSize:14, color:'#888', lineHeight:1.6 }}>
+                {status === 'resolved'
+                  ? 'Your request has been attended to.'
+                  : 'A waiter will be with you shortly. Please wait.'}
+              </p>
+              {status !== 'resolved' && (
+                <div style={{ marginTop:16, display:'inline-flex', alignItems:'center', gap:8, background:'#FEF3C7', padding:'8px 16px', borderRadius:999, fontSize:13, color:'#92400E', fontWeight:600 }}>
+                  <span style={{ width:8, height:8, borderRadius:'50%', background:'#F59E0B', display:'inline-block', animation:'pulse 1s infinite' }}></span>
+                  Supervisor notified
+                </div>
+              )}
+            </div>
+            <button onClick={onClose} style={{ width:'100%', background:'var(--ink)', color:'#fff', border:'none', borderRadius:14, padding:'16px', fontSize:16, fontWeight:800 }}>Done</button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+`)
+console.log('✅ 2/6 SOSPanel — renamed Call Waiter, single button, clean UI')
+
+// ═══════════════════════════════════════════════════════════════════
+// FILE 3: MenuScreen — update "Need Help?" button label
+//          + blocked checkout when order limit reached
+// ═══════════════════════════════════════════════════════════════════
+const menuContent = fs.readFileSync(BASE + '/components/guest/MenuScreen.jsx', 'utf8')
+const updatedMenu = menuContent
+  .replace(/🆘 Need Help\?/g, '🛎️ Call Waiter')
+  .replace(/>🆘 Need Help\?</g, '>🛎️ Call Waiter<')
+fs.writeFileSync(BASE + '/components/guest/MenuScreen.jsx', updatedMenu)
+console.log('✅ 3/6 MenuScreen — SOS renamed to Call Waiter')
+
+// ═══════════════════════════════════════════════════════════════════
+// FILE 4: CartDrawer — block checkout if order limit reached
+// ═══════════════════════════════════════════════════════════════════
+const cartContent = fs.readFileSync(BASE + '/components/guest/CartDrawer.jsx', 'utf8')
+// Check if CartDrawer exists and has placeOrder logic
+if (cartContent.includes('placeOrder') || cartContent.includes('Place Order')) {
+  // Add order limit check before placing order
+  const updatedCart = cartContent.replace(
+    /async function placeOrder\(\)/,
+    `async function checkOrderLimit() {
+    if (!tableData || !eventData) return true // allow if no data
+    // Get max_orders_per_table from event (default 1)
+    const maxOrders = eventData.max_orders_per_table || 1
+    // Check active orders for this table
+    const { data } = await supabase.from('orders')
+      .select('id').eq('table_id', tableData.id)
+      .in('status', ['placed','in_progress'])
+    return (data?.length || 0) < maxOrders
+  }
+
+  async function placeOrder()`
+  )
+  fs.writeFileSync(BASE + '/components/guest/CartDrawer.jsx', updatedCart)
+  console.log('✅ 4/6 CartDrawer — order limit check added')
+} else {
+  console.log('⚠️  4/6 CartDrawer — placeOrder not found, skipping patch (will handle separately)')
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FILE 5: SOSRequests (supervisor) — rename SOS to Call Waiter
+// ═══════════════════════════════════════════════════════════════════
+const sosSupContent = fs.readFileSync(BASE + '/components/supervisor/SOSRequests.jsx', 'utf8')
+const updatedSosSup = sosSupContent
+  .replace(/sos:'Call Waiter'/g, "sos:'Call Waiter'")
+  .replace(/Service Requests/g, 'Call Waiter Requests')
+  .replace(/SOS Requests/g, 'Call Waiter Requests')
+fs.writeFileSync(BASE + '/components/supervisor/SOSRequests.jsx', updatedSosSup)
+console.log('✅ 5/6 SOSRequests — renamed to Call Waiter Requests')
+
+// ═══════════════════════════════════════════════════════════════════
+// FILE 6: SupervisorApp — wire onNewOrder to KOTDashboard
+// ═══════════════════════════════════════════════════════════════════
+const supContent = fs.readFileSync(BASE + '/pages/SupervisorApp.jsx', 'utf8')
+const updatedSup = supContent.replace(
+  '{activeTab===\'kot\'     && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} />}',
+  '{activeTab===\'kot\'     && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={(order) => { setNewOrderAlert(order); setOrderCount(c=>c+1) }} />}'
+)
+fs.writeFileSync(BASE + '/pages/SupervisorApp.jsx', updatedSup)
+console.log('✅ 6/6 SupervisorApp — KOTDashboard wired to order alert')
+
+console.log('\n🎉 Phase 2 build complete! Now run SQL then: npm run dev')
