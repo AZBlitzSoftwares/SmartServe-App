@@ -42,7 +42,7 @@ export default function SupervisorApp() {
       const count = data?.length || 0
       if (prevOrderCount.current >= 0 && count > prevOrderCount.current && data?.[0]) {
         setNewOrderAlert(data[0])
-        setTimeout(() => setNewOrderAlert(null), 6000)
+        // alert stays until dismissed manually
       }
       prevOrderCount.current = count
     }
@@ -57,8 +57,12 @@ export default function SupervisorApp() {
     const { data } = await supabase.from('events').select('*').order('created_at', { ascending:false })
     const evs = data || []
     setAllEvents(evs)
-    // Default: first non-closed event, or first event
-    if (!eventData) {
+
+    if (currentUser?.role === 'supervisor' && currentUser?.assignedEvent) {
+      // Supervisor is locked to their assigned event only
+      setEventData(currentUser.assignedEvent)
+    } else if (!eventData) {
+      // Admin: default to first active event
       const active = evs.find(e=>!e.is_closed) || evs[0]
       if (active) setEventData(active)
     }
@@ -145,11 +149,15 @@ export default function SupervisorApp() {
             <span style={{ color:'rgba(255,255,255,0.5)', fontSize:12, fontWeight:500, marginLeft:8 }}>{isAdmin?'Admin':'Supervisor'}</span>
           </div>
           {eventData && (
-            <button onClick={() => setShowEventPicker(true)} style={{ background:'none', border:'none', padding:0, cursor:'pointer', textAlign:'left' }}>
-              <div style={{ color:'rgba(255,255,255,0.7)', fontSize:12, marginTop:2 }}>
-                📍 {eventData.name} <span style={{ color:'#E8890C', fontSize:11 }}>▾ change</span>
-              </div>
-            </button>
+            isAdmin
+              ? <button onClick={() => setShowEventPicker(true)} style={{ background:'none', border:'none', padding:0, cursor:'pointer', textAlign:'left' }}>
+                  <div style={{ color:'rgba(255,255,255,0.7)', fontSize:12, marginTop:2 }}>
+                    📍 {eventData.name} <span style={{ color:'#E8890C', fontSize:11 }}>▾ change</span>
+                  </div>
+                </button>
+              : <div style={{ color:'rgba(255,255,255,0.6)', fontSize:12, marginTop:2 }}>
+                  📍 {eventData.name}
+                </div>
           )}
         </div>
         <button onClick={() => setAuthed(false)} style={{ background:'rgba(255,255,255,0.1)', border:'none', color:'#fff', borderRadius:8, padding:'6px 12px', fontSize:12, fontWeight:600 }}>Logout</button>
