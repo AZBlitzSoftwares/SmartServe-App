@@ -6,6 +6,7 @@ import SOSRequests, { useSOSAlert } from '../components/supervisor/SOSRequests'
 import MenuManager from '../components/supervisor/MenuManager'
 import ReportsDashboard from '../components/supervisor/ReportsDashboard'
 import EventManager from '../components/supervisor/EventManager'
+import FeedbackReport from '../components/supervisor/FeedbackReport'
 
 const TYPE_LABELS = { sos:'Call Waiter', call_waiter:'Call Waiter', clean_table:'Clean Table', extra_cutlery:'Extra Cutlery', water_refill:'Water Refill' }
 const TYPE_EMOJI  = { sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', water_refill:'💧' }
@@ -77,6 +78,7 @@ export default function SupervisorApp() {
     { id:'sos',     label:'Requests', emoji:'🆘', badge:sosCount },
     { id:'menu',    label:'Menu',     emoji:'📋', badge:0 },
     { id:'reports', label:'Reports',  emoji:'📊', badge:0 },
+    { id:'feedback', label:'Feedback', emoji:'⭐', badge:0 },
     ...(isAdmin ? [{ id:'events', label:'Events', emoji:'📅', badge:0 }] : []),
   ]
 
@@ -198,6 +200,7 @@ export default function SupervisorApp() {
         {activeTab==='sos'     && <SOSRequests eventData={eventData} onSosCountChange={setSosCount} />}
         {activeTab==='menu'    && <MenuManager eventData={eventData} />}
         {activeTab==='reports' && <ReportsDashboard eventData={eventData} onEventChange={setEventData} />}
+        {activeTab==='feedback' && <FeedbackReport eventData={eventData} />}
         {activeTab==='events'  && <EventManager onEventChange={(ev) => { setEventData(ev); loadEvents() }} />}
       </div>
 

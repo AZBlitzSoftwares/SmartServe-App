@@ -30,7 +30,7 @@ export default function ReportsDashboard({ eventData: defaultEvent, onEventChang
     const [ordersRes, sosRes, fbRes, waitersRes] = await Promise.all([
       supabase.from('orders').select('*, tables(table_number), order_items(quantity, menu_items(name))').eq('event_id', evId),
       supabase.from('sos_requests').select('*, tables(table_number)').eq('event_id', evId),
-      supabase.from('feedback').select('*').eq('event_id', evId),
+      supabase.from('feedback').select('*, tables(table_number)').eq('event_id', evId),
       supabase.from('waiters').select('*').eq('event_id', evId)
     ])
     const orders = ordersRes.data||[]; const sos = sosRes.data||[]; const fb = fbRes.data||[]; const ws = waitersRes.data||[]

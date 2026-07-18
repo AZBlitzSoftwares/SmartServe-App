@@ -6,7 +6,7 @@ export default function FeedbackModal({ orderId, tableData, eventData, onClose }
   const [hoverRating, setHoverRating] = useState(0)
   const [food, setFood] = useState(0); const [hf, setHf] = useState(0)
   const [service, setService] = useState(0); const [hs, setHs] = useState(0)
-  const [presentation, setPresentation] = useState(0); const [hp, setHp] = useState(0)
+  const [appExp, setAppExp] = useState(0); const [happ, setHapp] = useState(0)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [mobile, setMobile] = useState('')
@@ -32,14 +32,37 @@ export default function FeedbackModal({ orderId, tableData, eventData, onClose }
   async function submit() {
     if (!rating) { setErrors({ rating:'Please select a rating' }); return }
     setSubmitting(true)
-    await supabase.from('feedback').insert({
-      order_id:orderId, event_id:eventData?.id||null, table_id:tableData?.id||null,
-      rating, food_rating:food||null, service_rating:service||null, presentation_rating:presentation||null,
-      guest_name:name.trim()||null, guest_email:email.trim()||null, guest_mobile:mobile.trim()||null,
-      comment:comment.trim()||null
-    })
-    setSubmitted(true)
-    setTimeout(() => onClose(), 3500)
+    try {
+      const payload = {
+        event_id: eventData?.id || null,
+        table_id: tableData?.id || null,
+        rating,
+        food_rating: food || null,
+        service_rating: service || null,
+        app_experience_rating: appExp || null,
+        guest_name: name.trim() || null,
+        guest_email: email.trim() || null,
+        guest_mobile: mobile.trim() || null,
+        comment: comment.trim() || null
+      }
+      // Only add order_id if it's a valid UUID (not offline-)
+      if (orderId && !orderId.startsWith('offline-')) {
+        payload.order_id = orderId
+      }
+      const { error } = await supabase.from('feedback').insert(payload)
+      if (error) {
+        console.error('Feedback error:', error)
+        // Still show thank you — don't block guest
+      }
+      setSubmitted(true)
+      setTimeout(() => onClose(), 3500)
+    } catch(e) {
+      console.error('Feedback submit error:', e)
+      setSubmitted(true) // show thank you anyway
+      setTimeout(() => onClose(), 3500)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   if (submitted) return (
@@ -73,7 +96,11 @@ export default function FeedbackModal({ orderId, tableData, eventData, onClose }
 
         <div style={{ background:'#f9f9f9', borderRadius:14, padding:14, marginBottom:20 }}>
           <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>Rate by Category</div>
-          {[['Food Quality',food,hf,setFood,setHf],['Service Speed',service,hs,setService,setHs],['Presentation',presentation,hp,setPresentation,setHp]].map(([label,val,hov,setVal,setHov]) => (
+          {[
+              ['🍛 Food Quality', food, hf, setFood, setHf],
+              ['⚡ Service Speed', service, hs, setService, setHs],
+              ['📱 App Ease of Use', appExp, happ, setAppExp, setHapp],
+            ].map(([label,val,hov,setVal,setHov]) => (
             <div key={label} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 0', borderBottom:'1px solid #eee' }}>
               <span style={{ fontSize:13, fontWeight:600 }}>{label}</span>
               <Stars value={val} hover={hov} onSet={setVal} onHover={setHov} size={22} />

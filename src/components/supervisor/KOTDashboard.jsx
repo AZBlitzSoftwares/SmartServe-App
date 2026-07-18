@@ -10,8 +10,17 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const [filter, setFilter] = useState('active')
   const [loading, setLoading] = useState(true)
   const [assigning, setAssigning] = useState(null)
+  const [waiterFilter, setWaiterFilter] = useState(null)
+  const [tableFilter, setTableFilter] = useState(null) // table number to filter
+  const [now, setNow] = useState(Date.now())
   const prevCount = useRef(-1)
   const audioEnabled = useRef(false)
+
+  // Tick every second for live timer
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
 
   useEffect(() => {
     if (!eventData) return
@@ -27,11 +36,19 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     setWaiters(data || [])
   }
 
+  function formatTimer(assignedAt) {
+    if (!assignedAt) return null
+    const secs = Math.floor((Date.now() - new Date(assignedAt).getTime()) / 1000)
+    const m = Math.floor(secs/60)
+    const s = secs % 60
+    return { str: m + ':' + String(s).padStart(2,'0'), mins: m, secs }
+  }
+
   async function loadOrders(showSpinner = false) {
     if (!eventData) return
     if (showSpinner) setLoading(true)
     const { data } = await supabase.from('orders')
-      .select('*, tables(table_number), order_items(quantity, menu_items(name, is_live_counter)), waiters(name)')
+      .select('*, tables(table_number), order_items(quantity, menu_items(name, is_live_counter)), waiters(name), assigned_at')
       .eq('event_id', eventData.id)
       .order('created_at', { ascending: false })
     const all = data || []
@@ -82,7 +99,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     setAssigning(orderId)
     await supabase.from('orders').update({
       status: 'in_progress',
-      waiter_id: waiterId || null
+      waiter_id: waiterId || null,
+      assigned_at: waiterId ? new Date().toISOString() : null
     }).eq('id', orderId)
     // Also upsert to food_master when marking in progress
     setAssigning(null)
@@ -147,9 +165,10 @@ ${(order.order_items||[]).map(i=>`<div class="item">• ${i.menu_items?.name} x$
     .sort((a,b) => (waiterOrderCount[a.id]||0) - (waiterOrderCount[b.id]||0))
 
   const filtered = orders.filter(o => {
-    if (filter==='active') return !['delivered','cancelled'].includes(o.status)
-    if (filter==='delivered') return o.status==='delivered'
-    return true
+    const matchFilter = filter==='active' ? !['delivered','cancelled'].includes(o.status) : filter==='delivered' ? o.status==='delivered' : true
+    const matchWaiter = !waiterFilter || o.waiter_id===waiterFilter
+    const matchTable = !tableFilter || o.tables?.table_number===tableFilter
+    return matchFilter && matchWaiter && matchTable
   })
 
   return (
@@ -171,14 +190,28 @@ ${(order.order_items||[]).map(i=>`<div class="item">• ${i.menu_items?.name} x$
               const busy = busyWaiterIds.includes(w.id)
               const assignedOrder = orders.find(o=>o.waiter_id===w.id && o.status==='in_progress')
               return (
-                <div key={w.id} style={{ background:busy?'#FEF2F2':'#F0FDF4', border:'1.5px solid', borderColor:busy?'#FECACA':'#BBF7D0', borderRadius:10, padding:'6px 12px', fontSize:12 }}>
-                  <span style={{ fontWeight:800, color:busy?'#DC2626':'#16A34A' }}>{w.name}</span>
-                  {busy && assignedOrder && <span style={{ color:'#888', marginLeft:6 }}>→ T{assignedOrder.tables?.table_number}</span>}
+                <div key={w.id} onClick={()=>setWaiterFilter(waiterFilter===w.id?null:w.id)}
+                  style={{ background: waiterFilter===w.id?'#1A0A0A':busy?'#FEF2F2':'#F0FDF4', border:'2px solid', borderColor:waiterFilter===w.id?'#E8890C':busy?'#FECACA':'#BBF7D0', borderRadius:10, padding:'6px 12px', fontSize:12, cursor:'pointer', transition:'all 0.15s' }}>
+                  <span style={{ fontWeight:800, color:waiterFilter===w.id?'#E8890C':busy?'#DC2626':'#16A34A' }}>{w.name}</span>
+                  {busy && assignedOrder && <span style={{ color:waiterFilter===w.id?'rgba(255,255,255,0.6)':'#888', marginLeft:6 }}>→ T{assignedOrder.tables?.table_number}</span>}
                   <span style={{ marginLeft:6, fontSize:11 }}>{busy?'🔴 Busy':'🟢 Free'}</span>
+                  {waiterFilter===w.id && <span style={{ marginLeft:6, fontSize:10, color:'#E8890C', fontWeight:800 }}>● Filtered</span>}
                 </div>
               )
             })}
           </div>
+        </div>
+      )}
+
+      {/* Table + Waiter filter indicators */}
+      {(waiterFilter || tableFilter) && (
+        <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:10, padding:'8px 14px', marginBottom:10, display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:13 }}>
+          <span style={{ fontWeight:700, color:'#92400E' }}>
+            🔍 {waiterFilter && <>Waiter: {waiters.find(w=>w.id===waiterFilter)?.name}</>}
+            {waiterFilter && tableFilter && <span> · </span>}
+            {tableFilter && <>Table: {tableFilter}</>}
+          </span>
+          <button onClick={()=>{ setWaiterFilter(null); setTableFilter(null) }} style={{ background:'none', border:'none', color:'#92400E', fontWeight:700, cursor:'pointer', fontSize:13 }}>Clear All ✕</button>
         </div>
       )}
 
@@ -198,12 +231,41 @@ ${(order.order_items||[]).map(i=>`<div class="item">• ${i.menu_items?.name} x$
       ) : filtered.map(order => (
         <div key={order.id} style={{ background:'#fff', borderRadius:18, padding:18, marginBottom:14, boxShadow:'var(--shadow)', borderLeft:'4px solid '+(STATUS_COLORS[order.status]||'#999') }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
-            <div>
-              <div style={{ fontSize:22, fontWeight:800 }}>Table {order.tables?.table_number}</div>
-              <div style={{ fontSize:12, color:'var(--ink2)', marginTop:2 }}>
+            <div style={{ flex:1 }}>
+              {/* Top row: Table + Timer side by side */}
+              <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+                {/* Clickable table number */}
+                <button onClick={()=>setTableFilter(tableFilter===order.tables?.table_number?null:order.tables?.table_number)}
+                  style={{ fontSize:22, fontWeight:900, background: tableFilter===order.tables?.table_number?'#1A0A0A':'transparent', color:tableFilter===order.tables?.table_number?'#E8890C':'#1A1A1A', border:'none', padding:tableFilter===order.tables?.table_number?'2px 10px':'0', borderRadius:8, cursor:'pointer', lineHeight:1 }}>
+                  Table {order.tables?.table_number}
+                </button>
+                {/* Timer inline */}
+                {order.status==='in_progress' && order.assigned_at && (() => {
+                  const t = formatTimer(order.assigned_at)
+                  if (!t) return null
+                  const bg = t.mins>=15?'#FEF2F2':t.mins>=10?'#FEF3C7':'#F0FDF4'
+                  const col = t.mins>=15?'#DC2626':t.mins>=10?'#D97706':'#16A34A'
+                  const bord = t.mins>=15?'#FECACA':t.mins>=10?'#FCD34D':'#BBF7D0'
+                  return (
+                    <div style={{ display:'inline-flex', alignItems:'center', gap:6, background:bg, border:'2px solid '+bord, borderRadius:10, padding:'5px 14px' }}>
+                      <span style={{ fontSize:16 }}>⏱</span>
+                      <span style={{ fontSize:24, fontWeight:900, color:col, fontVariantNumeric:'tabular-nums' }}>{t.str}</span>
+                      {t.mins>=15 && <span style={{ fontSize:11, background:'#DC2626', color:'#fff', padding:'1px 7px', borderRadius:999, fontWeight:700 }}>⚠️ Slow</span>}
+                      {t.mins>=10 && t.mins<15 && <span style={{ fontSize:11, color:'#D97706', fontWeight:700 }}>Check</span>}
+                    </div>
+                  )
+                })()}
+              </div>
+              <div style={{ fontSize:12, color:'var(--ink2)', marginTop:4 }}>
                 {new Date(order.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} · #{order.id.slice(-6).toUpperCase()}
               </div>
-              {order.waiters?.name && <div style={{ fontSize:12, color:'#2563EB', marginTop:2, fontWeight:600 }}>👤 {order.waiters.name}</div>}
+              {/* Clickable waiter name */}
+              {order.waiters?.name && (
+                <button onClick={()=>setWaiterFilter(waiterFilter===order.waiter_id?null:order.waiter_id)}
+                  style={{ fontSize:14, fontWeight:800, color: waiterFilter===order.waiter_id?'#fff':'#2563EB', background: waiterFilter===order.waiter_id?'#2563EB':'#EFF6FF', border:'none', borderRadius:8, padding:'3px 12px', marginTop:4, cursor:'pointer' }}>
+                  👤 {order.waiters.name} {waiterFilter===order.waiter_id?'✕':''}
+                </button>
+              )}
             </div>
             <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6 }}>
               <div style={{ background:(STATUS_COLORS[order.status]||'#999')+'20', color:STATUS_COLORS[order.status]||'#999', fontSize:12, fontWeight:700, padding:'4px 12px', borderRadius:999 }}>
