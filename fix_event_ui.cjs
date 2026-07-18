@@ -1,4 +1,16 @@
-import { useState, useEffect, useRef } from 'react'
+const fs = require('fs')
+const BASE = '/Users/asayyed/SmartServe/src'
+
+const emPath = BASE + '/components/supervisor/EventManager.jsx'
+let content = fs.readFileSync(emPath, 'utf8')
+
+// Full EventManager rewrite with:
+// 1. Sophisticated 2-column create form with sections
+// 2. Edit fields (tables, max orders) on existing events
+// 3. Logo upload in create form
+// 4. Video upload/URL in create form
+
+fs.writeFileSync(emPath, `import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
 const INP = { width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:14, marginBottom:0, fontFamily:'Manrope', outline:'none', boxSizing:'border-box', background:'#fff' }
@@ -369,7 +381,7 @@ export default function EventManager({ onEventChange }) {
           </select>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
             <input value={newSup.name} onChange={e=>setNewSup(p=>({...p,name:e.target.value}))} placeholder="Full name * (username)" style={INP} />
-            <input value={newSup.pin} onChange={e=>setNewSup(p=>({...p,pin:e.target.value.replace(/D/g,'').slice(0,6)}))} placeholder="PIN * (password)" style={{ ...INP, letterSpacing:'0.2em' }} />
+            <input value={newSup.pin} onChange={e=>setNewSup(p=>({...p,pin:e.target.value.replace(/\D/g,'').slice(0,6)}))} placeholder="PIN * (password)" style={{ ...INP, letterSpacing:'0.2em' }} />
           </div>
           <input value={newSup.mobile} onChange={e=>setNewSup(p=>({...p,mobile:e.target.value}))} placeholder="Mobile number (optional)" type="tel" style={{ ...INP, marginBottom:10 }} />
           {newSup.name && newSup.pin && <div style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', borderRadius:8, padding:'8px 12px', fontSize:12, color:'#15803D', marginBottom:10 }}>Login: <strong>{newSup.name}</strong> / <strong>{newSup.pin}</strong></div>}
@@ -553,3 +565,7 @@ export default function EventManager({ onEventChange }) {
     </div>
   )
 }
+`)
+console.log('✅ EventManager — complete redesign done')
+console.log('3-step create wizard + editable tables/max orders/call waiter on existing events')
+console.log('Run: npm run dev')
