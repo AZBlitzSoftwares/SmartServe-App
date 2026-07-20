@@ -48,12 +48,8 @@ export default function GuestApp() {
   }, [currentOrderId, tableNumber])
 
   useEffect(() => {
-    if (eventData?.id) {
-      loadEventAndTable(eventData.id)
-    } else {
-      // No stored event — auto-find today's active event
-      autoLoadActiveEvent()
-    }
+    // ALWAYS check for today's active event first — never trust stale localStorage
+    autoLoadActiveEvent()
     const on = () => { setIsOnline(true); syncOfflineOrders() }
     const off = () => setIsOnline(false)
     window.addEventListener('online', on); window.addEventListener('offline', off)
@@ -69,10 +65,28 @@ export default function GuestApp() {
       const { data: evs } = await supabase.from('events').select('*').order('date', { ascending:false }).limit(50)
       const active = (evs||[]).filter(e => eventStatus(e.date) === 'active')
       setActiveEventCount(active.length)
+
       if (active.length === 1) {
-        handleEventSelect(active[0])
+        const activeEv = active[0]
+        const cached = eventData
+        // If no cached event OR cached event is not today's active → auto-switch
+        if (!cached || cached.id !== activeEv.id) {
+          console.log('Auto-switching to active event:', activeEv.name)
+          handleEventSelect(activeEv)
+        } else {
+          // Same event — just refresh its data
+          loadEventAndTable(activeEv.id)
+        }
+      } else if (active.length === 0 && eventData?.id) {
+        // No active event today — keep showing cached event
+        loadEventAndTable(eventData.id)
       }
-    } catch(e) { console.error('Auto event load failed:', e) }
+      // 2+ active events: keep cached or show picker
+    } catch(e) {
+      console.error('Auto event load failed:', e)
+      // Fallback to cached event if available
+      if (eventData?.id) loadEventAndTable(eventData.id)
+    }
   }
 
   // Watch for delivered status → show feedback bubble after FEEDBACK_DELAY_SECONDS
