@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import SupervisorLogin from '../components/supervisor/SupervisorLogin'
 import KOTDashboard from '../components/supervisor/KOTDashboard'
@@ -7,6 +7,23 @@ import MenuManager from '../components/supervisor/MenuManager'
 import ReportsDashboard from '../components/supervisor/ReportsDashboard'
 import EventManager from '../components/supervisor/EventManager'
 import FeedbackReport from '../components/supervisor/FeedbackReport'
+
+
+// ─── Event Status Helper ───────────────────────────────────────────────────
+// Compares event date (YYYY-MM-DD) to today in local timezone
+function eventStatus(dateStr) {
+  if (!dateStr) return 'planned'
+  const today = new Date()
+  const todayStr = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0')
+  if (dateStr > todayStr) return 'planned'
+  if (dateStr === todayStr) return 'active'
+  return 'completed'
+}
+function statusLabel(s) { return { planned:'Planned', active:'Active', completed:'Completed' }[s]||'Unknown' }
+function statusColor(s) { return { planned:'#2563EB', active:'#16A34A', completed:'#6B7280' }[s]||'#999' }
+function statusBg(s)    { return { planned:'#EFF6FF', active:'#DCFCE7', completed:'#F3F4F6' }[s]||'#F3F4F6' }
+function statusEmoji(s) { return { planned:'🔵', active:'🟢', completed:'⚫' }[s]||'⚪' }
+// ──────────────────────────────────────────────────────────────────────────
 
 const TYPE_LABELS = { sos:'Call Waiter', call_waiter:'Call Waiter', clean_table:'Clean Table', extra_cutlery:'Extra Cutlery', water_refill:'Water Refill' }
 const TYPE_EMOJI  = { sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', water_refill:'💧' }
@@ -20,11 +37,12 @@ export default function SupervisorApp() {
   const [orderCount, setOrderCount] = useState(0)
   const [sosCount, setSosCount] = useState(0)
   const [showEventPicker, setShowEventPicker] = useState(false)
+  const [pickerStatus, setPickerStatus] = useState('active')
 
   // SOS alert hook — runs regardless of which tab is active
   const { openRequests, newAlert, clearAlert } = useSOSAlert(eventData)
   const [newOrderAlert, setNewOrderAlert] = useState(null)
-  const prevOrderCount = { current: -1 }
+  const prevOrderCount = useRef(-1)
 
   useEffect(() => {
     setSosCount(openRequests.length)
@@ -60,12 +78,12 @@ export default function SupervisorApp() {
     setAllEvents(evs)
 
     if (currentUser?.role === 'supervisor' && currentUser?.assignedEvent) {
-      // Supervisor is locked to their assigned event only
       setEventData(currentUser.assignedEvent)
     } else if (!eventData) {
-      // Admin: default to first active event
-      const active = evs.find(e=>!e.is_closed) || evs[0]
-      if (active) setEventData(active)
+      // Admin: auto-select today's active event, fall back to most recent
+      const todayActive = evs.find(e => eventStatus(e.date) === 'active')
+      if (todayActive) setEventData(todayActive)
+      else if (evs.length) setEventData(evs[0])
     }
   }
 
@@ -172,24 +190,50 @@ export default function SupervisorApp() {
             <div style={{ width:40, height:4, background:'#ddd', borderRadius:999, margin:'0 auto 16px' }}></div>
             <h3 style={{ fontSize:18, fontWeight:800, marginBottom:4 }}>Switch Event</h3>
             <p style={{ fontSize:13, color:'var(--ink2)', marginBottom:16 }}>Select the event you want to manage</p>
-            {allEvents.map(ev => (
-              <button key={ev.id} onClick={() => { setEventData(ev); setShowEventPicker(false) }} style={{
-                width:'100%', background: eventData?.id===ev.id ? 'var(--ink)' : '#f5f5f5',
-                color: eventData?.id===ev.id ? '#fff' : '#333',
-                border:'none', borderRadius:12, padding:'14px 16px', marginBottom:8,
-                textAlign:'left', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center'
-              }}>
-                <div>
-                  <div style={{ fontWeight:700, fontSize:15 }}>{ev.name}</div>
-                  <div style={{ fontSize:12, opacity:0.7, marginTop:3 }}>
-                    📅 {new Date(ev.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}
-                    {ev.venue && <span> · 📍 {ev.venue}</span>}
-                    <span style={{ marginLeft:8, color:ev.is_closed?'#DC2626':'#16A34A', fontWeight:600 }}>{ev.is_closed?'Closed':'Active'}</span>
-                  </div>
-                </div>
-                {eventData?.id===ev.id && <span style={{ fontSize:20 }}>✓</span>}
-              </button>
-            ))}
+
+            {/* Status filter pills */}
+            <div style={{ display:'flex', gap:6, marginBottom:14, flexWrap:'wrap' }}>
+              {['active','planned','completed','all'].map(s => (
+                <button key={s} onClick={e=>{e.stopPropagation();setPickerStatus(s)}}
+                  style={{ padding:'5px 14px', borderRadius:999, fontSize:12, fontWeight:700, cursor:'pointer', border:'1.5px solid',
+                    borderColor: pickerStatus===s ? statusColor(s==='all'?'active':s) : '#E5E7EB',
+                    background:  pickerStatus===s ? statusBg(s==='all'?'active':s)   : '#fff',
+                    color:       pickerStatus===s ? statusColor(s==='all'?'active':s): '#888' }}>
+                  {s==='all'?'All':statusLabel(s)}
+                </button>
+              ))}
+            </div>
+
+            {allEvents
+              .filter(ev => pickerStatus==='all' || eventStatus(ev.date)===pickerStatus)
+              .map(ev => {
+                const st = eventStatus(ev.date)
+                return (
+                  <button key={ev.id} onClick={() => { setEventData(ev); setShowEventPicker(false) }} style={{
+                    width:'100%', background: eventData?.id===ev.id ? 'var(--ink)' : '#f5f5f5',
+                    color: eventData?.id===ev.id ? '#fff' : '#333',
+                    border:'none', borderRadius:12, padding:'14px 16px', marginBottom:8,
+                    textAlign:'left', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center'
+                  }}>
+                    <div>
+                      <div style={{ fontWeight:700, fontSize:15 }}>{ev.name}</div>
+                      <div style={{ fontSize:12, opacity:0.7, marginTop:3 }}>
+                        📅 {new Date(ev.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}
+                        {ev.venue && <span> · 📍 {ev.venue}</span>}
+                        <span style={{ marginLeft:8, fontWeight:700,
+                          color: eventData?.id===ev.id ? '#fff' : statusColor(st) }}>
+                          {statusEmoji(st)} {statusLabel(st)}
+                        </span>
+                      </div>
+                    </div>
+                    {eventData?.id===ev.id && <span style={{ fontSize:20 }}>✓</span>}
+                  </button>
+                )
+              })
+            }
+            {allEvents.filter(ev=>pickerStatus==='all'||eventStatus(ev.date)===pickerStatus).length===0 && (
+              <div style={{ textAlign:'center', padding:24, color:'#999', fontSize:13 }}>No {statusLabel(pickerStatus)} events found</div>
+            )}
           </div>
         </div>
       )}

@@ -1,232 +1,238 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 
-export default function FeedbackReport({ eventData: defaultEvent }) {
-  const [allEvents, setAllEvents] = useState([])
-  const [selectedEventId, setSelectedEventId] = useState(defaultEvent?.id||null)
-  const [feedback, setFeedback] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [tableFilter, setTableFilter] = useState('all')
+function eventStatus(dateStr) {
+  if (!dateStr) return 'planned'
+  const today = new Date()
+  const todayStr = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0')
+  if (dateStr > todayStr) return 'planned'
+  if (dateStr === todayStr) return 'active'
+  return 'completed'
+}
+const S = {
+  label: { planned:'Planned', active:'Active', completed:'Completed' },
+  color: { planned:'#2563EB', active:'#16A34A', completed:'#6B7280' },
+  bg:    { planned:'#EFF6FF', active:'#DCFCE7', completed:'#F3F4F6' },
+  emoji: { planned:'🔵', active:'🟢', completed:'⚫' },
+}
 
-  useEffect(() => {
-    supabase.from('events').select('id,name,date').order('created_at',{ascending:false})
-      .then(({data})=>{ setAllEvents(data||[]); if(!selectedEventId&&data?.length) setSelectedEventId(data[0].id) })
-  },[])
+export default function FeedbackReport() {
+  const [allEvents,    setAllEvents]    = useState([])
+  const [allFeedback,  setAllFeedback]  = useState([])
+  const [displayed,    setDisplayed]    = useState([])
+  const [loading,      setLoading]      = useState(true)
+  const [selEvent,     setSelEvent]     = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [tableFilter,  setTableFilter]  = useState('all')
 
-  useEffect(() => { if(selectedEventId) loadFeedback() },[selectedEventId])
+  useEffect(() => { loadAll() }, [])
 
-  async function loadFeedback() {
+  async function loadAll() {
     setLoading(true)
-    try {
-      // Simple query — no joins that could fail
-      const { data: allFb, error } = await supabase
-        .from('feedback')
-        .select('*')
-        .order('created_at', { ascending:false })
-        .limit(200)
 
-      if (error) { console.error('Feedback query error:', error); setFeedback([]); setLoading(false); return }
+    // Load events
+    const { data: evs } = await supabase
+      .from('events').select('id,name,date').order('date', { ascending:false })
+    setAllEvents(evs || [])
 
-      // Now enrich with table numbers via separate query
-      const orderIds = [...new Set((allFb||[]).map(f=>f.order_id).filter(Boolean))]
-      let tableMap = {}
-      if (orderIds.length > 0) {
-        const { data: orders } = await supabase
-          .from('orders')
-          .select('id, table_id, tables(table_number)')
-          .in('id', orderIds)
-        ;(orders||[]).forEach(o => { if(o.id) tableMap[o.id] = o.tables?.table_number })
-      }
+    // Load ALL feedback — no filter at all
+    const { data: rows, error } = await supabase
+      .from('feedback')
+      .select('id,event_id,order_id,table_number,rating,food_rating,service_rating,app_experience_rating,guest_name,guest_email,guest_mobile,comment,created_at')
+      .order('created_at', { ascending:false })
+      .limit(1000)
 
-      // Attach table number to each feedback
-      const enriched = (allFb||[]).map(f => ({
-        ...f,
-        tableNumber: f.order_id ? tableMap[f.order_id] : null
-      }))
-
-      // Filter by selected event
-      const forEvent = enriched.filter(f =>
-        f.event_id === selectedEventId ||
-        (!f.event_id && orderIds.length > 0) // show unlinked ones too
-      )
-
-      setFeedback(forEvent.length > 0 ? forEvent : enriched)
-    } catch(e) {
-      console.error('Feedback load error:', e)
-      setFeedback([])
+    if (error) {
+      console.error('Feedback load error:', error)
+      setLoading(false)
+      return
     }
+
+    console.log('Feedback rows loaded from DB:', rows?.length ?? 0)
+    const rowList = rows || []
+
+    // table_number is now stored directly in feedback row
+    // For old rows without table_number, try order_id → orders → tables as fallback
+    const oldRows = rowList.filter(f => !f.table_number && f.order_id)
+    let tableNumMap = {}
+    if (oldRows.length > 0) {
+      const orderIds = [...new Set(oldRows.map(f => f.order_id).filter(Boolean))]
+      const { data: ords } = await supabase
+        .from('orders').select('id,tables(table_number)').in('id', orderIds)
+      ;(ords||[]).forEach(o => { if (o.id) tableNumMap[o.id] = o.tables?.table_number ?? null })
+    }
+
+    const enriched = rowList.map(f => ({
+      ...f,
+      // Use direct table_number if available, else fall back to order join
+      tableNumber: f.table_number ?? (f.order_id ? (tableNumMap[f.order_id] ?? null) : null)
+    }))
+    setAllFeedback(enriched)
+    setDisplayed(enriched)
     setLoading(false)
   }
 
-  const tables = [...new Set(feedback.map(f=>f.tableNumber||f.orders?.tables?.table_number).filter(Boolean))].sort((a,b)=>a-b)
-  const filtered = tableFilter==='all' ? feedback : feedback.filter(f=>(f.tableNumber||f.orders?.tables?.table_number)===parseInt(tableFilter))
+  useEffect(() => {
+    if (!selEvent) {
+      setDisplayed(allFeedback)
+    } else {
+      // Show ONLY selected event's rows
+      const matched = allFeedback.filter(r => r.event_id && String(r.event_id) === String(selEvent))
+      setDisplayed(matched)
+    }
+    setTableFilter('all')
+  }, [selEvent, allFeedback])
 
-  const avg = (key) => {
-    const vals = filtered.filter(f=>f[key]>0).map(f=>f[key])
-    return vals.length ? (vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(1) : null
+  const visibleEvents = allEvents.filter(ev =>
+    statusFilter === 'all' || eventStatus(ev.date) === statusFilter
+  )
+
+  const finalRows = tableFilter === 'all'
+    ? displayed
+    : displayed.filter(f => String(f.order_id) === tableFilter)
+
+  function avg(key) {
+    const vals = displayed.filter(f => f[key] > 0).map(f => f[key])
+    return vals.length ? (vals.reduce((s,v) => s+v, 0) / vals.length).toFixed(1) : null
   }
 
-  function Stars({ n }) {
-    return <span style={{ color:'#E8890C', fontSize:14 }}>{'⭐'.repeat(Math.round(n||0))}</span>
+  function exportCSV() {
+    if (!displayed.length) return
+    const H = ['Table No','Name','Mobile','Email','Overall','Food','Service','App','Comment','Date','Time','Event']
+    const rows = displayed.map(f => {
+      const evName = allEvents.find(e => e.id === f.event_id)?.name || ''
+      return [
+        f.tableNumber??'', f.guest_name||'Anonymous', f.guest_mobile||'', f.guest_email||'',
+        f.rating||'', f.food_rating||'', f.service_rating||'',
+        f.app_experience_rating||'',
+        (f.comment||'').replace(/,/g,';'),
+        new Date(f.created_at).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}),
+        new Date(f.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true}),
+        evName,
+      ]
+    })
+    const csv = [H,...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n')
+    const a = document.createElement('a')
+    const nm = selEvent ? (allEvents.find(e=>e.id===selEvent)?.name||'event') : 'all-events'
+    a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}))
+    a.download = `Feedback_${nm.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
   }
-
-  function RatingBar({ label, value, total=5 }) {
-    if (!value) return null
-    const pct = (parseFloat(value)/total)*100
-    const col = pct>=80?'#16A34A':pct>=60?'#D97706':'#DC2626'
-    return (
-      <div style={{ marginBottom:10 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, marginBottom:4 }}>
-          <span style={{ fontWeight:600, color:'var(--ink2)' }}>{label}</span>
-          <span style={{ fontWeight:800, color:col }}>{value} / 5</span>
-        </div>
-        <div style={{ height:8, background:'#F3F4F6', borderRadius:999, overflow:'hidden' }}>
-          <div style={{ height:'100%', width:pct+'%', background:col, borderRadius:999, transition:'width 0.6s ease' }}></div>
-        </div>
-      </div>
-    )
-  }
-
-  // Table-wise summary
-  const tableSummary = tables.map(t => {
-    const rows = feedback.filter(f=>(f.tableNumber||f.orders?.tables?.table_number)===t)
-    const avgRating = rows.filter(f=>f.rating>0).reduce((s,f)=>s+f.rating,0) / (rows.filter(f=>f.rating>0).length||1)
-    return { table:t, count:rows.length, avg:avgRating.toFixed(1) }
-  })
 
   return (
-    <div>
-      <h2 style={{ fontSize:20, fontWeight:800, marginBottom:16 }}>Feedback Report</h2>
+    <div style={{ paddingBottom:40 }}>
 
-      {/* Event selector */}
-      <div style={{ background:'#fff', borderRadius:14, padding:'12px 16px', marginBottom:14, boxShadow:'var(--shadow)' }}>
-        <div style={{ fontSize:12, fontWeight:700, color:'var(--ink2)', marginBottom:6 }}>SELECT EVENT</div>
-        <select value={selectedEventId||''} onChange={e=>setSelectedEventId(e.target.value)}
-          style={{ width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', background:'#fff' }}>
-          <option value="">Choose event...</option>
-          {allEvents.map(ev=><option key={ev.id} value={ev.id}>{ev.name} · {new Date(ev.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</option>)}
-        </select>
+      {/* Header */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+        <h2 style={{ fontSize:20, fontWeight:800, margin:0 }}>⭐ Feedback Report</h2>
+        {displayed.length > 0 && (
+          <button onClick={exportCSV} style={{ background:'#16A34A',color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontSize:13,fontWeight:700,cursor:'pointer' }}>
+            ⬇️ Export CSV
+          </button>
+        )}
       </div>
 
-      {loading && <div style={{ textAlign:'center', padding:60, color:'var(--ink2)' }}>Loading feedback...</div>}
+      {/* DB count banner */}
+      <div style={{ background:'#FFF8EE',borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:'#C06A00',fontWeight:600,border:'1px solid #E8890C44' }}>
+        📊 Total in database: <strong>{allFeedback.length}</strong> response{allFeedback.length!==1?'s':''}
+        {selEvent && allFeedback.length > 0 && (
+          <span style={{ marginLeft:8, color:'#666', fontWeight:500 }}>
+            · All shown (event rows sorted first)
+          </span>
+        )}
+      </div>
 
-      {!loading && feedback.length===0 && selectedEventId && (
-        <div style={{ textAlign:'center', padding:60 }}>
-          <div style={{ fontSize:48, marginBottom:12 }}>📋</div>
-          <div style={{ fontWeight:600, color:'var(--ink2)', marginBottom:8 }}>No feedback found for this event</div>
-          <div style={{ fontSize:13, color:'var(--ink2)' }}>Submit feedback from the guest tablet to see it here</div>
-          <div style={{ fontSize:12, color:'#E8890C', marginTop:8, fontWeight:600 }}>
-            Tip: Go to tablet → ⭐ Feedback button → submit → refresh this page
-          </div>
+      {/* Status filter pills */}
+      <div style={{ display:'flex', gap:6, marginBottom:10, flexWrap:'wrap' }}>
+        {['all','active','planned','completed'].map(s => (
+          <button key={s} onClick={() => { setStatusFilter(s); setSelEvent('') }}
+            style={{ padding:'5px 14px', borderRadius:999, fontSize:12, fontWeight:700, cursor:'pointer', border:'1.5px solid',
+              borderColor: statusFilter===s ? (s==='all'?'#1A0A0A':S.color[s]) : '#E5E7EB',
+              background:  statusFilter===s ? (s==='all'?'#1A0A0A':S.bg[s])    : '#fff',
+              color:       statusFilter===s ? (s==='all'?'#fff':S.color[s])    : '#888' }}>
+            {s==='all' ? 'All Events' : S.label[s]}
+          </button>
+        ))}
+      </div>
+
+      {/* Event dropdown */}
+      <select value={selEvent} onChange={e => { setSelEvent(e.target.value); setTableFilter('all') }}
+        style={{ width:'100%',border:'1.5px solid #ddd',borderRadius:10,padding:'10px 14px',fontSize:14,marginBottom:12,background:'#fff',outline:'none' }}>
+        <option value="">— All events ({allFeedback.length} responses) —</option>
+        {visibleEvents.map(ev => {
+          const st = eventStatus(ev.date)
+          const cnt = allFeedback.filter(f => f.event_id === ev.id).length
+          return (
+            <option key={ev.id} value={ev.id}>
+              {S.emoji[st]} {ev.name} · {new Date(ev.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})} [{S.label[st]}] ({cnt} responses)
+            </option>
+          )
+        })}
+      </select>
+
+      {loading && <div style={{ textAlign:'center', padding:40, color:'#999' }}>Loading...</div>}
+
+      {/* Summary cards */}
+      {!loading && displayed.length > 0 && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, marginBottom:12 }}>
+          {[
+            { l:'Responses', v:displayed.length,         c:'#E8890C' },
+            { l:'Overall',   v:avg('rating'),            c:'#F59E0B' },
+            { l:'Food',      v:avg('food_rating'),       c:'#16A34A' },
+            { l:'Service',   v:avg('service_rating'),    c:'#2563EB' },
+          ].map(({l,v,c}) => (
+            <div key={l} style={{ background:'#fff',borderRadius:12,padding:'10px 6px',textAlign:'center',boxShadow:'0 1px 4px rgba(0,0,0,0.08)' }}>
+              <div style={{ fontSize:22, fontWeight:900, color:c }}>{v ?? '—'}</div>
+              <div style={{ fontSize:10, color:'#888', fontWeight:600 }}>{l}</div>
+            </div>
+          ))}
         </div>
       )}
 
-      {!loading && feedback.length > 0 && (
-        <>
-          {/* Summary cards */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:16 }}>
-            <div style={{ background:'#fff', borderRadius:14, padding:'14px 16px', boxShadow:'var(--shadow)', textAlign:'center' }}>
-              <div style={{ fontSize:28, fontWeight:900, color:'#E8890C' }}>{feedback.length}</div>
-              <div style={{ fontSize:11, color:'var(--ink2)', fontWeight:600, marginTop:2 }}>Total Responses</div>
-            </div>
-            <div style={{ background:'#fff', borderRadius:14, padding:'14px 16px', boxShadow:'var(--shadow)', textAlign:'center' }}>
-              <div style={{ fontSize:28, fontWeight:900, color:'#16A34A' }}>{avg('rating')||'—'}</div>
-              <div style={{ fontSize:11, color:'var(--ink2)', fontWeight:600, marginTop:2 }}>Avg Rating ⭐</div>
-            </div>
-            <div style={{ background:'#fff', borderRadius:14, padding:'14px 16px', boxShadow:'var(--shadow)', textAlign:'center' }}>
-              <div style={{ fontSize:28, fontWeight:900, color:'#2563EB' }}>{tables.length}</div>
-              <div style={{ fontSize:11, color:'var(--ink2)', fontWeight:600, marginTop:2 }}>Tables Rated</div>
-            </div>
-          </div>
+      {/* Empty state */}
+      {!loading && displayed.length === 0 && (
+        <div style={{ textAlign:'center', padding:40, color:'#999' }}>
+          <div style={{ fontSize:36, marginBottom:8 }}>📋</div>
+          <div style={{ fontWeight:600 }}>No feedback found</div>
+          <div style={{ fontSize:12, marginTop:6 }}>Total in DB: {allFeedback.length} rows</div>
+        </div>
+      )}
 
-          {/* Average ratings */}
-          <div style={{ background:'#fff', borderRadius:16, padding:16, marginBottom:14, boxShadow:'var(--shadow)' }}>
-            <div style={{ fontWeight:800, fontSize:15, marginBottom:14 }}>Average Ratings</div>
-            <RatingBar label="Overall Experience" value={avg('rating')} />
-            <RatingBar label="🍛 Food Quality" value={avg('food_rating')} />
-            <RatingBar label="⚡ Service Speed" value={avg('service_rating')} />
-            <RatingBar label="📱 App Ease of Use" value={avg('app_experience_rating')} />
-          </div>
-
-          {/* Table-wise summary */}
-          {tableSummary.length > 0 && (
-            <div style={{ background:'#fff', borderRadius:16, padding:16, marginBottom:14, boxShadow:'var(--shadow)' }}>
-              <div style={{ fontWeight:800, fontSize:15, marginBottom:12 }}>Table-wise Feedback</div>
-              <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12 }}>
-                <button onClick={()=>setTableFilter('all')} style={{ padding:'6px 14px', borderRadius:999, border:'1.5px solid', borderColor:tableFilter==='all'?'var(--ink)':'var(--line)', background:tableFilter==='all'?'var(--ink)':'#fff', color:tableFilter==='all'?'#fff':'var(--ink)', fontSize:12, fontWeight:700, cursor:'pointer' }}>
-                  All Tables
-                </button>
-                {tableSummary.map(t=>(
-                  <button key={t.table} onClick={()=>setTableFilter(String(t.table))}
-                    style={{ padding:'6px 14px', borderRadius:999, border:'1.5px solid', borderColor:tableFilter===String(t.table)?'var(--ink)':'var(--line)', background:tableFilter===String(t.table)?'var(--ink)':'#fff', color:tableFilter===String(t.table)?'#fff':'var(--ink)', fontSize:12, fontWeight:700, cursor:'pointer' }}>
-                    Table {t.table} ({t.count})
-                  </button>
+      {/* Table */}
+      {!loading && displayed.length > 0 && (
+        <div style={{ background:'#fff', borderRadius:12, overflow:'auto', boxShadow:'0 1px 4px rgba(0,0,0,0.08)' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:700 }}>
+            <thead>
+              <tr style={{ background:'#1A0A0A', color:'#fff' }}>
+                {['Table','Name','Mobile','Overall','Food','Service','Comment','Date',...(!selEvent?['Event']:[])]
+                  .map(h => (
+                  <th key={h} style={{ padding:'10px', textAlign:'left', fontWeight:700, fontSize:11, whiteSpace:'nowrap' }}>{h}</th>
                 ))}
-              </div>
-              {tableSummary.map(t=>(
-                <div key={t.table} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 0', borderBottom:'1px solid var(--line)' }}>
-                  <div>
-                    <span style={{ fontWeight:700, fontSize:14 }}>Table {t.table}</span>
-                    <span style={{ fontSize:12, color:'var(--ink2)', marginLeft:8 }}>{t.count} response{t.count!==1?'s':''}</span>
-                  </div>
-                  <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                    <Stars n={parseFloat(t.avg)} />
-                    <span style={{ fontWeight:800, fontSize:15, color:'#E8890C' }}>{t.avg}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Individual feedback cards */}
-          <div style={{ background:'#fff', borderRadius:16, padding:16, marginBottom:14, boxShadow:'var(--shadow)' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-              <div style={{ fontWeight:800, fontSize:15 }}>All Responses ({filtered.length})</div>
-            </div>
-
-            {filtered.length===0 ? <div style={{ color:'var(--ink2)', fontSize:13 }}>No feedback for this table yet</div>
-            : filtered.map((f,i) => (
-              <div key={f.id||i} style={{ padding:'14px 0', borderBottom:'1px solid var(--line)' }}>
-                {/* Row 1: Name + Table + Time + Overall rating */}
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
-                  <div>
-                    <span style={{ fontWeight:800, fontSize:15 }}>{f.guest_name||'Anonymous'}</span>
-                    {(f.tableNumber || f.orders?.tables?.table_number) && (
-                      <span style={{ fontSize:12, background:'#EFF6FF', color:'#2563EB', fontWeight:700, padding:'2px 8px', borderRadius:999, marginLeft:8 }}>
-                        Table {f.tableNumber || f.orders?.tables?.table_number}
-                      </span>
-                    )}
-                    <div style={{ fontSize:12, color:'var(--ink2)', marginTop:4, display:'flex', gap:12, flexWrap:'wrap' }}>
-                      {f.guest_email && <span>✉️ {f.guest_email}</span>}
-                      {f.guest_mobile && <span>📞 {f.guest_mobile}</span>}
-                      <span>🕐 {new Date(f.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})} · {new Date(f.created_at).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</span>
-                    </div>
-                  </div>
-                  <div style={{ textAlign:'right', flexShrink:0 }}>
-                    <div style={{ color:'#E8890C', fontWeight:900, fontSize:18 }}>{f.rating}⭐</div>
-                    <div style={{ fontSize:11, color:'var(--ink2)', marginTop:2 }}>Overall</div>
-                  </div>
-                </div>
-
-                {/* Sub-ratings */}
-                {(f.food_rating||f.service_rating||f.app_experience_rating) && (
-                  <div style={{ display:'flex', gap:8, marginBottom:8, flexWrap:'wrap' }}>
-                    {f.food_rating>0 && <span style={{ fontSize:12, background:'#FEF3C7', color:'#92400E', padding:'3px 10px', borderRadius:999, fontWeight:600 }}>🍛 Food: {f.food_rating}/5</span>}
-                    {f.service_rating>0 && <span style={{ fontSize:12, background:'#EFF6FF', color:'#2563EB', padding:'3px 10px', borderRadius:999, fontWeight:600 }}>⚡ Service: {f.service_rating}/5</span>}
-                    {f.app_experience_rating>0 && <span style={{ fontSize:12, background:'#F5F3FF', color:'#7C3AED', padding:'3px 10px', borderRadius:999, fontWeight:600 }}>📱 App: {f.app_experience_rating}/5</span>}
-                  </div>
-                )}
-
-                {/* Comment */}
-                {f.comment && (
-                  <div style={{ background:'#F9FAFB', borderRadius:10, padding:'10px 14px', fontSize:13, color:'#444', fontStyle:'italic', lineHeight:1.6, borderLeft:'3px solid #E8890C' }}>
-                    "{f.comment}"
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </>
+              </tr>
+            </thead>
+            <tbody>
+              {displayed.map((f, i) => {
+                const evName = allEvents.find(e => e.id === f.event_id)?.name || '—'
+                return (
+                  <tr key={f.id||i} style={{ borderBottom:'1px solid #F3F4F6', background:i%2===0?'#fff':'#FAFAFA' }}>
+                    <td style={{ padding:'9px 10px', fontWeight:800, color:'#2563EB', textAlign:'center' }}>{f.tableNumber ?? '—'}</td>
+                    <td style={{ padding:'9px 10px', fontWeight:600 }}>{f.guest_name||'Anon'}</td>
+                    <td style={{ padding:'9px 10px', color:'#555' }}>{f.guest_mobile||'—'}</td>
+                    <td style={{ padding:'9px 10px', textAlign:'center' }}>{f.rating ? <span style={{ fontWeight:800, color:'#E8890C' }}>{f.rating}★</span> : '—'}</td>
+                    <td style={{ padding:'9px 10px', textAlign:'center' }}>{f.food_rating||'—'}</td>
+                    <td style={{ padding:'9px 10px', textAlign:'center' }}>{f.service_rating||'—'}</td>
+                    <td style={{ padding:'9px 10px', color:'#555', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={f.comment||''}>{f.comment||'—'}</td>
+                    <td style={{ padding:'9px 10px', color:'#888', whiteSpace:'nowrap', fontSize:11 }}>
+                      {new Date(f.created_at).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}<br/>
+                      {new Date(f.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})}
+                    </td>
+                    {!selEvent && <td style={{ padding:'9px 10px', fontSize:11, color:'#7C3AED', fontWeight:600, maxWidth:120, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{evName}</td>}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )

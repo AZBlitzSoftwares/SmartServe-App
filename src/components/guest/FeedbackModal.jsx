@@ -33,32 +33,43 @@ export default function FeedbackModal({ orderId, tableData, eventData, onClose }
     if (!rating) { setErrors({ rating:'Please select a rating' }); return }
     setSubmitting(true)
     try {
+      // Safe payload with table_number stored directly
       const payload = {
-        event_id: eventData?.id || null,
-        table_id: tableData?.id || null,
+        event_id:             eventData?.id || null,
+        table_number:         tableData?.table_number || null,
         rating,
-        food_rating: food || null,
-        service_rating: service || null,
+        food_rating:          food || null,
+        service_rating:       service || null,
         app_experience_rating: appExp || null,
-        guest_name: name.trim() || null,
-        guest_email: email.trim() || null,
-        guest_mobile: mobile.trim() || null,
-        comment: comment.trim() || null
+        guest_name:           name.trim() || null,
+        guest_email:          email.trim() || null,
+        guest_mobile:         mobile.trim() || null,
+        comment:              comment.trim() || null,
       }
-      // Only add order_id if it's a valid UUID (not offline-)
+      // Only add order_id if valid UUID (not offline-)
       if (orderId && !orderId.startsWith('offline-')) {
         payload.order_id = orderId
       }
-      const { error } = await supabase.from('feedback').insert(payload)
+      const { data: inserted, error } = await supabase
+        .from('feedback').insert(payload).select()
       if (error) {
-        console.error('Feedback error:', error)
-        // Still show thank you — don't block guest
+        console.error('Feedback INSERT error:', JSON.stringify(error))
+        // Try minimal fallback — just rating + event_id
+        const { error: err2 } = await supabase
+          .from('feedback').insert({ event_id: eventData?.id||null, rating })
+        if (err2) {
+          console.error('Feedback fallback error:', JSON.stringify(err2))
+        } else {
+          console.log('Feedback saved via fallback (minimal)')
+        }
+      } else {
+        console.log('Feedback saved:', inserted)
       }
       setSubmitted(true)
       setTimeout(() => onClose(), 3500)
     } catch(e) {
-      console.error('Feedback submit error:', e)
-      setSubmitted(true) // show thank you anyway
+      console.error('Feedback submit exception:', e)
+      setSubmitted(true)
       setTimeout(() => onClose(), 3500)
     } finally {
       setSubmitting(false)

@@ -1,5 +1,106 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import janusLogo from '../../assets/janus_logo.jpg'
+import igQrCode from '../../assets/ig_qr.jpg'
+
+/* ── Animated Header Carousel ─────────────────────────────────────────── */
+function HeaderCarousel({ eventData, tableNumber, isOnline }) {
+  const [slide, setSlide] = useState(0) // 0 = catering, 1 = janu's
+  const [fade, setFade] = useState(true)
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      // fade out
+      setFade(false)
+      setTimeout(() => {
+        setSlide(s => (s + 1) % 2)
+        setFade(true)
+      }, 350) // cross-fade duration
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const isCateringSlide = slide === 0
+  const hasCatering = !!(eventData?.catering_company || eventData?.catering_logo_url)
+
+  return (
+    <div style={{ background:'#1A0A0A', flexShrink:0, padding:'12px 12px', display:'flex', alignItems:'center', gap:6 }}>
+      {/* Brand carousel — 80% width */}
+      <div style={{ flex:8, borderRight:'1px solid rgba(255,255,255,0.12)', paddingRight:10, overflow:'hidden', position:'relative', minHeight:52 }}>
+        {/* Catering Slide */}
+        <div style={{
+          position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', gap:10,
+          opacity: (isCateringSlide && hasCatering) ? (fade ? 1 : 0) : 0,
+          transition:'opacity 0.35s ease',
+          pointerEvents: (isCateringSlide && hasCatering) ? 'auto' : 'none'
+        }}>
+          {eventData?.catering_logo_url ? (
+            <img src={eventData.catering_logo_url} alt=""
+              style={{ width:44, height:44, objectFit:'contain', borderRadius:10, background:'rgba(255,255,255,0.1)', padding:4, flexShrink:0, border:'1px solid rgba(255,255,255,0.2)' }}
+              onError={e=>e.target.style.display='none'} />
+          ) : (
+            <div style={{ width:40, height:40, borderRadius:9, background:'rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+              <span style={{ fontSize:20 }}>🏷️</span>
+            </div>
+          )}
+          <div>
+            <div style={{ color:'#fff', fontWeight:900, fontSize:17, lineHeight:1.2 }}>
+              {eventData?.catering_company || 'Catering Partner'}
+            </div>
+            <div style={{ color:'rgba(255,255,255,0.45)', fontSize:11, fontWeight:500 }}>Catering Partner</div>
+          </div>
+        </div>
+
+        {/* Janu's Smart Serve Slide */}
+        <div style={{
+          position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', gap:10,
+          opacity: (!isCateringSlide || !hasCatering) ? (fade ? 1 : 0) : 0,
+          transition:'opacity 0.35s ease',
+          pointerEvents: (!isCateringSlide || !hasCatering) ? 'auto' : 'none'
+        }}>
+          <img src={janusLogo} alt="Janu's Smart Serve"
+            style={{ width:44, height:44, objectFit:'contain', borderRadius:10, background:'rgba(255,255,255,0.08)', flexShrink:0, border:'1px solid rgba(255,255,255,0.2)' }} />
+          <div>
+            <div style={{ color:'#E8890C', fontWeight:900, fontSize:16, lineHeight:1.2, whiteSpace:'nowrap' }}>Janu's Smart Serve</div>
+            <div style={{ color:'rgba(255,255,255,0.45)', fontSize:11, fontWeight:500 }}>Technology Partner</div>
+          </div>
+        </div>
+
+        {/* Dot indicators */}
+        {hasCatering && (
+          <div style={{ position:'absolute', bottom:2, left:'50%', transform:'translateX(-50%)', display:'flex', gap:4 }}>
+            <span style={{ width:5, height:5, borderRadius:'50%', background: isCateringSlide ? '#E8890C' : 'rgba(255,255,255,0.3)', display:'block', transition:'background 0.3s' }} />
+            <span style={{ width:5, height:5, borderRadius:'50%', background: !isCateringSlide ? '#E8890C' : 'rgba(255,255,255,0.3)', display:'block', transition:'background 0.3s' }} />
+          </div>
+        )}
+      </div>
+
+      {/* Instagram QR strip between carousel and table */}
+      <div style={{ display:'flex', alignItems:'center', gap:5, background:'rgba(255,255,255,0.07)', borderRadius:10, padding:'5px 7px', border:'1px solid rgba(255,255,255,0.1)', flexShrink:0, marginRight:6 }}>
+        <img src={igQrCode} alt="Instagram" style={{ width:32, height:32, borderRadius:6, objectFit:'cover', flexShrink:0 }} />
+        <div>
+          <div style={{ display:'flex', alignItems:'center', gap:3 }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+              <defs><linearGradient id="hIG" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stopColor="#F58529"/><stop offset="50%" stopColor="#DD2A7B"/><stop offset="100%" stopColor="#515BD4"/></linearGradient></defs>
+              <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#hIG)"/>
+              <circle cx="12" cy="12" r="4.5" stroke="white" strokeWidth="1.8" fill="none"/>
+              <circle cx="17.5" cy="6.5" r="1" fill="white"/>
+            </svg>
+            <span style={{ fontSize:9, fontWeight:800, color:'#fff' }}>@janusmartserve</span>
+          </div>
+          <div style={{ fontSize:8, color:'rgba(255,255,255,0.4)', marginTop:1 }}>Scan to follow</div>
+        </div>
+      </div>
+
+      {/* Table — 20% */}
+      <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2 }}>
+        {isOnline===false && <span style={{ background:'#DC2626', color:'#fff', fontSize:8, fontWeight:700, padding:'1px 4px', borderRadius:999 }}>OFFLINE</span>}
+        <div style={{ color:'rgba(255,255,255,0.5)', fontSize:10, fontWeight:600, letterSpacing:'0.5px' }}>TABLE</div>
+        <div style={{ color:'#fff', fontSize:22, fontWeight:900, lineHeight:1 }}>{tableNumber}</div>
+      </div>
+    </div>
+  )
+}
 
 function MenuModal({ categories, items, onSelect, cartCount }) {
   const [open, setOpen] = useState(false)
@@ -153,46 +254,8 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   return (
     <div style={{ height:'100vh', display:'flex', flexDirection:'column', background:'#F5F5F5', overflow:'hidden' }}>
 
-      {/* HEADER — 40% catering | 40% Janu | 20% table — taller, centred */}
-      <div style={{ background:'#1A0A0A', flexShrink:0, padding:'14px 12px', display:'flex', alignItems:'center', gap:6 }}>
-
-        {/* 40% — Catering company — centred */}
-        <div style={{ flex:4, display:'flex', alignItems:'center', justifyContent:'center', gap:10, borderRight:'1px solid rgba(255,255,255,0.12)', paddingRight:10 }}>
-          {eventData?.catering_logo_url ? (
-            <img src={eventData.catering_logo_url} alt=""
-              style={{ width:46, height:46, objectFit:'contain', borderRadius:10, background:'rgba(255,255,255,0.1)', padding:4, flexShrink:0, border:'1px solid rgba(255,255,255,0.2)' }}
-              onError={e=>e.target.style.display='none'} />
-          ) : (
-            <div style={{ width:40, height:40, borderRadius:9, background:'rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-              <span style={{ fontSize:20 }}>🏷️</span>
-            </div>
-          )}
-          <div>
-            <div style={{ color:'#fff', fontWeight:900, fontSize:17, lineHeight:1.2, whiteSpace:'nowrap' }}>
-              {eventData?.catering_company || 'Catering'}
-            </div>
-            <div style={{ color:'rgba(255,255,255,0.45)', fontSize:11, fontWeight:500 }}>Catering Partner</div>
-          </div>
-        </div>
-
-        {/* 40% — Janu's Smart Serve — centred */}
-        <div style={{ flex:4, display:'flex', alignItems:'center', justifyContent:'center', gap:10, borderRight:'1px solid rgba(255,255,255,0.12)', paddingLeft:10, paddingRight:10 }}>
-          <div style={{ width:40, height:40, borderRadius:9, background:'#E8890C', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 10px rgba(232,137,12,0.5)' }}>
-            <span style={{ fontSize:22 }}>🍽️</span>
-          </div>
-          <div>
-            <div style={{ color:'#E8890C', fontWeight:900, fontSize:16, lineHeight:1.2, whiteSpace:'nowrap' }}>Janu's Smart Serve</div>
-            <div style={{ color:'rgba(255,255,255,0.45)', fontSize:11, fontWeight:500 }}>Technology Partner</div>
-          </div>
-        </div>
-
-        {/* 20% — Table — centred */}
-        <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2 }}>
-          {isOnline===false && <span style={{ background:'#DC2626', color:'#fff', fontSize:8, fontWeight:700, padding:'1px 4px', borderRadius:999 }}>OFFLINE</span>}
-          <div style={{ color:'rgba(255,255,255,0.5)', fontSize:10, fontWeight:600, letterSpacing:'0.5px' }}>TABLE</div>
-          <div style={{ color:'#fff', fontSize:22, fontWeight:900, lineHeight:1 }}>{tableNumber}</div>
-        </div>
-      </div>
+      {/* HEADER — Animated carousel brand | Table */}
+      <HeaderCarousel eventData={eventData} tableNumber={tableNumber} isOnline={isOnline} />
 
       {/* ACTION BAR */}
       <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff', borderBottom:'1px solid #eee', overflowX:'auto', flexShrink:0, scrollbarWidth:'none' }}>
@@ -219,28 +282,32 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         ))}
       </div>
 
-      {/* SWIGGY-STYLE CATEGORY CHIPS */}
+      {/* CATEGORY CHIPS — amber when active, amber outline when inactive */}
       {search.length===0 && (
         <div ref={chipBarRef} style={{ display:'flex', gap:8, padding:'10px 14px', background:'#fff', borderBottom:'2px solid #F0F0F0', overflowX:'auto', flexShrink:0, scrollbarWidth:'none' }}>
           <button onClick={()=>{ setActiveChip('all'); scrollRef.current?.scrollTo({top:0,behavior:'smooth'}) }}
-            style={{ flexShrink:0, padding:'8px 20px', borderRadius:999, fontSize:13, fontWeight:800, border: activeChip==='all'?'none':'1.5px solid #E0E0E0', cursor:'pointer',
-              background:activeChip==='all'?'#E8890C':'#fff',
-              color:activeChip==='all'?'#fff':'#555',
-              boxShadow:activeChip==='all'?'0 3px 10px rgba(232,137,12,0.4)':'none',
+            style={{ flexShrink:0, padding:'8px 20px', borderRadius:999, fontSize:13, fontWeight:800,
+              border: activeChip==='all' ? 'none' : '1.5px solid #E8890C',
+              cursor:'pointer',
+              background: activeChip==='all' ? '#E8890C' : '#FFF8EE',
+              color: activeChip==='all' ? '#fff' : '#C06A00',
+              boxShadow: activeChip==='all' ? '0 3px 10px rgba(232,137,12,0.4)' : 'none',
               transition:'all 0.15s' }}>
             All
           </button>
           {categories.map(cat => (
             <button key={cat.id} onClick={()=>scrollToCategory(cat.id)}
               style={{ flexShrink:0, padding:'8px 20px', borderRadius:999, fontSize:13, fontWeight:800,
-                border: activeChip===cat.id?'none':'1.5px solid #E0E0E0',
+                border: activeChip===cat.id ? 'none' : '1.5px solid #E8890C',
                 cursor:'pointer', whiteSpace:'nowrap',
-                background:activeChip===cat.id?'#E8890C':'#fff',
-                color:activeChip===cat.id?'#fff':'#555',
-                boxShadow:activeChip===cat.id?'0 3px 10px rgba(232,137,12,0.4)':'none',
+                background: activeChip===cat.id ? '#E8890C' : '#FFF8EE',
+                color: activeChip===cat.id ? '#fff' : '#C06A00',
+                boxShadow: activeChip===cat.id ? '0 3px 10px rgba(232,137,12,0.4)' : 'none',
                 transition:'all 0.15s' }}>
               {cat.name}
-              <span style={{ fontSize:11, marginLeft:5, opacity: activeChip===cat.id?0.85:0.5 }}>({items.filter(i=>i.category_id===cat.id).length})</span>
+              <span style={{ fontSize:11, marginLeft:5, opacity: activeChip===cat.id ? 0.85 : 0.65 }}>
+                ({items.filter(i=>i.category_id===cat.id).length})
+              </span>
             </button>
           ))}
         </div>

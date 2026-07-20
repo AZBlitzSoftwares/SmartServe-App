@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import janusLogo from '../../assets/janus_logo.jpg'
 
 export default function SupervisorLogin({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -35,7 +36,9 @@ export default function SupervisorLogin({ onLogin }) {
 
   return (
     <div style={{ minHeight:'100vh', background:'linear-gradient(160deg,#2A1B2E 0%,#4A2340 50%,#8E2A5C 100%)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24 }}>
-      <div style={{ fontSize:48, marginBottom:12 }}>👨‍💼</div>
+      <img src={janusLogo} alt="Janu's Smart Serve"
+        style={{ width:90, height:90, objectFit:'contain', borderRadius:20, marginBottom:12,
+                 border:'2px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)' }} />
       <h1 style={{ color:'#fff', fontSize:26, fontWeight:800, marginBottom:4 }}>Janu's <span style={{ color:'#E8890C' }}>Smart Serve</span></h1>
       <p style={{ color:'rgba(255,255,255,0.6)', fontSize:14, marginBottom:40 }}>Supervisor & Admin Access</p>
 

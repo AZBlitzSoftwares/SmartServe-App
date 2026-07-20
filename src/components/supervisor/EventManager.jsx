@@ -1,8 +1,62 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
+// Auto-compute event status from date
+function eventStatus(dateStr) {
+  if (!dateStr) return 'planned'
+  const today = new Date()
+  const todayStr = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0')
+  if (dateStr > todayStr) return 'planned'
+  if (dateStr === todayStr) return 'active'
+  return 'completed'
+}
+const STATUS_LABEL = { planned:'Planned', active:'Active', completed:'Completed' }
+const STATUS_BG    = { planned:'#EFF6FF', active:'#DCFCE7', completed:'#F3F4F6' }
+const STATUS_COLOR = { planned:'#2563EB', active:'#16A34A', completed:'#6B7280' }
+
 const INP = { width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:14, marginBottom:0, fontFamily:'Manrope', outline:'none', boxSizing:'border-box', background:'#fff' }
 const LBL = { fontSize:12, fontWeight:700, color:'#666', display:'block', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.04em' }
+
+
+function EventDateNameEditor({ ev, onSave }) {
+  const [name, setName]       = useState(ev.name || '')
+  const [date, setDate]       = useState(ev.date || '')
+  const [saving, setSaving]   = useState(false)
+  const [saved, setSaved]     = useState(false)
+
+  // Reset when event changes
+  useState(() => { setName(ev.name||''); setDate(ev.date||'') })
+
+  async function save() {
+    if (!name.trim() || !date) { alert('Name and date are required'); return }
+    setSaving(true)
+    if (name.trim() !== ev.name) await onSave('name', name.trim())
+    if (date !== ev.date)         await onSave('date', date)
+    setSaving(false)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:10, marginBottom:12, alignItems:'flex-end' }}>
+      <div>
+        <label style={{ fontSize:12, fontWeight:700, color:'#666', display:'block', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.04em' }}>Event Name</label>
+        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Event name"
+          style={{ width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:13, fontFamily:'Manrope', outline:'none', boxSizing:'border-box', background:'#fff' }} />
+      </div>
+      <div>
+        <label style={{ fontSize:12, fontWeight:700, color:'#666', display:'block', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.04em' }}>Event Date</label>
+        <input type="date" value={date} onChange={e=>setDate(e.target.value)}
+          style={{ width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:13, fontFamily:'Manrope', outline:'none', boxSizing:'border-box', background:'#fff', cursor:'pointer' }} />
+      </div>
+      <button onClick={save} disabled={saving}
+        style={{ padding:'10px 18px', background: saved?'#16A34A':'var(--ink)', color: saved?'#fff':'#E8890C',
+                 border:'none', borderRadius:10, fontSize:13, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap', height:42 }}>
+        {saving ? 'Saving...' : saved ? '✅ Saved' : '💾 Save'}
+      </button>
+    </div>
+  )
+}
 
 export default function EventManager({ onEventChange }) {
   const [events, setEvents] = useState([])
@@ -440,7 +494,7 @@ export default function EventManager({ onEventChange }) {
           {events.map((ev, idx) => {
             const sups = getSups(ev.id)
             const ws = getWaiters(ev.id)
-            const isActive = !ev.is_closed
+            const st = eventStatus(ev.date)
             return (
               <div key={ev.id} onClick={()=>{ setSelectedEvent(ev.id); setViewMode('detail') }}
                 style={{ display:'flex', alignItems:'center', gap:14, padding:'14px 18px', borderBottom: idx<events.length-1?'1px solid var(--line)':'none', cursor:'pointer', transition:'background 0.15s' }}
@@ -459,7 +513,7 @@ export default function EventManager({ onEventChange }) {
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
                     <span style={{ fontWeight:800, fontSize:15, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{ev.name}</span>
-                    <span style={{ flexShrink:0, fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:999, background:isActive?'#DCFCE7':'#F3F4F6', color:isActive?'#16A34A':'#6B7280' }}>{isActive?'Active':'Closed'}</span>
+                    <span style={{ flexShrink:0, fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:999, background:STATUS_BG[st], color:STATUS_COLOR[st] }}>{STATUS_LABEL[st]}</span>
                   </div>
                   <div style={{ fontSize:12, color:'var(--ink2)', display:'flex', gap:12, flexWrap:'wrap' }}>
                     <span>📅 {new Date(ev.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>
@@ -499,7 +553,8 @@ export default function EventManager({ onEventChange }) {
       : viewMode==='detail' && events.filter(ev => !selectedEvent || ev.id===selectedEvent).map(ev => {
         const sups = getSups(ev.id)
         const ws = getWaiters(ev.id)
-        const isActive = !ev.is_closed
+        const st = eventStatus(ev.date)
+        const isActive = st === 'active'
 
         return (
           <div key={ev.id} style={{ background:'#fff', borderRadius:18, marginBottom:14, boxShadow:'var(--shadow)', overflow:'hidden', border:'1px solid var(--line)' }}>
@@ -526,6 +581,9 @@ export default function EventManager({ onEventChange }) {
             </div>
 
             <div style={{ padding:'16px 18px' }}>
+
+              {/* Event Name + Date editable */}
+              <EventDateNameEditor ev={ev} onSave={async(field,val)=>{ await updateEventField(ev.id,field,val); loadAll() }} />
 
               {/* Quick edit fields — tables + max orders + call waiter */}
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:16 }}>

@@ -208,21 +208,7 @@ ${data.fb.length>0?'<h2>Guest Feedback</h2><table><tr><th>Name</th><th>Rating</t
             ))}
           </div>
 
-          {/* Feedback */}
-          {data.fb.length>0 && (
-            <div style={{ background:'#fff',borderRadius:16,padding:16,marginBottom:16,boxShadow:'var(--shadow)' }}>
-              <div style={{ fontWeight:800,fontSize:16,marginBottom:12 }}>Guest Feedback ({data.fb.length})</div>
-              {data.fb.map((f,i) => (
-                <div key={i} style={{ padding:'10px 0',borderBottom:'1px solid var(--line)' }}>
-                  <div style={{ display:'flex',justifyContent:'space-between',marginBottom:4 }}>
-                    <span style={{ fontWeight:700,fontSize:14 }}>{f.guest_name||'Anonymous'}</span>
-                    <span style={{ color:'#E8890C',fontWeight:700 }}>{'⭐'.repeat(f.rating||0)}</span>
-                  </div>
-                  {f.comment && <div style={{ fontSize:13,color:'var(--ink2)' }}>{f.comment}</div>}
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Feedback moved to dedicated Feedback tab */}
         </>
       )}
     </div>

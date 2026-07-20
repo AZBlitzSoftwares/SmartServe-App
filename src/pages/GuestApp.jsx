@@ -10,6 +10,16 @@ import SOSPanel from '../components/guest/SOSPanel'
 import OrderHistory from '../components/guest/OrderHistory'
 import FeedbackModal from '../components/guest/FeedbackModal'
 
+
+function eventStatus(dateStr) {
+  if (!dateStr) return 'planned'
+  const today = new Date()
+  const todayStr = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0')
+  if (dateStr > todayStr) return 'planned'
+  if (dateStr === todayStr) return 'active'
+  return 'completed'
+}
+
 function eventKey(t) { return 'ss_event_table_' + t }
 function orderKey(t) { return 'ss_order_' + t + '_' + new Date().toISOString().slice(0,10) }
 
@@ -29,6 +39,7 @@ export default function GuestApp() {
   const [showHistory, setShowHistory] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [showFeedbackBubble, setShowFeedbackBubble] = useState(false)
+  const [activeEventCount, setActiveEventCount] = useState(0)
   const feedbackTimerRef = useRef(null)
   const retryRef = useRef(null)
 
@@ -37,7 +48,12 @@ export default function GuestApp() {
   }, [currentOrderId, tableNumber])
 
   useEffect(() => {
-    if (eventData?.id) loadEventAndTable(eventData.id)
+    if (eventData?.id) {
+      loadEventAndTable(eventData.id)
+    } else {
+      // No stored event — auto-find today's active event
+      autoLoadActiveEvent()
+    }
     const on = () => { setIsOnline(true); syncOfflineOrders() }
     const off = () => setIsOnline(false)
     window.addEventListener('online', on); window.addEventListener('offline', off)
@@ -47,6 +63,17 @@ export default function GuestApp() {
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current)
     }
   }, [tableNumber])
+
+  async function autoLoadActiveEvent() {
+    try {
+      const { data: evs } = await supabase.from('events').select('*').order('date', { ascending:false }).limit(50)
+      const active = (evs||[]).filter(e => eventStatus(e.date) === 'active')
+      setActiveEventCount(active.length)
+      if (active.length === 1) {
+        handleEventSelect(active[0])
+      }
+    } catch(e) { console.error('Auto event load failed:', e) }
+  }
 
   // Watch for delivered status → show feedback bubble after FEEDBACK_DELAY_SECONDS
   useEffect(() => {
@@ -98,7 +125,7 @@ export default function GuestApp() {
 
   return (
     <div style={{ minHeight:'100vh', background:'var(--bg)', position:'relative' }}>
-      {screen==='welcome' && <WelcomeScreen tableNumber={tableNumber} onStart={()=>setScreen('menu')} eventData={eventData} onEventSelect={handleEventSelect} />}
+      {screen==='welcome' && <WelcomeScreen tableNumber={tableNumber} onStart={()=>setScreen('menu')} eventData={eventData} onEventSelect={handleEventSelect} activeEventCount={activeEventCount} />}
       {screen==='menu' && <MenuScreen tableData={tableData} eventData={eventData} tableNumber={tableNumber} cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} cartCount={cartCount} isOnline={isOnline} onShowSOS={()=>setShowSOS(true)} onShowHistory={()=>setShowHistory(true)} onShowStatus={()=>setScreen('status')} currentOrderId={currentOrderId} showFeedbackBubble={showFeedbackBubble} onFeedbackBubbleClick={()=>{ setShowFeedbackBubble(false); setShowFeedback(true) }} onShowFeedback={()=>setShowFeedback(true)} />}
       {screen==='status' && <OrderStatus orderId={currentOrderId} tableNumber={tableNumber} onBack={()=>setScreen('menu')} />}
       {cartCount>0 && screen==='menu' && <CartDrawer cart={cart} tableData={tableData} eventData={eventData} isOnline={isOnline} onOrderPlaced={(id)=>{ setCurrentOrderId(id); setCart([]); setScreen('status') }} onRemove={removeFromCart} onAdd={addToCart} />}
