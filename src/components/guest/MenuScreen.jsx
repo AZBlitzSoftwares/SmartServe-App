@@ -5,79 +5,88 @@ import igQrCode from '../../assets/ig_qr.jpg'
 
 /* ── Animated Header Carousel ─────────────────────────────────────────── */
 function HeaderCarousel({ eventData, tableNumber, isOnline }) {
-  const [slide, setSlide] = useState(0) // 0 = catering, 1 = janu's
+  const hasWelcomeNote = !!(eventData?.welcome_note)
+  const hasCatering = !!(eventData?.catering_company || eventData?.catering_logo_url)
+  const totalSlides = 1 + (hasCatering ? 1 : 0) + (hasWelcomeNote ? 1 : 0)
+  // slide 0 = janus, 1 = catering (if exists), 2 = welcome note (if exists)
+  // simplified: always 0=catering(if exists), 1=janus, 2=welcome(if exists)
+  const slideOrder = [
+    ...(hasCatering ? ['catering'] : []),
+    'janus',
+    ...(hasWelcomeNote ? ['welcome'] : []),
+  ]
+  const [slideIdx, setSlideIdx] = useState(0)
   const [fade, setFade] = useState(true)
 
   useEffect(() => {
+    if (slideOrder.length < 2) return
     const timer = setInterval(() => {
-      // fade out
       setFade(false)
       setTimeout(() => {
-        setSlide(s => (s + 1) % 2)
+        setSlideIdx(s => (s + 1) % slideOrder.length)
         setFade(true)
-      }, 350) // cross-fade duration
+      }, 350)
     }, 5000)
     return () => clearInterval(timer)
-  }, [])
+  }, [slideOrder.length])
 
-  const isCateringSlide = slide === 0
-  const hasCatering = !!(eventData?.catering_company || eventData?.catering_logo_url)
+  const currentSlide = slideOrder[slideIdx] || 'janus'
+  const isCateringSlide = currentSlide === 'catering'
+  const isJanusSlide = currentSlide === 'janus'
+  const isWelcomeSlide = currentSlide === 'welcome'
 
   return (
-    <div style={{ background:'#1A0A0A', flexShrink:0, padding:'12px 12px', display:'flex', alignItems:'center', gap:6 }}>
-      {/* Brand carousel — 80% width */}
-      <div style={{ flex:8, borderRight:'1px solid rgba(255,255,255,0.12)', paddingRight:10, overflow:'hidden', position:'relative', minHeight:52 }}>
+    <div style={{ background:'#1A0A0A', flexShrink:0, padding:'18px 12px', display:'flex', alignItems:'center', gap:6 }}>
+      {/* Brand carousel — 80% width, 3 panels */}
+      <div style={{ flex:8, borderRight:'1px solid rgba(255,255,255,0.12)', paddingRight:10, overflow:'hidden', position:'relative', minHeight:78 }}>
+
         {/* Catering Slide */}
-        <div style={{
-          position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', gap:10,
-          opacity: (isCateringSlide && hasCatering) ? (fade ? 1 : 0) : 0,
-          transition:'opacity 0.35s ease',
-          pointerEvents: (isCateringSlide && hasCatering) ? 'auto' : 'none'
-        }}>
-          {eventData?.catering_logo_url ? (
-            <img src={eventData.catering_logo_url} alt=""
-              style={{ width:44, height:44, objectFit:'contain', borderRadius:10, background:'rgba(255,255,255,0.1)', padding:4, flexShrink:0, border:'1px solid rgba(255,255,255,0.2)' }}
-              onError={e=>e.target.style.display='none'} />
-          ) : (
-            <div style={{ width:40, height:40, borderRadius:9, background:'rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-              <span style={{ fontSize:20 }}>🏷️</span>
-            </div>
-          )}
+        <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', gap:10, opacity: isCateringSlide ? (fade?1:0) : 0, transition:'opacity 0.35s ease', pointerEvents: isCateringSlide ? 'auto' : 'none' }}>
+          {eventData?.catering_logo_url
+            ? <img src={eventData.catering_logo_url} alt="" style={{ width:56, height:56, objectFit:'contain', borderRadius:12, background:'rgba(255,255,255,0.1)', padding:4, flexShrink:0, border:'1px solid rgba(255,255,255,0.2)' }} onError={e=>e.target.style.display='none'} />
+            : <div style={{ width:52, height:52, borderRadius:11, background:'rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}><span style={{ fontSize:26 }}>🏷️</span></div>
+          }
           <div>
-            <div style={{ color:'#fff', fontWeight:900, fontSize:17, lineHeight:1.2 }}>
-              {eventData?.catering_company || 'Catering Partner'}
-            </div>
-            <div style={{ color:'rgba(255,255,255,0.45)', fontSize:11, fontWeight:500 }}>Catering Partner</div>
+            <div style={{ color:'#fff', fontWeight:900, fontSize:20, lineHeight:1.2 }}>{eventData?.catering_company || 'Catering Partner'}</div>
+            <div style={{ color:'rgba(255,255,255,0.45)', fontSize:12, fontWeight:500 }}>Catering Partner</div>
           </div>
         </div>
 
         {/* Janu's Smart Serve Slide */}
-        <div style={{
-          position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', gap:10,
-          opacity: (!isCateringSlide || !hasCatering) ? (fade ? 1 : 0) : 0,
-          transition:'opacity 0.35s ease',
-          pointerEvents: (!isCateringSlide || !hasCatering) ? 'auto' : 'none'
-        }}>
-          <img src={janusLogo} alt="Janu's Smart Serve"
-            style={{ width:44, height:44, objectFit:'contain', borderRadius:10, background:'rgba(255,255,255,0.08)', flexShrink:0, border:'1px solid rgba(255,255,255,0.2)' }} />
+        <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', gap:10, opacity: isJanusSlide ? (fade?1:0) : 0, transition:'opacity 0.35s ease', pointerEvents: isJanusSlide ? 'auto' : 'none' }}>
+          <img src={janusLogo} alt="Janu's Smart Serve" style={{ width:56, height:56, objectFit:'contain', borderRadius:12, background:'rgba(255,255,255,0.08)', flexShrink:0, border:'1px solid rgba(255,255,255,0.2)' }} />
           <div>
-            <div style={{ color:'#E8890C', fontWeight:900, fontSize:16, lineHeight:1.2, whiteSpace:'nowrap' }}>Janu's Smart Serve</div>
-            <div style={{ color:'rgba(255,255,255,0.45)', fontSize:11, fontWeight:500 }}>Technology Partner</div>
+            <div style={{ color:'#E8890C', fontWeight:900, fontSize:19, lineHeight:1.2, whiteSpace:'nowrap' }}>Janu's Smart Serve</div>
+            <div style={{ color:'rgba(255,255,255,0.45)', fontSize:12, fontWeight:500 }}>Technology Partner</div>
           </div>
         </div>
 
+        {/* Welcome Note Slide — 3rd panel */}
+        {hasWelcomeNote && (
+          <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', gap:10, opacity: isWelcomeSlide ? (fade?1:0) : 0, transition:'opacity 0.35s ease', pointerEvents: isWelcomeSlide ? 'auto' : 'none' }}>
+            {eventData?.banner_image_url
+              ? <img src={eventData.banner_image_url} alt="" style={{ width:44, height:44, objectFit:'cover', borderRadius:10, flexShrink:0, border:'1px solid rgba(255,255,255,0.2)' }} onError={e=>e.target.style.display='none'} />
+              : <span style={{ fontSize:28, flexShrink:0 }}>🎉</span>
+            }
+            <div style={{ textAlign:'center' }}>
+              <div style={{ color:'#FFE0A0', fontWeight:900, fontSize:18, lineHeight:1.3 }}>{eventData.welcome_note}</div>
+            </div>
+          </div>
+        )}
+
         {/* Dot indicators */}
-        {hasCatering && (
+        {slideOrder.length > 1 && (
           <div style={{ position:'absolute', bottom:2, left:'50%', transform:'translateX(-50%)', display:'flex', gap:4 }}>
-            <span style={{ width:5, height:5, borderRadius:'50%', background: isCateringSlide ? '#E8890C' : 'rgba(255,255,255,0.3)', display:'block', transition:'background 0.3s' }} />
-            <span style={{ width:5, height:5, borderRadius:'50%', background: !isCateringSlide ? '#E8890C' : 'rgba(255,255,255,0.3)', display:'block', transition:'background 0.3s' }} />
+            {slideOrder.map((_, i) => (
+              <span key={i} style={{ width:5, height:5, borderRadius:'50%', background: slideIdx===i ? '#E8890C' : 'rgba(255,255,255,0.3)', display:'block', transition:'background 0.3s' }} />
+            ))}
           </div>
         )}
       </div>
 
       {/* Instagram QR strip between carousel and table */}
       <div style={{ display:'flex', alignItems:'center', gap:5, background:'rgba(255,255,255,0.07)', borderRadius:10, padding:'5px 7px', border:'1px solid rgba(255,255,255,0.1)', flexShrink:0, marginRight:6 }}>
-        <img src={igQrCode} alt="Instagram" style={{ width:32, height:32, borderRadius:6, objectFit:'cover', flexShrink:0 }} />
+        <img src={igQrCode} alt="Instagram" style={{ width:42, height:42, borderRadius:8, objectFit:'cover', flexShrink:0 }} />
         <div>
           <div style={{ display:'flex', alignItems:'center', gap:3 }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
@@ -93,30 +102,41 @@ function HeaderCarousel({ eventData, tableNumber, isOnline }) {
       </div>
 
       {/* Table — 20% */}
-      <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2 }}>
+      <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3 }}>
         {isOnline===false && <span style={{ background:'#DC2626', color:'#fff', fontSize:8, fontWeight:700, padding:'1px 4px', borderRadius:999 }}>OFFLINE</span>}
-        <div style={{ color:'rgba(255,255,255,0.5)', fontSize:10, fontWeight:600, letterSpacing:'0.5px' }}>TABLE</div>
-        <div style={{ color:'#fff', fontSize:22, fontWeight:900, lineHeight:1 }}>{tableNumber}</div>
+        <div style={{ color:'rgba(255,255,255,0.5)', fontSize:11, fontWeight:600, letterSpacing:'0.5px' }}>TABLE</div>
+        <div style={{ color:'#fff', fontSize:28, fontWeight:900, lineHeight:1 }}>{tableNumber}</div>
       </div>
     </div>
   )
 }
 
-function MenuModal({ categories, items, onSelect, cartCount }) {
+function MenuModal({ categories, items, onSelect, cartCount, currentOrderId, onShowStatus }) {
   const [open, setOpen] = useState(false)
   return (
     <>
-      {/* Floating MENU button — bottom RIGHT corner */}
-      <button onClick={()=>setOpen(true)} style={{
-        position:'fixed', bottom: cartCount>0 ? 110 : 28, right:16,
-        background:'#1A0A0A', color:'#fff', border:'none', borderRadius:999,
-        padding:'12px 22px', fontSize:14, fontWeight:800, cursor:'pointer',
-        boxShadow:'0 6px 20px rgba(0,0,0,0.4)', zIndex:60,
-        display:'flex', alignItems:'center', gap:8, letterSpacing:'0.5px'
-      }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-        MENU
-      </button>
+      {/* Bottom-right button group: Track Order + MENU */}
+      <div style={{ position:'fixed', bottom: cartCount>0 ? 110 : 28, right:16, zIndex:60, display:'flex', gap:8, alignItems:'center' }}>
+        {currentOrderId && (
+          <button onClick={onShowStatus} style={{
+            background:'#16A34A', color:'#fff', border:'none', borderRadius:999,
+            padding:'12px 18px', fontSize:13, fontWeight:800, cursor:'pointer',
+            boxShadow:'0 6px 20px rgba(22,163,74,0.45)',
+            display:'flex', alignItems:'center', gap:6
+          }}>
+            📦 Track
+          </button>
+        )}
+        <button onClick={()=>setOpen(true)} style={{
+          background:'#1A0A0A', color:'#fff', border:'none', borderRadius:999,
+          padding:'12px 22px', fontSize:14, fontWeight:800, cursor:'pointer',
+          boxShadow:'0 6px 20px rgba(0,0,0,0.4)',
+          display:'flex', alignItems:'center', gap:8, letterSpacing:'0.5px'
+        }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          MENU
+        </button>
+      </div>
 
       {/* Category picker modal */}
       {open && (
@@ -168,10 +188,21 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
     })
   }
 
-  useEffect(() => { if (eventData) loadMenu() }, [eventData])
+  useEffect(() => {
+    if (!eventData) return
+    loadMenu()
+    // Real-time updates when supervisor hides/shows items
+    const sub = supabase.channel('menu-realtime-'+eventData.id)
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'menu_items' }, () => loadMenu(false))
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'menu_items' }, () => loadMenu(false))
+      .subscribe()
+    // Also poll every 15s as fallback
+    const poll = setInterval(() => loadMenu(false), 15000)
+    return () => { supabase.removeChannel(sub); clearInterval(poll) }
+  }, [eventData?.id])
 
-  async function loadMenu() {
-    setLoading(true)
+  async function loadMenu(showSpinner = true) {
+    if (showSpinner) setLoading(true)
     const { data: cats } = await supabase.from('menu_categories').select('*').eq('event_id', eventData.id).eq('is_visible', true).order('sort_order')
     const { data: catIds } = { data: (cats||[]).map(c=>c.id) }
     const { data: menuItems } = catIds.length
@@ -259,7 +290,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
 
       {/* ACTION BAR */}
       <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff', borderBottom:'1px solid #eee', overflowX:'auto', flexShrink:0, scrollbarWidth:'none' }}>
-        {currentOrderId && <button onClick={onShowStatus} style={{ flexShrink:0, background:'#16A34A', color:'#fff', border:'none', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>📦 Track Order</button>}
+        
         <button onClick={onShowHistory} style={{ flexShrink:0, background:'#fff', color:'#333', border:'1.5px solid #ddd', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:600, cursor:'pointer' }}>📋 History</button>
         {eventData?.call_waiter_enabled!==false && <button onClick={onShowSOS} style={{ flexShrink:0, background:'#FEF3C7', color:'#92400E', border:'1.5px solid #FCD34D', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>🛎️ Call Waiter</button>}
         <button onClick={onShowFeedback} style={{ flexShrink:0, background:'#FFF7ED', color:'#C2410C', border:'1.5px solid #FED7AA', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>⭐ Feedback</button>
@@ -343,9 +374,9 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         )}
       </div>
 
-      {/* FLOATING MENU BUTTON — bottom right */}
+      {/* FLOATING BOTTOM BUTTONS — MENU (right) + Track Order (left of menu) */}
       {search.length === 0 && categories.length > 0 && (
-        <MenuModal categories={categories} items={items} onSelect={scrollToCategory} cartCount={cartCount} />
+        <MenuModal categories={categories} items={items} onSelect={scrollToCategory} cartCount={cartCount} currentOrderId={currentOrderId} onShowStatus={onShowStatus} />
       )}
 
       {/* FEEDBACK BUBBLE */}

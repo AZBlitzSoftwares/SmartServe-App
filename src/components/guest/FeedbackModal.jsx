@@ -1,145 +1,177 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
-export default function FeedbackModal({ orderId, tableData, eventData, onClose }) {
-  const [rating, setRating] = useState(0)
-  const [hoverRating, setHoverRating] = useState(0)
-  const [food, setFood] = useState(0); const [hf, setHf] = useState(0)
-  const [service, setService] = useState(0); const [hs, setHs] = useState(0)
-  const [appExp, setAppExp] = useState(0); const [happ, setHapp] = useState(0)
+function FaceSVG({ type, size = 80 }) {
+  const configs = {
+    excellent: { outline: '#16A34A', fill: '#DCFCE7', eyeType: 'happy' },
+    good:      { outline: '#65A30D', fill: '#ECFCCB', eyeType: 'smile' },
+    average:   { outline: '#D97706', fill: '#FEF3C7', eyeType: 'flat'  },
+  }
+  const c = configs[type]
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="12" r="10" stroke={c.outline} strokeWidth="2" fill={c.fill} />
+      <circle cx="8.5" cy="9.5" r="1.2" fill={c.outline} />
+      <circle cx="15.5" cy="9.5" r="1.2" fill={c.outline} />
+      {c.eyeType === 'happy' && <path d="M 8,14 Q 12,18.5 16,14" stroke={c.outline} strokeWidth="1.8" strokeLinecap="round" fill="none" />}
+      {c.eyeType === 'smile' && <path d="M 8.5,14 Q 12,17 15.5,14" stroke={c.outline} strokeWidth="1.8" strokeLinecap="round" fill="none" />}
+      {c.eyeType === 'flat'  && <line x1="8.5" y1="15" x2="15.5" y2="15" stroke={c.outline} strokeWidth="1.8" strokeLinecap="round" />}
+    </svg>
+  )
+}
+
+const SENTIMENT_CONFIG = {
+  excellent: { label: 'Excellent', color: '#16A34A', bg: '#DCFCE7', border: '#86EFAC' },
+  good:      { label: 'Good',      color: '#65A30D', bg: '#ECFCCB', border: '#BEF264' },
+  average:   { label: 'Average',   color: '#D97706', bg: '#FEF3C7', border: '#FCD34D' },
+}
+
+function FacePicker({ onSelect, onClose }) {
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:100, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+      <div style={{ background:'#fff', borderRadius:'28px 28px 0 0', padding:'28px 24px 48px', width:'100%', maxWidth:520 }}>
+        <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 24px' }} />
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+          <h3 style={{ fontSize:20, fontWeight:800, color:'#1A1A1A', margin:0 }}>How was your experience?</h3>
+          <button onClick={onClose} style={{ background:'#F5F5F5', border:'none', borderRadius:999, width:34, height:34, fontSize:18, color:'#888', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
+        </div>
+        <p style={{ fontSize:14, color:'#888', marginBottom:28, marginTop:0 }}>Tap a face to share your feedback</p>
+        <div style={{ display:'flex', justifyContent:'space-around', alignItems:'center' }}>
+          {Object.entries(SENTIMENT_CONFIG).map(([key, cfg]) => (
+            <button key={key} onClick={() => onSelect(key)}
+              style={{ background:'none', border:'2px solid transparent', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:10, padding:'14px 18px', borderRadius:20, transition:'all 0.15s' }}
+              onMouseEnter={e => { e.currentTarget.style.background = cfg.bg; e.currentTarget.style.borderColor = cfg.border }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.borderColor = 'transparent' }}>
+              <FaceSVG type={key} size={80} />
+              <span style={{ fontSize:15, fontWeight:800, color:cfg.color }}>{cfg.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDone }) {
+  const cfg = SENTIMENT_CONFIG[sentiment]
+  const [foodRating, setFoodRating] = useState(null)
+  const [serviceRating, setServiceRating] = useState(null)
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
   const [mobile, setMobile] = useState('')
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
-  const [errors, setErrors] = useState({})
 
-  const MOOD = { 5:'Excellent! 🎉', 4:'Great! 😊', 3:'Good 👍', 2:'Could be better 😐', 1:'Poor 😞' }
-  const MOOD_COLOR = { 5:'#16A34A', 4:'#16A34A', 3:'#D97706', 2:'#D97706', 1:'#DC2626' }
-
-  function Stars({ value, hover, onSet, onHover, size=36 }) {
+  function FaceRow({ label, value, onChange }) {
     return (
-      <div style={{ display:'flex', gap:6 }}>
-        {[1,2,3,4,5].map(s => (
-          <button key={s} onClick={() => onSet(s)} onMouseEnter={() => onHover(s)} onMouseLeave={() => onHover(0)}
-            style={{ background:'none', border:'none', fontSize:size, cursor:'pointer', transition:'transform 0.15s', transform:(hover||value)>=s?'scale(1.2)':'scale(1)', filter:(hover||value)>=s?'none':'grayscale(1) opacity(0.3)', padding:0 }}>⭐</button>
-        ))}
+      <div style={{ marginBottom:18 }}>
+        <div style={{ fontWeight:700, fontSize:14, color:'#444', marginBottom:10 }}>{label}</div>
+        <div style={{ display:'flex', gap:12, justifyContent:'center' }}>
+          {Object.entries(SENTIMENT_CONFIG).map(([key, c]) => (
+            <button key={key} onClick={() => onChange(key)}
+              style={{ background: value===key ? c.bg : '#F9F9F9', border:'2px solid', borderColor: value===key ? c.border : '#E5E7EB', borderRadius:16, padding:'10px 14px', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:6, transition:'all 0.15s', flex:1 }}>
+              <FaceSVG type={key} size={36} />
+              <span style={{ fontSize:11, fontWeight:700, color: value===key ? c.color : '#888' }}>{c.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
     )
   }
 
   async function submit() {
-    if (!rating) { setErrors({ rating:'Please select a rating' }); return }
     setSubmitting(true)
     try {
-      // Safe payload with table_number stored directly
+      const sentimentToRating = { excellent: 5, good: 3, average: 2 }
       const payload = {
-        event_id:             eventData?.id || null,
-        table_number:         tableData?.table_number || null,
-        rating,
-        food_rating:          food || null,
-        service_rating:       service || null,
-        app_experience_rating: appExp || null,
-        guest_name:           name.trim() || null,
-        guest_email:          email.trim() || null,
-        guest_mobile:         mobile.trim() || null,
-        comment:              comment.trim() || null,
+        event_id:       eventData?.id || null,
+        table_number:   tableData?.table_number || null,
+        rating:         sentimentToRating[sentiment] || 3,
+        food_rating:    foodRating ? sentimentToRating[foodRating] : null,
+        service_rating: serviceRating ? sentimentToRating[serviceRating] : null,
+        guest_name:     name.trim() || null,
+        guest_mobile:   mobile.trim() || null,
+        comment:        comment.trim() || null,
+        sentiment:      sentiment,
       }
-      // Only add order_id if valid UUID (not offline-)
-      if (orderId && !orderId.startsWith('offline-')) {
-        payload.order_id = orderId
-      }
-      const { data: inserted, error } = await supabase
-        .from('feedback').insert(payload).select()
+      if (orderId && !orderId.startsWith('offline-')) payload.order_id = orderId
+      const { error } = await supabase.from('feedback').insert(payload)
       if (error) {
-        console.error('Feedback INSERT error:', JSON.stringify(error))
-        // Try minimal fallback — just rating + event_id
-        const { error: err2 } = await supabase
-          .from('feedback').insert({ event_id: eventData?.id||null, rating })
-        if (err2) {
-          console.error('Feedback fallback error:', JSON.stringify(err2))
-        } else {
-          console.log('Feedback saved via fallback (minimal)')
-        }
-      } else {
-        console.log('Feedback saved:', inserted)
+        console.error('Feedback INSERT error:', error.message)
+        // Fallback without sentiment column (if column not yet added)
+        const fallback = { ...payload }
+        delete fallback.sentiment
+        const { error: err2 } = await supabase.from('feedback').insert(fallback)
+        if (err2) console.error('Feedback fallback error:', err2.message)
       }
       setSubmitted(true)
-      setTimeout(() => onClose(), 3500)
+      setTimeout(() => onDone(), 2800)
     } catch(e) {
-      console.error('Feedback submit exception:', e)
+      console.error('Feedback exception:', e)
       setSubmitted(true)
-      setTimeout(() => onClose(), 3500)
+      setTimeout(() => onDone(), 2800)
     } finally {
       setSubmitting(false)
     }
   }
 
   if (submitted) return (
-    <div style={{ position:'fixed', inset:0, background:'linear-gradient(160deg,#2A1B2E,#4A2340,#8E2A5C)', zIndex:100, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24, textAlign:'center' }}>
-      <div style={{ fontSize:80, marginBottom:20 }}>🙏</div>
-      <h2 style={{ color:'#fff', fontSize:28, fontWeight:800, marginBottom:12 }}>Thank You!</h2>
-      <p style={{ color:'rgba(255,255,255,0.75)', fontSize:16, lineHeight:1.6, maxWidth:280, marginBottom:16 }}>Your feedback means a lot to us. We hope you had a wonderful experience!</p>
-      <div style={{ display:'flex', gap:2, marginBottom:24 }}>
-        {[...Array(rating)].map((_,i) => <span key={i} style={{ fontSize:36 }}>⭐</span>)}
-      </div>
-      <p style={{ color:'rgba(255,255,255,0.4)', fontSize:13 }}>Returning to home screen...</p>
+    <div style={{ position:'fixed', inset:0, background:'linear-gradient(160deg,#1A0A0A,#3A1A2E)', zIndex:100, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24, textAlign:'center' }}>
+      <div style={{ marginBottom:20 }}><FaceSVG type={sentiment} size={100} /></div>
+      <h2 style={{ color:'#fff', fontSize:26, fontWeight:800, marginBottom:10 }}>Thank You!</h2>
+      <p style={{ color:'rgba(255,255,255,0.7)', fontSize:15, lineHeight:1.6, maxWidth:260 }}>Your feedback helps us serve you better!</p>
     </div>
   )
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', zIndex:100, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-      <div style={{ background:'#fff', borderRadius:'24px 24px 0 0', padding:'24px 24px 48px', width:'100%', maxWidth:500, maxHeight:'92vh', overflowY:'auto' }}>
-        <div style={{ width:40, height:4, background:'#E8E0F0', borderRadius:999, margin:'0 auto 20px' }}></div>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
-          <h3 style={{ fontSize:20, fontWeight:800 }}>Share Your Experience</h3>
-          <button onClick={onClose} style={{ background:'none', border:'none', fontSize:22, color:'#999', cursor:'pointer' }}>✕</button>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:100, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+      <div style={{ background:'#fff', borderRadius:'28px 28px 0 0', width:'100%', maxWidth:520, maxHeight:'92vh', display:'flex', flexDirection:'column' }}>
+        <div style={{ padding:'20px 24px 0', flexShrink:0 }}>
+          <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 16px' }} />
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+            <h3 style={{ fontSize:18, fontWeight:800, margin:0 }}>Your Feedback</h3>
+            <button onClick={onClose} style={{ background:'#F5F5F5', border:'none', borderRadius:999, width:34, height:34, fontSize:18, color:'#888', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
+          </div>
+          <div style={{ display:'inline-flex', alignItems:'center', gap:8, background:cfg.bg, border:'1.5px solid '+cfg.border, borderRadius:999, padding:'6px 14px', marginBottom:16 }}>
+            <FaceSVG type={sentiment} size={22} />
+            <span style={{ fontWeight:800, fontSize:14, color:cfg.color }}>{cfg.label}</span>
+          </div>
         </div>
-        <p style={{ fontSize:13, color:'#888', marginBottom:20 }}>Your feedback helps us serve you better</p>
-
-        <div style={{ marginBottom:20 }}>
-          <div style={{ fontWeight:700, fontSize:14, marginBottom:10 }}>Overall Rating *</div>
-          <Stars value={rating} hover={hoverRating} onSet={setRating} onHover={setHoverRating} size={40} />
-          {rating > 0 && <div style={{ marginTop:8, fontSize:14, fontWeight:700, color:MOOD_COLOR[rating] }}>{MOOD[rating]}</div>}
-          {errors.rating && <div style={{ color:'#DC2626', fontSize:12, marginTop:4 }}>{errors.rating}</div>}
+        <div style={{ flex:1, overflowY:'auto', padding:'0 24px' }}>
+          <FaceRow label="Food Experience" value={foodRating} onChange={setFoodRating} />
+          <FaceRow label="How Was The Service?" value={serviceRating} onChange={setServiceRating} />
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontWeight:700, fontSize:14, color:'#444', marginBottom:8 }}>Your Name (optional)</div>
+            <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name"
+              style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }} />
+          </div>
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontWeight:700, fontSize:14, color:'#444', marginBottom:8 }}>Mobile (optional)</div>
+            <input value={mobile} onChange={e=>setMobile(e.target.value)} placeholder="Mobile number" type="tel"
+              style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }} />
+          </div>
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontWeight:700, fontSize:14, color:'#444', marginBottom:8 }}>Comments (optional)</div>
+            <textarea value={comment} onChange={e=>setComment(e.target.value)} placeholder="Tell us about your experience..."
+              style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', resize:'none', height:72, boxSizing:'border-box' }} />
+          </div>
         </div>
-
-        <div style={{ background:'#f9f9f9', borderRadius:14, padding:14, marginBottom:20 }}>
-          <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>Rate by Category</div>
-          {[
-              ['🍛 Food Quality', food, hf, setFood, setHf],
-              ['⚡ Service Speed', service, hs, setService, setHs],
-              ['📱 App Ease of Use', appExp, happ, setAppExp, setHapp],
-            ].map(([label,val,hov,setVal,setHov]) => (
-            <div key={label} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 0', borderBottom:'1px solid #eee' }}>
-              <span style={{ fontSize:13, fontWeight:600 }}>{label}</span>
-              <Stars value={val} hover={hov} onSet={setVal} onHover={setHov} size={22} />
-            </div>
-          ))}
-        </div>
-
-        <div style={{ marginBottom:16 }}>
-          <div style={{ fontWeight:700, fontSize:14, marginBottom:10 }}>Your Details (optional)</div>
-          {[['name','Your name','text',name,setName],['email','Email address','email',email,setEmail],['mobile','Mobile number','tel',mobile,setMobile]].map(([key,ph,type,val,set]) => (
-            <input key={key} value={val} onChange={e=>set(e.target.value)} placeholder={ph} type={type}
-              style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', boxSizing:'border-box', marginBottom:8 }} />
-          ))}
-        </div>
-
-        <div style={{ marginBottom:24 }}>
-          <div style={{ fontWeight:700, fontSize:14, marginBottom:10 }}>Comments</div>
-          <textarea value={comment} onChange={e=>setComment(e.target.value)} placeholder="Tell us about your experience..."
-            style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:12, padding:'12px 16px', fontSize:14, fontFamily:'Manrope', outline:'none', resize:'none', height:80, boxSizing:'border-box' }} />
-        </div>
-
-        <div style={{ display:'flex', gap:10 }}>
-          <button onClick={onClose} style={{ flex:1, background:'#f5f5f5', border:'none', borderRadius:14, padding:'16px', fontSize:15, fontWeight:700, color:'#888' }}>Skip</button>
-          <button onClick={submit} disabled={submitting} style={{ flex:2, background:submitting?'#999':'#1a0a0a', color:'#E8890C', border:'none', borderRadius:14, padding:'16px', fontSize:15, fontWeight:800, cursor:submitting?'wait':'pointer' }}>
-            {submitting?'Submitting...':'Submit Feedback →'}
+        <div style={{ padding:'12px 24px 32px', flexShrink:0, borderTop:'1px solid #F0F0F0', display:'flex', gap:10 }}>
+          <button onClick={onClose} style={{ flex:1, background:'#F5F5F5', border:'none', borderRadius:14, padding:'15px', fontSize:15, fontWeight:700, color:'#888', cursor:'pointer' }}>Skip</button>
+          <button onClick={submit} disabled={submitting}
+            style={{ flex:2, background:submitting?'#999':'#1A0A0A', color:'#E8890C', border:'none', borderRadius:14, padding:'15px', fontSize:15, fontWeight:800, cursor:submitting?'wait':'pointer' }}>
+            {submitting ? 'Submitting...' : 'Submit →'}
           </button>
         </div>
       </div>
     </div>
   )
+}
+
+export default function FeedbackModal({ orderId, tableData, eventData, onClose }) {
+  const [step, setStep] = useState('picker')
+  const [sentiment, setSentiment] = useState(null)
+  function handleFaceSelect(s) { setSentiment(s); setStep('form') }
+  if (step === 'picker') return <FacePicker onSelect={handleFaceSelect} onClose={onClose} />
+  return <DetailedForm sentiment={sentiment} orderId={orderId} tableData={tableData} eventData={eventData} onClose={onClose} onDone={onClose} />
 }

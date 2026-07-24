@@ -131,12 +131,6 @@ export default function EventManager({ onEventChange }) {
 
   async function createEvent() {
     if (!newEvent.name||!newEvent.date) { alert('Event name and date are required'); return }
-    // Check for duplicate event name
-    const { data: existing } = await supabase.from('events').select('id').ilike('name', newEvent.name.trim()).limit(1)
-    if (existing?.length) {
-      alert('An event named "' + newEvent.name.trim() + '" already exists. Please use a different name.')
-      return
-    }
     setSaving(true)
     try {
       // Upload logo if file selected
@@ -419,34 +413,12 @@ export default function EventManager({ onEventChange }) {
                 {/* ── BANNER IMAGE (3rd carousel panel background) ── */}
                 <div style={{ marginBottom:20 }}>
                   <div style={{ fontWeight:700, fontSize:13, color:'var(--ink2)', marginBottom:6, textTransform:'uppercase', letterSpacing:'0.5px' }}>Banner Image <span style={{ color:'#888', fontWeight:500, textTransform:'none' }}>(optional — shows behind welcome note)</span></div>
-                  {newEvent.banner_image_url && (
-                    <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8, background:'#fff', borderRadius:8, padding:'6px 10px', border:'1px solid var(--line)' }}>
-                      <img src={newEvent.banner_image_url} style={{ width:60, height:36, objectFit:'cover', borderRadius:6 }} onError={e=>e.target.style.display='none'} />
-                      <span style={{ fontSize:12, color:'#16A34A', fontWeight:600, flex:1 }}>✅ Banner image set</span>
-                      <button type="button" onClick={()=>setNewEvent(p=>({...p,banner_image_url:''}))} style={{ background:'none', border:'none', color:'#DC2626', fontSize:11, cursor:'pointer', fontWeight:600 }}>Remove</button>
-                    </div>
-                  )}
-                  <div style={{ display:'flex', gap:8, marginBottom:4 }}>
-                    <label style={{ flex:1, background:'var(--ink)', color:'#fff', borderRadius:8, padding:'8px', fontSize:12, fontWeight:700, cursor:'pointer', textAlign:'center' }}>
-                      📷 Upload Image
-                      <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display:'none' }} onChange={async e=>{
-                        const file = e.target.files[0]; if (!file) return
-                        const ext = file.name.split('.').pop()
-                        const fname = Date.now()+'-banner.'+ext
-                        const { data, error } = await supabase.storage.from('smartserve').upload('catering-logos/'+fname, file, { upsert:true })
-                        if (!error) {
-                          const { data: pub } = supabase.storage.from('smartserve').getPublicUrl('catering-logos/'+fname)
-                          setNewEvent(p=>({...p,banner_image_url:pub.publicUrl}))
-                        }
-                      }} />
-                    </label>
-                    <input
-                      value={newEvent.banner_image_url}
-                      onChange={e=>setNewEvent(p=>({...p,banner_image_url:e.target.value}))}
-                      placeholder="or paste image URL"
-                      style={{ flex:2, border:'1.5px solid var(--line)', borderRadius:8, padding:'8px 10px', fontSize:12, fontFamily:'Manrope', outline:'none' }} />
-                  </div>
-                  <div style={{ fontSize:11, color:'#999' }}>JPG, PNG · Recommended: 800×200px landscape</div>
+                  <input
+                    value={newEvent.banner_image_url}
+                    onChange={e=>setNewEvent(p=>({...p,banner_image_url:e.target.value}))}
+                    placeholder="https://example.com/banner.jpg or paste image URL"
+                    style={INP} />
+                  <div style={{ fontSize:11, color:'#999', marginTop:3 }}>JPG, PNG · Recommended: 800×200px landscape</div>
                 </div>
 
                 {/* Video */}
@@ -689,48 +661,6 @@ export default function EventManager({ onEventChange }) {
                   <input defaultValue={ev.catering_logo_url||''} key={'cl'+ev.id}
                     onBlur={async e=>{ if(e.target.value.trim()&&e.target.value!==ev.catering_logo_url){ await updateEventField(ev.id,'catering_logo_url',e.target.value.trim()||null) } }}
                     placeholder="or paste URL" style={{ flex:2, border:'1.5px solid var(--line)', borderRadius:8, padding:'8px 10px', fontSize:12, fontFamily:'Manrope', outline:'none' }} />
-                </div>
-              </div>
-
-              {/* Welcome Note + Banner Image edit */}
-              <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
-                <div style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', marginBottom:10, textTransform:'uppercase' }}>🎉 Welcome Note & Banner</div>
-                <div style={{ marginBottom:10 }}>
-                  <label style={LBL}>Welcome Note (max 60 chars — shows on guest tablet banner)</label>
-                  <input defaultValue={ev.welcome_note||''} key={'wn'+ev.id}
-                    maxLength={60}
-                    onBlur={async e=>{ await updateEventField(ev.id,'welcome_note',e.target.value.trim()||null) }}
-                    placeholder="e.g. Azeem Weds Neha · Sayyed Family Welcomes You!"
-                    style={{ ...INP, fontSize:13 }} />
-                </div>
-                <div>
-                  <label style={LBL}>Banner Image (optional — shows on 3rd carousel panel)</label>
-                  {ev.banner_image_url && (
-                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6, background:'#fff', borderRadius:8, padding:'5px 10px', border:'1px solid var(--line)' }}>
-                      <img src={ev.banner_image_url} style={{ width:60, height:36, objectFit:'cover', borderRadius:6 }} onError={e=>e.target.style.display='none'} />
-                      <span style={{ fontSize:12, color:'#16A34A', flex:1 }}>✅ Banner set</span>
-                      <button onClick={async()=>updateEventField(ev.id,'banner_image_url',null)} style={{ background:'none', border:'none', color:'#DC2626', fontSize:11, cursor:'pointer', fontWeight:600 }}>Remove</button>
-                    </div>
-                  )}
-                  <div style={{ display:'flex', gap:8 }}>
-                    <label style={{ flex:1, background:'var(--ink)', color:'#fff', borderRadius:8, padding:'8px', fontSize:12, fontWeight:700, cursor:'pointer', textAlign:'center' }}>
-                      📷 Upload
-                      <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display:'none' }} onChange={async e=>{
-                        const file = e.target.files[0]; if (!file) return
-                        const ext = file.name.split('.').pop()
-                        const fname = Date.now()+'-banner.'+ext
-                        const { data, error } = await supabase.storage.from('smartserve').upload('catering-logos/'+fname, file, { upsert:true })
-                        if (!error) {
-                          const { data: pub } = supabase.storage.from('smartserve').getPublicUrl('catering-logos/'+fname)
-                          await updateEventField(ev.id,'banner_image_url',pub.publicUrl)
-                        }
-                      }} />
-                    </label>
-                    <input defaultValue={ev.banner_image_url||''} key={'bi'+ev.id}
-                      onBlur={async e=>{ await updateEventField(ev.id,'banner_image_url',e.target.value.trim()||null) }}
-                      placeholder="or paste image URL"
-                      style={{ flex:2, border:'1.5px solid var(--line)', borderRadius:8, padding:'8px 10px', fontSize:12, fontFamily:'Manrope', outline:'none' }} />
-                  </div>
                 </div>
               </div>
 

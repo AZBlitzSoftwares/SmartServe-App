@@ -70,7 +70,17 @@ export default function SupervisorApp() {
     return () => clearInterval(interval)
   }, [eventData])
 
-  useEffect(() => { if (authed) loadEvents() }, [authed])
+  useEffect(() => {
+    if (!authed) return
+    // Suppress browser back button in supervisor kiosk mode
+    window.history.pushState({ kiosk: true }, '')
+    const handlePop = () => window.history.pushState({ kiosk: true }, '')
+    window.addEventListener('popstate', handlePop)
+    loadEvents()
+    // Silent poll every 30s so new events appear without logout/login
+    const poll = setInterval(() => loadEvents(), 30000)
+    return () => { clearInterval(poll); window.removeEventListener('popstate', handlePop) }
+  }, [authed])
 
   async function loadEvents() {
     const { data } = await supabase.from('events').select('*').order('created_at', { ascending:false })
@@ -93,7 +103,6 @@ export default function SupervisorApp() {
 
   const TABS = [
     { id:'kot',     label:'Orders',   emoji:'🎫', badge:orderCount },
-    { id:'sos',     label:'Requests', emoji:'🆘', badge:sosCount },
     { id:'menu',    label:'Menu',     emoji:'📋', badge:0 },
     { id:'reports', label:'Reports',  emoji:'📊', badge:0 },
     { id:'feedback', label:'Feedback', emoji:'⭐', badge:0 },
@@ -151,7 +160,7 @@ export default function SupervisorApp() {
                 Table {newAlert.tables?.table_number} · {new Date(newAlert.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
               </div>
             </div>
-            <button onClick={() => { clearAlert(); setActiveTab('sos') }} style={{ background:'#fff', color:'#DC2626', border:'none', borderRadius:10, padding:'10px 18px', fontSize:13, fontWeight:800, cursor:'pointer' }}>
+            <button onClick={() => { clearAlert(); setActiveTab('kot') }} style={{ background:'#fff', color:'#DC2626', border:'none', borderRadius:10, padding:'10px 18px', fontSize:13, fontWeight:800, cursor:'pointer' }}>
               View →
             </button>
             <button onClick={clearAlert} style={{ background:'rgba(255,255,255,0.2)', border:'none', borderRadius:8, padding:'8px 12px', color:'#fff', fontSize:18, cursor:'pointer', lineHeight:1 }}>✕</button>
@@ -241,7 +250,6 @@ export default function SupervisorApp() {
       {/* ── CONTENT ── */}
       <div style={{ padding:'16px' }}>
         {activeTab==='kot'     && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={(order) => { setNewOrderAlert(order); setOrderCount(c=>c+1) }} />}
-        {activeTab==='sos'     && <SOSRequests eventData={eventData} onSosCountChange={setSosCount} />}
         {activeTab==='menu'    && <MenuManager eventData={eventData} />}
         {activeTab==='reports' && <ReportsDashboard eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='feedback' && <FeedbackReport eventData={eventData} />}

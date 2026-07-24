@@ -25,6 +25,12 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
   const [events, setEvents] = useState([])
   const [showEventPicker, setShowEventPicker] = useState(false)
   const [loadingEvents, setLoadingEvents] = useState(false)
+  const [showTablePicker, setShowTablePicker] = useState(false)
+  const [tablePinInput, setTablePinInput] = useState('')
+  const [tablePinError, setTablePinError] = useState('')
+  const [pinVerified, setPinVerified] = useState(false)
+  const [selectedTableNum, setSelectedTableNum] = useState(null)
+  const [supervisorPins, setSupervisorPins] = useState([])
 
   useEffect(() => {
     if (videoRef.current && eventData?.video_url) {
@@ -32,6 +38,45 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
       videoRef.current.play().catch(()=>{})
     }
   }, [eventData?.video_url])
+
+  async function openTablePicker() {
+    setShowTablePicker(true); setTablePinInput(''); setTablePinError(''); setPinVerified(false); setSelectedTableNum(null)
+    // Load supervisor PINs for this event
+    if (eventData?.id) {
+      const { data } = await supabase.from('supervisors').select('pin').eq('event_id', eventData.id).eq('is_active', true)
+      setSupervisorPins((data||[]).map(s=>s.pin))
+    }
+  }
+
+  function verifyPin() {
+    if (supervisorPins.includes(tablePinInput.trim())) {
+      setPinVerified(true); setTablePinError('')
+    } else {
+      setTablePinError('Incorrect PIN. Please ask your supervisor.')
+    }
+  }
+
+  async function claimTable(tNum) {
+    if (!eventData?.id) return
+    // Check if table is already active on another device
+    const { data: existing } = await supabase.from('tables')
+      .select('id, table_number').eq('event_id', eventData.id).eq('table_number', tNum).limit(1)
+    if (existing?.length) {
+      // Table record exists — check if it has recent activity (order in last 2 hours)
+      const { data: recentOrders } = await supabase.from('orders')
+        .select('id').eq('table_id', existing[0].id)
+        .in('status', ['pending','placed','in_progress'])
+        .limit(1)
+      if (recentOrders?.length) {
+        if (!confirm('Table ' + tNum + ' has an active order. Are you sure you want to switch to this table?')) return
+      }
+    }
+    // Save to localStorage and reload
+    const key = 'ss_event_table_' + tNum
+    localStorage.setItem(key, JSON.stringify(eventData))
+    // Navigate to new table URL
+    window.location.href = '/tablet/' + tNum
+  }
 
   async function openEventPicker() {
     setShowEventPicker(true); setLoadingEvents(true)
@@ -140,6 +185,11 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
             🔄 Change Event
           </button>
         )}
+        {eventData && (
+          <button onClick={openTablePicker} style={{ marginTop:10,background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.2)',borderRadius:999,padding:'8px 22px',fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.6)',cursor:'pointer' }}>
+            🔢 Change Table
+          </button>
+        )}
 
         {/* Instagram QR footer strip */}
         <div style={{ marginTop:28, display:'flex', alignItems:'center', justifyContent:'center', gap:16,
@@ -170,6 +220,57 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
         </div>
 
       </div>
+
+      {showTablePicker && (
+        <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.9)',zIndex:100,display:'flex',alignItems:'flex-end' }} onClick={()=>setShowTablePicker(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ width:'100%',background:'#1a1a2e',borderRadius:'24px 24px 0 0',padding:'24px 20px 48px',maxHeight:'85vh',overflowY:'auto' }}>
+            <div style={{ width:40,height:4,background:'rgba(255,255,255,0.2)',borderRadius:999,margin:'0 auto 20px' }}></div>
+            <h3 style={{ color:'#fff',fontSize:20,fontWeight:800,marginBottom:4,textAlign:'center' }}>🔢 Change Table</h3>
+
+            {!pinVerified ? (
+              <div style={{ maxWidth:320, margin:'0 auto', marginTop:16 }}>
+                <p style={{ color:'rgba(255,255,255,0.6)',fontSize:13,textAlign:'center',marginBottom:20 }}>Enter supervisor PIN to change table</p>
+                <input
+                  value={tablePinInput}
+                  onChange={e=>setTablePinInput(e.target.value)}
+                  onKeyDown={e=>e.key==='Enter'&&verifyPin()}
+                  placeholder="Enter PIN"
+                  type="password"
+                  maxLength={6}
+                  style={{ width:'100%',background:'rgba(255,255,255,0.1)',border:'1.5px solid rgba(255,255,255,0.2)',borderRadius:12,padding:'14px 18px',fontSize:18,color:'#fff',textAlign:'center',letterSpacing:8,fontWeight:800,outline:'none',boxSizing:'border-box',marginBottom:10 }} />
+                {tablePinError && <div style={{ color:'#FC8181',fontSize:13,textAlign:'center',marginBottom:10 }}>{tablePinError}</div>}
+                <button onClick={verifyPin} style={{ width:'100%',background:'#E8890C',color:'#fff',border:'none',borderRadius:12,padding:'14px',fontSize:16,fontWeight:800,cursor:'pointer' }}>
+                  Verify PIN →
+                </button>
+              </div>
+            ) : (
+              <div style={{ marginTop:16 }}>
+                <p style={{ color:'rgba(255,255,255,0.6)',fontSize:13,textAlign:'center',marginBottom:16 }}>
+                  Select table for this device · {eventData?.number_of_tables||'?'} tables in this event
+                </p>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10 }}>
+                  {Array.from({ length: eventData?.number_of_tables||0 }, (_,i)=>i+1).map(tNum => {
+                    const currentTable = parseInt(window.location.pathname.split('/').pop())
+                    const isCurrent = tNum === currentTable
+                    return (
+                      <button key={tNum} onClick={()=>claimTable(tNum)}
+                        style={{ background: isCurrent?'#E8890C':'rgba(255,255,255,0.08)', border:'1.5px solid', borderColor: isCurrent?'#E8890C':'rgba(255,255,255,0.2)', borderRadius:12, padding:'16px 8px', color:'#fff', fontSize:20, fontWeight:900, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
+                        {tNum}
+                        {isCurrent && <span style={{ fontSize:9, color:'#fff', fontWeight:600, opacity:0.8 }}>CURRENT</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            <button onClick={()=>setShowTablePicker(false)}
+              style={{ width:'100%',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:14,padding:'14px',color:'rgba(255,255,255,0.5)',fontSize:14,cursor:'pointer',marginTop:20 }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {showEventPicker && (
         <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',zIndex:100,display:'flex',alignItems:'flex-end' }} onClick={()=>setShowEventPicker(false)}>

@@ -105,12 +105,45 @@ ${data.fb.length>0?'<h2>Guest Feedback</h2><table><tr><th>Name</th><th>Rating</t
     w.document.close(); w.focus(); setTimeout(()=>{ w.print(); w.close() },400)
   }
 
-  function exportCSV() {
+  async function exportCSV() {
     if (!data) return
-    const rows = [['Table','Waiter','Orders','Items','Delivered','Cancelled']]
-    data.tableStats.forEach(t => rows.push([t.table, t.waiter||'', t.orders, t.items, t.delivered, t.cancelled]))
-    const blob = new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'})
-    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download=(eventData?.name||'report')+'.csv'; a.click(); URL.revokeObjectURL(url)
+    // Fetch full order details for rich export
+    const { data: orders } = await supabase
+      .from('orders')
+      .select('id,status,created_at,delivered_at,assigned_at,tables(table_number),waiters(name),order_items(quantity,menu_items(name,is_veg,is_live_counter))')
+      .eq('event_id', selectedEventId)
+      .order('created_at', { ascending: true })
+
+    const rows = [['Order ID','Table No','Waiter','Status','Item Name','Veg/Non-Veg','Live Counter','Qty','Order Time','Delivered Time','Duration (mins)']]
+    ;(orders||[]).forEach(o => {
+      const tableNum = o.tables?.table_number || ''
+      const waiter = o.waiters?.name || ''
+      const orderTime = o.created_at ? new Date(o.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true}) : ''
+      const deliveredTime = o.delivered_at ? new Date(o.delivered_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true}) : ''
+      const duration = (o.delivered_at && o.assigned_at) ? Math.round((new Date(o.delivered_at)-new Date(o.assigned_at))/60000) : ''
+      const orderId = '#'+o.id.slice(-6).toUpperCase()
+      if (o.order_items?.length) {
+        o.order_items.forEach(oi => {
+          rows.push([
+            orderId, tableNum, waiter, o.status,
+            oi.menu_items?.name||'',
+            oi.menu_items?.is_veg ? 'Veg' : 'Non-Veg',
+            oi.menu_items?.is_live_counter ? 'Yes' : 'No',
+            oi.quantity,
+            orderTime, deliveredTime, duration
+          ])
+        })
+      } else {
+        rows.push([orderId, tableNum, waiter, o.status, '', '', '', '', orderTime, deliveredTime, duration])
+      }
+    })
+
+    const csv = rows.map(r => r.map(v => '"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n')
+    const blob = new Blob([csv],{type:'text/csv'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href=url
+    a.download=(eventData?.name||'report')+'_detailed_'+new Date().toISOString().slice(0,10)+'.csv'
+    a.click(); URL.revokeObjectURL(url)
   }
 
   const CARDS = data ? [
