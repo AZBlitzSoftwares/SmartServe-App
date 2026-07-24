@@ -48,26 +48,43 @@ export default function SupervisorApp() {
     setSosCount(openRequests.length)
   }, [openRequests])
 
-  // Order alert — poll for new pending orders
+  // Order alert — fires when a new order arrives (tracks by latest order ID)
+  const lastSeenOrderId = useRef(null)
+  const initialLoad = useRef(true)
+
   useEffect(() => {
     if (!eventData) return
+
     async function checkOrders() {
       const { data } = await supabase.from('orders')
         .select('id, created_at, status, tables(table_number)')
         .eq('event_id', eventData.id)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'placed'])
         .order('created_at', { ascending: false })
         .limit(1)
-      const count = data?.length || 0
-      if (prevOrderCount.current >= 0 && count > prevOrderCount.current && data?.[0]) {
-        setNewOrderAlert(data[0])
-        // alert stays until dismissed manually
+
+      const latest = data?.[0]
+      if (!latest) return
+
+      if (initialLoad.current) {
+        lastSeenOrderId.current = latest.id
+        initialLoad.current = false
+        return
       }
-      prevOrderCount.current = count
+
+      if (latest.id !== lastSeenOrderId.current) {
+        lastSeenOrderId.current = latest.id
+        setNewOrderAlert(latest)
+      }
     }
+
     checkOrders()
-    const interval = setInterval(checkOrders, 4000)
-    return () => clearInterval(interval)
+    const interval = setInterval(checkOrders, 3000)
+    return () => {
+      clearInterval(interval)
+      initialLoad.current = true
+      lastSeenOrderId.current = null
+    }
   }, [eventData])
 
   useEffect(() => {
