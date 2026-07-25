@@ -31,12 +31,6 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
   const [pinVerified, setPinVerified] = useState(false)
   const [selectedTableNum, setSelectedTableNum] = useState(null)
   const [supervisorPins, setSupervisorPins] = useState([])
-  const [showTablePicker, setShowTablePicker] = useState(false)
-  const [tablePinInput, setTablePinInput] = useState('')
-  const [tablePinError, setTablePinError] = useState('')
-  const [pinVerified, setPinVerified] = useState(false)
-  const [selectedTableNum, setSelectedTableNum] = useState(null)
-  const [supervisorPins, setSupervisorPins] = useState([])
 
   useEffect(() => {
     if (videoRef.current && eventData?.video_url) {
@@ -84,15 +78,7 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
     window.location.href = '/tablet/' + tNum
   }
 
-  async function openTablePicker() {
-    setShowTablePicker(true); setTablePinInput(''); setTablePinError(''); setPinVerified(false); setSelectedTableNum(null)
-    // Load supervisor PINs for this event
-    if (eventData?.id) {
-      const { data } = await supabase.from('supervisors').select('pin').eq('event_id', eventData.id).eq('is_active', true)
-      setSupervisorPins((data||[]).map(s=>s.pin))
-    }
-  }
-
+  
   function verifyPin() {
     if (supervisorPins.includes(tablePinInput.trim())) {
       setPinVerified(true); setTablePinError('')
