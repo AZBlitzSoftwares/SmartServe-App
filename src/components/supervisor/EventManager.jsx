@@ -427,7 +427,7 @@ export default function EventManager({ onEventChange }) {
                     placeholder="https://example.com/banner.jpg or paste image URL"
                     style={INP} />
                   <div style={{ fontSize:11, color:'#999', marginTop:3 }}>JPG, PNG · Recommended: 800×200px landscape</div>
-                <div style={{ display:'none' }}><!--spacer-->
+                <div style={{ display:'none' }}>
                 </div>
 
                 {/* ── WELCOME NOTE (3rd carousel panel) ── */}
