@@ -90,7 +90,8 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
         guest_name:     name.trim() || null,
         guest_mobile:   mobile.trim() || null,
         comment:        comment.trim() || null,
-        sentiment:      sentiment,
+        // sentiment column — add via SQL: ALTER TABLE feedback ADD COLUMN IF NOT EXISTS sentiment TEXT;
+        // sentiment: sentiment, // uncomment after running SQL above
       }
       if (orderId && !orderId.startsWith('offline-')) payload.order_id = orderId
       const { error } = await supabase.from('feedback').insert(payload)
