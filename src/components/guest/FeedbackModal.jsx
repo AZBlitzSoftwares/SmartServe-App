@@ -28,22 +28,20 @@ const SENTIMENT_CONFIG = {
 
 function FacePicker({ onSelect, onClose }) {
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:100, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-      <div style={{ background:'#fff', borderRadius:'28px 28px 0 0', padding:'28px 24px 48px', width:'100%', maxWidth:520 }}>
-        <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 24px' }} />
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
-          <h3 style={{ fontSize:20, fontWeight:800, color:'#1A1A1A', margin:0 }}>How was your experience?</h3>
-          <button onClick={onClose} style={{ background:'#F5F5F5', border:'none', borderRadius:999, width:34, height:34, fontSize:18, color:'#888', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
+    <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, background:'rgba(0,0,0,0.65)', zIndex:100, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
+      <div style={{ background:'#fff', borderRadius:'24px 24px 0 0', padding:'24px 20px 48px', width:'100%', boxSizing:'border-box' }}>
+        <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 20px' }} />
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+          <h3 style={{ fontSize:19, fontWeight:800, color:'#1A1A1A', margin:0 }}>How was your experience?</h3>
+          <button onClick={onClose} style={{ background:'#F5F5F5', border:'none', borderRadius:999, width:36, height:36, fontSize:20, color:'#888', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
         </div>
-        <p style={{ fontSize:14, color:'#888', marginBottom:28, marginTop:0 }}>Tap a face to share your feedback</p>
-        <div style={{ display:'flex', justifyContent:'space-around', alignItems:'center' }}>
+        <p style={{ fontSize:14, color:'#888', marginBottom:24, marginTop:0 }}>Tap a face to share your feedback</p>
+        <div style={{ display:'flex', justifyContent:'space-around', alignItems:'center', paddingBottom:8 }}>
           {Object.entries(SENTIMENT_CONFIG).map(([key, cfg]) => (
             <button key={key} onClick={() => onSelect(key)}
-              style={{ background:'none', border:'2px solid transparent', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:10, padding:'14px 18px', borderRadius:20, transition:'all 0.15s' }}
-              onMouseEnter={e => { e.currentTarget.style.background = cfg.bg; e.currentTarget.style.borderColor = cfg.border }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.borderColor = 'transparent' }}>
-              <FaceSVG type={key} size={80} />
-              <span style={{ fontSize:15, fontWeight:800, color:cfg.color }}>{cfg.label}</span>
+              style={{ background:'none', border:'2px solid transparent', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:8, padding:'12px 8px', borderRadius:16, flex:1, WebkitTapHighlightColor:'transparent' }}>
+              <FaceSVG type={key} size={72} />
+              <span style={{ fontSize:14, fontWeight:800, color:cfg.color }}>{cfg.label}</span>
             </button>
           ))}
         </div>
@@ -124,8 +122,8 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
   )
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:100, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-      <div style={{ background:'#fff', borderRadius:'28px 28px 0 0', width:'100%', maxWidth:520, maxHeight:'92vh', display:'flex', flexDirection:'column' }}>
+    <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, background:'rgba(0,0,0,0.65)', zIndex:100, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
+      <div style={{ background:'#fff', borderRadius:'24px 24px 0 0', width:'100%', maxHeight:'90vh', display:'flex', flexDirection:'column', boxSizing:'border-box' }}>
         <div style={{ padding:'20px 24px 0', flexShrink:0 }}>
           <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 16px' }} />
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>

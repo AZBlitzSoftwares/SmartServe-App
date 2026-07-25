@@ -84,22 +84,7 @@ function HeaderCarousel({ eventData, tableNumber, isOnline }) {
         )}
       </div>
 
-      {/* Instagram QR strip between carousel and table */}
-      <div style={{ display:'flex', alignItems:'center', gap:5, background:'rgba(255,255,255,0.07)', borderRadius:10, padding:'5px 7px', border:'1px solid rgba(255,255,255,0.1)', flexShrink:0, marginRight:6 }}>
-        <img src={igQrCode} alt="Instagram" style={{ width:42, height:42, borderRadius:8, objectFit:'cover', flexShrink:0 }} />
-        <div>
-          <div style={{ display:'flex', alignItems:'center', gap:3 }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
-              <defs><linearGradient id="hIG" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stopColor="#F58529"/><stop offset="50%" stopColor="#DD2A7B"/><stop offset="100%" stopColor="#515BD4"/></linearGradient></defs>
-              <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#hIG)"/>
-              <circle cx="12" cy="12" r="4.5" stroke="white" strokeWidth="1.8" fill="none"/>
-              <circle cx="17.5" cy="6.5" r="1" fill="white"/>
-            </svg>
-            <span style={{ fontSize:9, fontWeight:800, color:'#fff' }}>@janusmartserve</span>
-          </div>
-          <div style={{ fontSize:8, color:'rgba(255,255,255,0.4)', marginTop:1 }}>Scan to follow</div>
-        </div>
-      </div>
+      {/* Instagram QR strip removed — just carousel + table */}
 
       {/* Table — 20% */}
       <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3 }}>

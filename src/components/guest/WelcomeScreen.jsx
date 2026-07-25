@@ -191,31 +191,31 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
           </button>
         )}
 
-        {/* Instagram QR footer strip */}
-        <div style={{ marginTop:28, display:'flex', alignItems:'center', justifyContent:'center', gap:16,
-                      background:'rgba(255,255,255,0.07)', borderRadius:20, padding:'14px 20px',
-                      border:'1px solid rgba(255,255,255,0.12)' }}>
-          <img src={igQrCode} alt="Follow on Instagram"
-            style={{ width:68, height:68, borderRadius:12, objectFit:'cover',
-                     border:'2px solid rgba(255,255,255,0.2)', flexShrink:0 }} />
+        {/* Instagram QR footer — large scannable QR + handle */}
+        <div style={{ marginTop:28, background:'rgba(255,255,255,0.07)', borderRadius:20, padding:'16px 20px', border:'1px solid rgba(255,255,255,0.12)', display:'flex', alignItems:'center', gap:16, width:'100%', boxSizing:'border-box' }}>
+          {/* Large white-background QR for easy scanning */}
+          <div style={{ background:'#fff', borderRadius:12, padding:6, flexShrink:0 }}>
+            <img src={igQrCode} alt="Follow on Instagram"
+              style={{ width:90, height:90, display:'block', borderRadius:8, objectFit:'cover' }} />
+          </div>
           <div style={{ textAlign:'left' }}>
-            <div style={{ fontSize:11, fontWeight:600, color:'rgba(255,255,255,0.5)', letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:3 }}>Follow us on Instagram</div>
+            <div style={{ fontSize:11, fontWeight:600, color:'rgba(255,255,255,0.5)', letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:5 }}>Follow us on Instagram</div>
             <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                 <defs>
-                  <linearGradient id="igG" x1="0%" y1="100%" x2="100%" y2="0%">
+                  <linearGradient id="igG2" x1="0%" y1="100%" x2="100%" y2="0%">
                     <stop offset="0%" stopColor="#F58529"/>
                     <stop offset="50%" stopColor="#DD2A7B"/>
                     <stop offset="100%" stopColor="#515BD4"/>
                   </linearGradient>
                 </defs>
-                <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#igG)"/>
+                <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#igG2)"/>
                 <circle cx="12" cy="12" r="4.5" stroke="white" strokeWidth="1.8" fill="none"/>
                 <circle cx="17.5" cy="6.5" r="1" fill="white"/>
               </svg>
-              <span style={{ fontSize:17, fontWeight:900, color:'#fff', letterSpacing:'0.3px' }}>@janusmartserve</span>
+              <span style={{ fontSize:18, fontWeight:900, color:'#fff' }}>@janusmartserve</span>
             </div>
-            <div style={{ fontSize:11, color:'rgba(255,255,255,0.45)' }}>Scan QR to follow &amp; stay updated</div>
+            <div style={{ fontSize:12, color:'rgba(255,255,255,0.45)', lineHeight:1.4 }}>Scan QR to follow<br/>& stay updated</div>
           </div>
         </div>
 
