@@ -37,3 +37,38 @@ a { color: var(--marigold); }
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+
+/* tablet-optimized — 11-inch Android tablet (1200x1920 or similar) */
+@media screen and (min-width: 768px) {
+  /* Slightly larger base font for tablet readability */
+  body { font-size: 16px; }
+
+  /* Prevent text selection on tablet (kiosk mode) */
+  * { -webkit-user-select: none; user-select: none; }
+
+  /* Allow text selection only in inputs */
+  input, textarea { -webkit-user-select: text; user-select: text; }
+
+  /* Prevent tap highlight on Android */
+  * { -webkit-tap-highlight-color: transparent; }
+
+  /* Prevent pull-to-refresh on Android WebView */
+  body { overscroll-behavior: none; }
+}
+
+/* Full screen kiosk mode */
+html, body {
+  overscroll-behavior: none;
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+  height: 100%;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}

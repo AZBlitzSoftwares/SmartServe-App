@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { getPendingOrders, clearOrder } from '../lib/offlineQueue'
@@ -24,13 +24,56 @@ function orderKey(t) { return 'ss_order_' + t + '_' + new Date().toISOString().s
 
 const FEEDBACK_DELAY_SECONDS = 5
 
+// ── Exit Confirmation Dialog ──────────────────────────────────────────────
+function ExitConfirmDialog({ onStay, onExit }) {
+  return (
+    <div style={{
+      position:'fixed', inset:0, background:'rgba(0,0,0,0.75)',
+      zIndex:999, display:'flex', alignItems:'center', justifyContent:'center',
+      padding:'0 24px'
+    }}>
+      <div style={{
+        background:'#fff', borderRadius:24, padding:'32px 28px',
+        width:'100%', maxWidth:400, textAlign:'center',
+        boxShadow:'0 20px 60px rgba(0,0,0,0.5)'
+      }}>
+        <div style={{ fontSize:48, marginBottom:16 }}>👋</div>
+        <div style={{ fontSize:20, fontWeight:900, color:'#1A0A0A', marginBottom:8 }}>
+          Exit Smart Serve?
+        </div>
+        <div style={{ fontSize:14, color:'#888', marginBottom:28, lineHeight:1.6 }}>
+          You will lose your cart items if you exit now.
+        </div>
+        <div style={{ display:'flex', gap:12 }}>
+          <button onClick={onStay} style={{
+            flex:1, background:'#1A0A0A', color:'#fff', border:'none',
+            borderRadius:14, padding:'16px', fontSize:16, fontWeight:800,
+            cursor:'pointer'
+          }}>
+            Stay
+          </button>
+          <button onClick={onExit} style={{
+            flex:1, background:'#F5F5F5', color:'#888', border:'1.5px solid #E5E7EB',
+            borderRadius:14, padding:'16px', fontSize:16, fontWeight:700,
+            cursor:'pointer'
+          }}>
+            Exit
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function GuestApp() {
   const { tableNumber } = useParams()
   const [screen, setScreen] = useState('welcome')
   const [cart, setCart] = useState([])
   const [currentOrderId, setCurrentOrderId] = useState(() => localStorage.getItem(orderKey(tableNumber))||null)
   const [tableData, setTableData] = useState(null)
-  const [eventData, setEventData] = useState(() => { try { return JSON.parse(localStorage.getItem(eventKey(tableNumber))) } catch { return null } })
+  const [eventData, setEventData] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(eventKey(tableNumber))) } catch { return null }
+  })
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [showSOS, setShowSOS] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
@@ -38,49 +81,107 @@ export default function GuestApp() {
   const [showFeedbackBubble, setShowFeedbackBubble] = useState(false)
   const [activeEventCount, setActiveEventCount] = useState(0)
   const [showOrderConfirm, setShowOrderConfirm] = useState(false)
+  const [showExitConfirm, setShowExitConfirm] = useState(false)
+
+  // Track screen state in a ref so back handler always has current value
+  const screenRef = useRef(screen)
+  const showSOSRef = useRef(showSOS)
+  const showHistoryRef = useRef(showHistory)
+  const showFeedbackRef = useRef(showFeedback)
+  const showOrderConfirmRef = useRef(showOrderConfirm)
+  const cartCountRef = useRef(0)
+
   const orderConfirmTimer = useRef(null)
   const feedbackTimerRef = useRef(null)
   const retryRef = useRef(null)
 
-  // Always save current table number immediately on load
-  useEffect(() => {
-    if (tableNumber) {
-      localStorage.setItem('ss_last_table', tableNumber)
-    }
-  }, [tableNumber])
+  // Keep refs in sync
+  useEffect(() => { screenRef.current = screen }, [screen])
+  useEffect(() => { showSOSRef.current = showSOS }, [showSOS])
+  useEffect(() => { showHistoryRef.current = showHistory }, [showHistory])
+  useEffect(() => { showFeedbackRef.current = showFeedback }, [showFeedback])
+  useEffect(() => { showOrderConfirmRef.current = showOrderConfirm }, [showOrderConfirm])
 
-  // Back button — intercept and replace URL back to current table
+  const cartCount = cart.reduce((s,i) => s+i.quantity, 0)
+  useEffect(() => { cartCountRef.current = cartCount }, [cartCount])
+
+  // ── BACK BUTTON HANDLER ─────────────────────────────────────────────────
+  // This single handler manages ALL back button presses
+  // Works for: browser back arrow, Android hardware back, gesture swipe back
+  const handleBack = useCallback(() => {
+    const currentScreen = screenRef.current
+
+    // Priority 1: Close any open overlay first
+    if (showFeedbackRef.current) { setShowFeedback(false); return }
+    if (showSOSRef.current) { setShowSOS(false); return }
+    if (showHistoryRef.current) { setShowHistory(false); return }
+    if (showOrderConfirmRef.current) { setShowOrderConfirm(false); return }
+
+    // Priority 2: Navigate screens
+    if (currentScreen === 'status') { setScreen('menu'); return }
+
+    // Priority 3: On menu or welcome — show exit confirmation
+    if (currentScreen === 'menu' || currentScreen === 'welcome') {
+      setShowExitConfirm(true)
+      return
+    }
+  }, [])
+
+  // ── BACK BUTTON SETUP ───────────────────────────────────────────────────
   useEffect(() => {
     if (!tableNumber) return
     const currentUrl = '/tablet/' + tableNumber
-    // Replace current history entry with our table URL
-    window.history.replaceState({ kiosk: true, table: tableNumber }, '', currentUrl)
-    // Push extra entries as buffer
-    window.history.pushState({ kiosk: true, table: tableNumber }, '', currentUrl)
-    window.history.pushState({ kiosk: true, table: tableNumber }, '', currentUrl)
 
-    const handlePop = () => {
-      // Immediately navigate back to correct table URL
-      window.history.pushState({ kiosk: true, table: tableNumber }, '', currentUrl)
+    // Save table number immediately
+    localStorage.setItem('ss_last_table', tableNumber)
+
+    // Push history buffer so back button has entries to consume
+    window.history.replaceState({ kiosk: true, table: tableNumber, idx: 0 }, '', currentUrl)
+    for (let i = 1; i <= 20; i++) {
+      window.history.pushState({ kiosk: true, table: tableNumber, idx: i }, '', currentUrl)
     }
+
+    const handlePop = (e) => {
+      // Always push back so URL never changes
+      window.history.pushState({ kiosk: true, table: tableNumber }, '', currentUrl)
+      // Handle the back action in our app
+      handleBack()
+    }
+
     window.addEventListener('popstate', handlePop)
-    return () => window.removeEventListener('popstate', handlePop)
-  }, [tableNumber])
+
+    // Android WebView — also listen for native back via document keydown
+    const handleKeyDown = (e) => {
+      if (e.key === 'GoBack' || e.keyCode === 4) {
+        e.preventDefault()
+        handleBack()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('popstate', handlePop)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [tableNumber, handleBack])
 
   useEffect(() => {
-    if (currentOrderId && !currentOrderId.startsWith('offline-')) localStorage.setItem(orderKey(tableNumber), currentOrderId)
+    if (currentOrderId && !currentOrderId.startsWith('offline-')) {
+      localStorage.setItem(orderKey(tableNumber), currentOrderId)
+    }
   }, [currentOrderId, tableNumber])
 
   useEffect(() => {
     autoLoadActiveEvent()
-    // Silent background poll every 30s — picks up new events without manual refresh
     const eventPoll = setInterval(() => autoLoadActiveEvent(), 30000)
     const on = () => { setIsOnline(true); syncOfflineOrders() }
     const off = () => setIsOnline(false)
-    window.addEventListener('online', on); window.addEventListener('offline', off)
+    window.addEventListener('online', on)
+    window.addEventListener('offline', off)
     return () => {
       clearInterval(eventPoll)
-      window.removeEventListener('online', on); window.removeEventListener('offline', off)
+      window.removeEventListener('online', on)
+      window.removeEventListener('offline', off)
       if (retryRef.current) clearTimeout(retryRef.current)
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current)
       if (orderConfirmTimer.current) clearTimeout(orderConfirmTimer.current)
@@ -94,31 +195,24 @@ export default function GuestApp() {
       setActiveEventCount(active.length)
 
       if (active.length === 1) {
-        // Only 1 active event — auto-load it
         const activeEv = active[0]
         if (!eventData || eventData.id !== activeEv.id) handleEventSelect(activeEv)
         else loadEventAndTable(activeEv.id)
-
       } else if (active.length > 1) {
-        // Multiple active events — check if we have a valid cached event
+        // Multiple events — only load cached event if it is still active
         if (eventData?.id) {
           const stillActive = active.find(e => e.id === eventData.id)
-          if (stillActive) {
-            // Cached event is still valid — load it
-            loadEventAndTable(eventData.id)
-          }
-          // If cached event is no longer active, don't auto-pick — let supervisor choose
+          if (stillActive) loadEventAndTable(eventData.id)
         }
-        // If no cached event, supervisor must select via Change Event button on welcome screen
-
+        // Otherwise supervisor must select event via Change Event button
       } else if (active.length === 0) {
-        // No active events today — use cached event if available
         if (eventData?.id) loadEventAndTable(eventData.id)
       }
-    } catch(e) { if (eventData?.id) loadEventAndTable(eventData.id) }
+    } catch(e) {
+      if (eventData?.id) loadEventAndTable(eventData.id)
+    }
   }
 
-  // Watch ALL orders for this table — feedback triggers after every delivery
   useEffect(() => {
     if (!tableData?.id) return
     const sub = supabase.channel('feedback-watch-table-'+tableData.id)
@@ -136,18 +230,15 @@ export default function GuestApp() {
       const { data: ev } = await supabase.from('events').select('*').eq('id', eventId).single()
       if (ev) { setEventData(ev); localStorage.setItem(eventKey(tableNumber), JSON.stringify(ev)) }
       const tNum = parseInt(tableNumber)
-      // Try to find existing table record
       const { data: tables } = await supabase.from('tables').select('*').eq('event_id', eventId).eq('table_number', tNum).limit(1)
       if (tables?.length) {
         setTableData(tables[0])
       } else {
-        // Try insert — if it fails (RLS or duplicate), try select again
-        const { data: newTable, error: insertErr } = await supabase.from('tables')
+        const { data: newTable } = await supabase.from('tables')
           .insert({ event_id:eventId, table_number:tNum, is_active:true }).select().single()
         if (newTable) {
           setTableData(newTable)
         } else {
-          // Insert may have failed due to race — try select once more
           const { data: retry } = await supabase.from('tables').select('*').eq('event_id', eventId).eq('table_number', tNum).limit(1)
           if (retry?.length) setTableData(retry[0])
           else retryRef.current = setTimeout(()=>loadEventAndTable(eventId), 2000)
@@ -166,15 +257,31 @@ export default function GuestApp() {
     const pending = await getPendingOrders()
     for (const order of pending) {
       try {
-        const { data: newOrder } = await supabase.from('orders').insert({ event_id:order.event_id, table_id:order.table_id, status:'pending' }).select().single()
-        if (newOrder) { await supabase.from('order_items').insert(order.items.map(i=>({order_id:newOrder.id,menu_item_id:i.id,quantity:i.quantity}))); await clearOrder(order.id) }
+        const { data: newOrder } = await supabase.from('orders')
+          .insert({ event_id:order.event_id, table_id:order.table_id, status:'pending' }).select().single()
+        if (newOrder) {
+          await supabase.from('order_items').insert(order.items.map(i=>({order_id:newOrder.id,menu_item_id:i.id,quantity:i.quantity})))
+          await clearOrder(order.id)
+        }
       } catch(e) { console.error(e) }
     }
   }
 
-  function addToCart(item) { setCart(prev => { const e=prev.find(c=>c.id===item.id); if(e) return prev.map(c=>c.id===item.id?{...c,quantity:c.quantity+1}:c); return [...prev,{...item,quantity:1}] }) }
-  function removeFromCart(itemId) { setCart(prev => { const e=prev.find(c=>c.id===itemId); if(e?.quantity===1) return prev.filter(c=>c.id!==itemId); return prev.map(c=>c.id===itemId?{...c,quantity:c.quantity-1}:c) }) }
-  const cartCount = cart.reduce((s,i)=>s+i.quantity,0)
+  function addToCart(item) {
+    setCart(prev => {
+      const e = prev.find(c=>c.id===item.id)
+      if (e) return prev.map(c=>c.id===item.id?{...c,quantity:c.quantity+1}:c)
+      return [...prev,{...item,quantity:1}]
+    })
+  }
+
+  function removeFromCart(itemId) {
+    setCart(prev => {
+      const e = prev.find(c=>c.id===itemId)
+      if (e?.quantity===1) return prev.filter(c=>c.id!==itemId)
+      return prev.map(c=>c.id===itemId?{...c,quantity:c.quantity-1}:c)
+    })
+  }
 
   function handleOrderPlaced(id) {
     setCurrentOrderId(id); setCart([])
@@ -183,16 +290,78 @@ export default function GuestApp() {
     orderConfirmTimer.current = setTimeout(() => setShowOrderConfirm(false), 10000)
   }
 
+  function handleExit() {
+    setShowExitConfirm(false)
+    // Try to close the app (works in WebView/APK)
+    // In browser, go to welcome screen instead
+    if (window.Android?.closeApp) {
+      window.Android.closeApp()
+    } else if (window.webkit?.messageHandlers?.closeApp) {
+      window.webkit.messageHandlers.closeApp.postMessage('close')
+    } else {
+      // Browser fallback — go to welcome screen
+      setScreen('welcome')
+    }
+  }
+
   return (
     <div style={{ minHeight:'100vh', background:'var(--bg)', position:'relative' }}>
-      {screen==='welcome' && <WelcomeScreen tableNumber={tableNumber} onStart={()=>setScreen('menu')} eventData={eventData} onEventSelect={handleEventSelect} activeEventCount={activeEventCount} />}
-      {screen==='menu' && <MenuScreen tableData={tableData} eventData={eventData} tableNumber={tableNumber} cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} cartCount={cartCount} isOnline={isOnline} onShowSOS={()=>setShowSOS(true)} onShowHistory={()=>setShowHistory(true)} onShowStatus={()=>setScreen('status')} currentOrderId={currentOrderId} showFeedbackBubble={showFeedbackBubble} onFeedbackBubbleClick={()=>{ setShowFeedbackBubble(false); setShowFeedback(true) }} onShowFeedback={()=>setShowFeedback(true)} />}
-      {screen==='status' && <OrderStatus orderId={currentOrderId} tableNumber={tableNumber} onBack={()=>setScreen('menu')} />}
-      {cartCount>0 && screen==='menu' && <CartDrawer cart={cart} tableData={tableData} eventData={eventData} isOnline={isOnline} onOrderPlaced={handleOrderPlaced} onRemove={removeFromCart} onAdd={addToCart} />}
+
+      {screen==='welcome' && (
+        <WelcomeScreen
+          tableNumber={tableNumber}
+          onStart={()=>setScreen('menu')}
+          eventData={eventData}
+          onEventSelect={handleEventSelect}
+          activeEventCount={activeEventCount}
+        />
+      )}
+
+      {screen==='menu' && (
+        <MenuScreen
+          tableData={tableData}
+          eventData={eventData}
+          tableNumber={tableNumber}
+          cart={cart}
+          addToCart={addToCart}
+          removeFromCart={removeFromCart}
+          cartCount={cartCount}
+          isOnline={isOnline}
+          onShowSOS={()=>setShowSOS(true)}
+          onShowHistory={()=>setShowHistory(true)}
+          onShowStatus={()=>setScreen('status')}
+          currentOrderId={currentOrderId}
+          showFeedbackBubble={showFeedbackBubble}
+          onFeedbackBubbleClick={()=>{ setShowFeedbackBubble(false); setShowFeedback(true) }}
+          onShowFeedback={()=>setShowFeedback(true)}
+        />
+      )}
+
+      {screen==='status' && (
+        <OrderStatus
+          orderId={currentOrderId}
+          tableNumber={tableNumber}
+          onBack={()=>setScreen('menu')}
+        />
+      )}
+
+      {cartCount>0 && screen==='menu' && (
+        <CartDrawer
+          cart={cart}
+          tableData={tableData}
+          eventData={eventData}
+          isOnline={isOnline}
+          onOrderPlaced={handleOrderPlaced}
+          onRemove={removeFromCart}
+          onAdd={addToCart}
+        />
+      )}
+
       {showSOS && <SOSPanel tableData={tableData} eventData={eventData} onClose={()=>setShowSOS(false)} />}
       {showHistory && <OrderHistory tableData={tableData} eventData={eventData} onClose={()=>setShowHistory(false)} />}
       {showFeedback && <FeedbackModal orderId={currentOrderId} tableData={tableData} eventData={eventData} onClose={()=>setShowFeedback(false)} />}
 
+      {/* Order placed confirmation popup */}
       {showOrderConfirm && (
         <div style={{ position:'fixed', inset:0, zIndex:95, display:'flex', alignItems:'flex-end', justifyContent:'center', pointerEvents:'none' }}>
           <div style={{ pointerEvents:'all', background:'#1A0A0A', borderRadius:'24px 24px 0 0', padding:'28px 24px 40px', width:'100%', maxWidth:520, boxShadow:'0 -8px 32px rgba(0,0,0,0.4)' }}>
@@ -215,26 +384,14 @@ export default function GuestApp() {
         </div>
       )}
 
-      {showFeedbackBubble && !showFeedback && (
-        <>
-          <style>{`
-            @keyframes fbPulse{0%,100%{transform:scale(1) translateY(0)}40%{transform:scale(1.1) translateY(-14px)}70%{transform:scale(1.05) translateY(-6px)}}
-            @keyframes fbBackdrop{from{opacity:0}to{opacity:1}}
-            .fb-backdrop{animation:fbBackdrop 0.5s ease forwards}
-            .fb-bubble-anim{animation:fbPulse 1.8s ease-in-out infinite}
-          `}</style>
-          <div className="fb-backdrop" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', zIndex:90 }} onClick={()=>setShowFeedbackBubble(false)} />
-          <div style={{ position:'fixed', inset:0, zIndex:91, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
-            <button className="fb-bubble-anim" onClick={()=>{ setShowFeedbackBubble(false); setShowFeedback(true) }}
-              style={{ pointerEvents:'all', background:'#E8890C', border:'4px solid #fff', borderRadius:100, padding:'28px 36px', display:'flex', flexDirection:'column', alignItems:'center', gap:8, cursor:'pointer', boxShadow:'0 8px 24px rgba(232,137,12,0.5)' }}>
-              <span style={{ fontSize:56 }}>😊</span>
-              <span style={{ color:'#fff', fontWeight:800, fontSize:18, whiteSpace:'nowrap' }}>How was your food?</span>
-              <span style={{ color:'rgba(255,255,255,0.85)', fontSize:13 }}>Tap to share your experience</span>
-            </button>
-            <button onClick={()=>setShowFeedbackBubble(false)} style={{ pointerEvents:'all', marginTop:24, background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.4)', borderRadius:999, padding:'10px 24px', color:'#fff', fontSize:14, cursor:'pointer' }}>Maybe later</button>
-          </div>
-        </>
+      {/* Exit confirmation dialog */}
+      {showExitConfirm && (
+        <ExitConfirmDialog
+          onStay={() => setShowExitConfirm(false)}
+          onExit={handleExit}
+        />
       )}
+
     </div>
   )
 }
