@@ -20,7 +20,27 @@ function statusBg(s)    { return { planned:'#EFF6FF', active:'#DCFCE7', complete
 function statusEmoji(s) { return { planned:'🔵', active:'🟢', completed:'⚫' }[s]||'⚪' }
 // ──────────────────────────────────────────────────────────────────────────
 
-export default function WelcomeScreen({ tableNumber, onStart, eventData, onEventSelect, activeEventCount=0 }) {
+export default function WelcomeScreen({ tableNumber, onStart, eventData, onEventSelect, activeEventCount=0, onLongPressTable }) {
+  const longPressTimer = useRef(null)
+  const [longPressProgress, setLongPressProgress] = useState(0)
+
+  function startLongPress() {
+    let count = 0
+    longPressTimer.current = setInterval(() => {
+      count += 100
+      setLongPressProgress(Math.min(100, (count / 3000) * 100))
+      if (count >= 3000) {
+        clearInterval(longPressTimer.current)
+        setLongPressProgress(0)
+        if (onLongPressTable) onLongPressTable()
+      }
+    }, 100)
+  }
+
+  function endLongPress() {
+    if (longPressTimer.current) clearInterval(longPressTimer.current)
+    setLongPressProgress(0)
+  }
   const videoRef = useRef(null)
   const [events, setEvents] = useState([])
   const [showEventPicker, setShowEventPicker] = useState(false)
@@ -161,10 +181,17 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
         )}
         {!eventData && <div style={{ fontSize:14,color:'rgba(255,255,255,0.5)',marginBottom:4 }}>No event selected</div>}
 
-        {/* Table badge */}
-        <div style={{ display:'inline-flex',alignItems:'center',gap:8,background:'rgba(255,255,255,0.15)',border:'1.5px solid rgba(255,255,255,0.3)',borderRadius:999,padding:'10px 28px',margin:'18px auto 20px',fontSize:17,fontWeight:800,color:'#fff' }}>
-          <span style={{ width:10,height:10,borderRadius:'50%',background:'#4ADE80',display:'inline-block',boxShadow:'0 0 8px #4ADE80' }}></span>
-          TABLE {tableNumber}
+        {/* Table badge — long press 3s to change setup */}
+        <div
+          onMouseDown={startLongPress} onMouseUp={endLongPress} onMouseLeave={endLongPress}
+          onTouchStart={startLongPress} onTouchEnd={endLongPress}
+          style={{ display:'inline-flex',alignItems:'center',gap:8,background:'rgba(255,255,255,0.15)',border:'1.5px solid rgba(255,255,255,0.3)',borderRadius:999,padding:'10px 28px',margin:'18px auto 20px',fontSize:17,fontWeight:800,color:'#fff',cursor:'pointer',position:'relative',overflow:'hidden',userSelect:'none' }}>
+          {longPressProgress > 0 && (
+            <div style={{ position:'absolute',left:0,top:0,height:'100%',background:'rgba(232,137,12,0.4)',width:longPressProgress+'%',transition:'width 0.1s linear',borderRadius:999 }} />
+          )}
+          <span style={{ width:10,height:10,borderRadius:'50%',background:'#4ADE80',display:'inline-block',boxShadow:'0 0 8px #4ADE80',position:'relative',zIndex:1 }}></span>
+          <span style={{ position:'relative',zIndex:1 }}>TABLE {tableNumber}</span>
+          {longPressProgress > 0 && <span style={{ position:'relative',zIndex:1,fontSize:10,opacity:0.7 }}>Hold to change...</span>}
         </div>
 
         <p style={{ fontSize:14,color:'rgba(255,255,255,0.65)',marginBottom:24,maxWidth:300,lineHeight:1.7,margin:'0 auto 24px' }}>
@@ -191,11 +218,7 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
             🔄 Change Event
           </button>
         )}
-        {eventData && (
-          <button onClick={openTablePicker} style={{ marginTop:10,background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.2)',borderRadius:999,padding:'8px 22px',fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.6)',cursor:'pointer' }}>
-            🔢 Change Table
-          </button>
-        )}
+        
 
         {/* Instagram QR footer — large scannable QR + handle */}
         <div style={{ marginTop:28, background:'rgba(255,255,255,0.07)', borderRadius:20, padding:'16px 20px', border:'1px solid rgba(255,255,255,0.12)', display:'flex', alignItems:'center', gap:16, width:'100%', boxSizing:'border-box' }}>

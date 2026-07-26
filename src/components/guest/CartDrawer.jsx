@@ -2,8 +2,13 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { queueOrder } from '../../lib/offlineQueue'
 
-export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrderPlaced, onRemove, onAdd }) {
-  const [open, setOpen] = useState(false)
+export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrderPlaced, onRemove, onAdd, cartOpen, onCartOpenChange }) {
+  const [open, setOpen] = useState(cartOpen || false)
+
+  // Sync with parent
+  useEffect(() => {
+    if (typeof cartOpen === 'boolean') setOpen(cartOpen)
+  }, [cartOpen])
   const [placing, setPlacing] = useState(false)
   const [error, setError] = useState('')
   const [activeOrderCount, setActiveOrderCount] = useState(0)
@@ -71,7 +76,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
 
   return (
     <>
-      <div onClick={() => setOpen(true)} style={{ position:'fixed', bottom:20, left:'50%', transform:'translateX(-50%)', width:'calc(100% - 32px)', maxWidth:480, background:'#E8890C', borderRadius:16, padding:'16px 22px', display:'flex', alignItems:'center', justifyContent:'space-between', cursor:'pointer', zIndex:50, boxShadow:'0 14px 36px rgba(232,137,12,0.55)' }}>
+      <div onClick={() => { setOpen(true); onCartOpenChange?.(true) }} style={{ position:'fixed', bottom:20, left:'50%', transform:'translateX(-50%)', width:'calc(100% - 32px)', maxWidth:480, background:'#E8890C', borderRadius:16, padding:'16px 22px', display:'flex', alignItems:'center', justifyContent:'space-between', cursor:'pointer', zIndex:50, boxShadow:'0 14px 36px rgba(232,137,12,0.55)' }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <div style={{ background:'rgba(255,255,255,0.25)', borderRadius:999, width:30, height:30, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, color:'#fff', fontSize:14 }}>{total}</div>
           <span style={{ color:'#fff', fontWeight:800, fontSize:16 }}>View Cart</span>
@@ -80,12 +85,12 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
       </div>
 
       {open && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:60 }} onClick={() => setOpen(false)}>
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:60 }} onClick={() => { setOpen(false); onCartOpenChange?.(false) }}>
           <div onClick={e => e.stopPropagation()} style={{ position:'absolute', bottom:0, left:0, right:0, background:'#fff', borderRadius:'24px 24px 0 0', padding:'24px 20px 36px', maxHeight:'80vh', overflowY:'auto' }}>
             <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 20px' }} />
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
               <h3 style={{ fontSize:20, fontWeight:800 }}>Your Order</h3>
-              <button onClick={() => setOpen(false)} style={{ background:'none', border:'none', fontSize:22, color:'#999', cursor:'pointer' }}>✕</button>
+              <button onClick={() => { setOpen(false); onCartOpenChange?.(false) }} style={{ background:'none', border:'none', fontSize:22, color:'#999', cursor:'pointer' }}>✕</button>
             </div>
 
             {cart.map(item => (
