@@ -42,23 +42,26 @@ export default function GuestApp() {
   const feedbackTimerRef = useRef(null)
   const retryRef = useRef(null)
 
-  // Save current table number so root page can redirect back to it
+  // Always save current table number immediately on load
   useEffect(() => {
     if (tableNumber) {
       localStorage.setItem('ss_last_table', tableNumber)
     }
   }, [tableNumber])
 
-  // Back button suppression — kiosk mode
-  // Push multiple history entries so back button needs many presses to escape
+  // Back button — intercept and replace URL back to current table
   useEffect(() => {
-    // Push 10 entries so the back button has to be pressed many times
-    for (let i = 0; i < 10; i++) {
-      window.history.pushState({ kiosk: true, table: tableNumber }, '', '/tablet/' + tableNumber)
-    }
-    const handlePop = (e) => {
-      // Always push back to current table URL — never let it navigate away
-      window.history.pushState({ kiosk: true, table: tableNumber }, '', '/tablet/' + tableNumber)
+    if (!tableNumber) return
+    const currentUrl = '/tablet/' + tableNumber
+    // Replace current history entry with our table URL
+    window.history.replaceState({ kiosk: true, table: tableNumber }, '', currentUrl)
+    // Push extra entries as buffer
+    window.history.pushState({ kiosk: true, table: tableNumber }, '', currentUrl)
+    window.history.pushState({ kiosk: true, table: tableNumber }, '', currentUrl)
+
+    const handlePop = () => {
+      // Immediately navigate back to correct table URL
+      window.history.pushState({ kiosk: true, table: tableNumber }, '', currentUrl)
     }
     window.addEventListener('popstate', handlePop)
     return () => window.removeEventListener('popstate', handlePop)

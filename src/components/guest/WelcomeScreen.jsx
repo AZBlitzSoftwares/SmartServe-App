@@ -71,11 +71,12 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
         if (!confirm('Table ' + tNum + ' has an active order. Are you sure you want to switch to this table?')) return
       }
     }
-    // Save to localStorage and reload
+    // Save to localStorage and redirect
     const key = 'ss_event_table_' + tNum
     localStorage.setItem(key, JSON.stringify(eventData))
-    // Navigate to new table URL
-    window.location.href = '/tablet/' + tNum
+    localStorage.setItem('ss_last_table', String(tNum))
+    // Use replace so back button doesn't come back to old table
+    window.location.replace('/tablet/' + tNum)
   }
 
   async function openEventPicker() {
