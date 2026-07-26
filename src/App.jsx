@@ -1,9 +1,18 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import GuestApp from './pages/GuestApp'
 import SupervisorApp from './pages/SupervisorApp'
 import janusLogo from './assets/janus_logo.jpg'
 
+// Root page — redirects to last used table or shows landing
 function RootPage() {
+  // Check if there's a saved table number from previous session
+  const savedTable = localStorage.getItem('ss_last_table')
+  
+  // If they have a saved table, redirect immediately
+  if (savedTable && savedTable !== '1') {
+    return <Navigate to={'/tablet/' + savedTable} replace />
+  }
+
   return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', fontFamily:'Manrope, sans-serif', flexDirection:'column', gap:0, background:'#1A0A0A' }}>
       <img src={janusLogo} alt="Janu's Smart Serve" style={{ width:120, height:120, borderRadius:24, objectFit:'contain', marginBottom:20, border:'2px solid rgba(232,137,12,0.3)' }} />

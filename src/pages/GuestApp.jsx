@@ -42,13 +42,27 @@ export default function GuestApp() {
   const feedbackTimerRef = useRef(null)
   const retryRef = useRef(null)
 
-  // Back button suppression — kiosk mode
+  // Save current table number so root page can redirect back to it
   useEffect(() => {
-    window.history.pushState({ kiosk: true }, '')
-    const handlePop = () => window.history.pushState({ kiosk: true }, '')
+    if (tableNumber) {
+      localStorage.setItem('ss_last_table', tableNumber)
+    }
+  }, [tableNumber])
+
+  // Back button suppression — kiosk mode
+  // Push multiple history entries so back button needs many presses to escape
+  useEffect(() => {
+    // Push 10 entries so the back button has to be pressed many times
+    for (let i = 0; i < 10; i++) {
+      window.history.pushState({ kiosk: true, table: tableNumber }, '', '/tablet/' + tableNumber)
+    }
+    const handlePop = (e) => {
+      // Always push back to current table URL — never let it navigate away
+      window.history.pushState({ kiosk: true, table: tableNumber }, '', '/tablet/' + tableNumber)
+    }
     window.addEventListener('popstate', handlePop)
     return () => window.removeEventListener('popstate', handlePop)
-  }, [])
+  }, [tableNumber])
 
   useEffect(() => {
     if (currentOrderId && !currentOrderId.startsWith('offline-')) localStorage.setItem(orderKey(tableNumber), currentOrderId)
