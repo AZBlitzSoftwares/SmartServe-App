@@ -181,7 +181,12 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
           </button>
         )}
 
-        {eventData && activeEventCount > 1 && (
+        {activeEventCount > 1 && (
+          <button onClick={openEventPicker} style={{ marginTop:16,background:'rgba(255,87,34,0.25)',border:'1px solid rgba(255,87,34,0.5)',borderRadius:999,padding:'10px 24px',fontSize:14,fontWeight:700,color:'#FF8A65',cursor:'pointer' }}>
+            🔄 {eventData ? 'Change Event' : 'Select Event'} — {activeEventCount} events today
+          </button>
+        )}
+        {eventData && activeEventCount <= 1 && (
           <button onClick={openEventPicker} style={{ marginTop:16,background:'rgba(255,255,255,0.1)',border:'1px solid rgba(255,255,255,0.25)',borderRadius:999,padding:'8px 22px',fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.7)',cursor:'pointer' }}>
             🔄 Change Event
           </button>

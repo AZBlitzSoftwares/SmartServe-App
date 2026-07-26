@@ -92,12 +92,28 @@ export default function GuestApp() {
       const { data: evs } = await supabase.from('events').select('*').order('date', { ascending:false }).limit(50)
       const active = (evs||[]).filter(e => eventStatus(e.date) === 'active')
       setActiveEventCount(active.length)
+
       if (active.length === 1) {
+        // Only 1 active event — auto-load it
         const activeEv = active[0]
         if (!eventData || eventData.id !== activeEv.id) handleEventSelect(activeEv)
         else loadEventAndTable(activeEv.id)
-      } else if (active.length === 0 && eventData?.id) {
-        loadEventAndTable(eventData.id)
+
+      } else if (active.length > 1) {
+        // Multiple active events — check if we have a valid cached event
+        if (eventData?.id) {
+          const stillActive = active.find(e => e.id === eventData.id)
+          if (stillActive) {
+            // Cached event is still valid — load it
+            loadEventAndTable(eventData.id)
+          }
+          // If cached event is no longer active, don't auto-pick — let supervisor choose
+        }
+        // If no cached event, supervisor must select via Change Event button on welcome screen
+
+      } else if (active.length === 0) {
+        // No active events today — use cached event if available
+        if (eventData?.id) loadEventAndTable(eventData.id)
       }
     } catch(e) { if (eventData?.id) loadEventAndTable(eventData.id) }
   }
