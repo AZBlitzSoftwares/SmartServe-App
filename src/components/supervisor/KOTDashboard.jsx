@@ -137,7 +137,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     const dateStr = d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
     const timeStr = d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})
 
-    // Epson TM-m30III — 80mm thermal paper — ALL DARK BOLD fonts for clear printing
+    // Epson TM-m30III — 58mm printable area, 4mm margins each side
     const w = window.open('','_blank','width=400,height=600')
     w.document.write(`<!DOCTYPE html>
 <html>
@@ -147,7 +147,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
 <style>
   @page {
     size: 80mm auto;
-    margin: 0mm;
+    margin: 3mm 4mm;
   }
   * {
     box-sizing: border-box;
@@ -156,114 +156,122 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   }
   body {
     font-family: 'Courier New', Courier, monospace;
-    font-size: 12pt;
+    font-size: 10pt;
     font-weight: bold;
-    width: 72mm;
-    margin: 2mm auto;
+    width: 100%;
+    margin: 0;
     padding: 0;
     color: #000000;
     background: #ffffff;
   }
   .app-name {
-    font-size: 14pt;
+    font-size: 11pt;
     font-weight: 900;
     text-align: center;
     text-transform: uppercase;
-    letter-spacing: 2px;
+    letter-spacing: 1px;
     margin-bottom: 1mm;
     color: #000000;
   }
   .event-name {
-    font-size: 12pt;
+    font-size: 10pt;
     font-weight: 900;
     text-align: center;
     margin-bottom: 2mm;
     color: #000000;
+    word-break: break-word;
   }
   .divider {
     border: none;
-    border-top: 2px solid #000000;
-    margin: 2mm 0;
+    border-top: 1.5px solid #000000;
+    margin: 1.5mm 0;
   }
   .divider-dash {
     border: none;
     border-top: 1px dashed #000000;
-    margin: 2mm 0;
+    margin: 1.5mm 0;
   }
   .row {
     display: flex;
     justify-content: space-between;
-    font-size: 11pt;
+    font-size: 9.5pt;
     font-weight: bold;
-    margin: 1mm 0;
+    margin: 0.8mm 0;
     color: #000000;
   }
+  .row span:first-child {
+    min-width: 14mm;
+  }
   .table-box {
-    border: 3px solid #000000;
+    border: 2.5px solid #000000;
     text-align: center;
-    padding: 2mm;
-    margin: 3mm 0;
+    padding: 1.5mm;
+    margin: 2mm 0;
   }
   .table-label {
-    font-size: 11pt;
+    font-size: 10pt;
     font-weight: 900;
-    letter-spacing: 3px;
+    letter-spacing: 2px;
     color: #000000;
   }
   .table-num {
-    font-size: 28pt;
+    font-size: 24pt;
     font-weight: 900;
     line-height: 1.1;
     color: #000000;
   }
   .waiter-box {
-    border: 2px solid #000000;
+    border: 1.5px solid #000000;
     text-align: center;
-    padding: 2mm;
-    margin: 2mm 0;
-    font-size: 12pt;
+    padding: 1.5mm;
+    margin: 1.5mm 0;
+    font-size: 10pt;
     font-weight: 900;
     color: #000000;
   }
   .item-row {
-    font-size: 12pt;
+    font-size: 10pt;
     font-weight: 900;
-    padding: 1.5mm 0;
+    padding: 1mm 0;
     display: flex;
     justify-content: space-between;
     border-bottom: 1px dashed #000000;
     color: #000000;
+    word-break: break-word;
   }
-  .item-name { flex: 1; }
+  .item-name {
+    flex: 1;
+    padding-right: 2mm;
+  }
   .item-qty {
     font-weight: 900;
-    margin-left: 4mm;
+    white-space: nowrap;
     color: #000000;
   }
   .item-tag {
-    font-size: 9pt;
+    font-size: 8pt;
     font-weight: 900;
     background: #000000;
     color: #ffffff;
-    padding: 0 2mm;
-    margin-left: 2mm;
+    padding: 0 1.5mm;
+    margin-left: 1mm;
   }
   .total-row {
     display: flex;
     justify-content: space-between;
     font-weight: 900;
-    font-size: 13pt;
-    margin-top: 2mm;
+    font-size: 11pt;
+    margin-top: 1.5mm;
     padding-top: 1mm;
-    border-top: 2px solid #000000;
+    border-top: 1.5px solid #000000;
     color: #000000;
   }
   .footer {
     text-align: center;
-    font-size: 10pt;
+    font-size: 9pt;
     font-weight: bold;
     color: #000000;
-    margin-top: 3mm;
+    margin-top: 2mm;
   }
 </style>
 </head>
