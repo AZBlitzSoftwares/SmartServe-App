@@ -11,7 +11,7 @@ function eventStatus(dateStr) {
   return 'completed'
 }
 
-export default function SetupScreen({ onSetupComplete }) {
+export default function SetupScreen({ onSetupComplete, currentTableNumber, currentEventId }) {
   const [step, setStep] = useState('pin')      // 'pin' | 'event' | 'table'
   const [pin, setPin] = useState('')
   const [pinError, setPinError] = useState('')
@@ -101,22 +101,28 @@ export default function SetupScreen({ onSetupComplete }) {
   }
 
   async function loadTakenTables(ev) {
-    // Find tables that have active orders in this event
-    const { data: tables } = await supabase.from('tables')
-      .select('table_number').eq('event_id', ev.id).eq('is_active', true)
-    // Find which of those have recent/active orders
-    const tableIds = (tables||[]).map(t => t.id).filter(Boolean)
-    setTakenTables([]) // Reset first
-    if (tables?.length) {
-      const { data: activeOrders } = await supabase.from('orders')
-        .select('table_id, tables(table_number)')
-        .in('status', ['pending','placed','in_progress'])
-        .eq('event_id', ev.id)
-      const takenNums = (activeOrders||[])
-        .map(o => o.tables?.table_number)
-        .filter(Boolean)
-      setTakenTables(takenNums)
-    }
+    setTakenTables([])
+    if (!ev?.id) return
+    // Find tables with active orders in this event
+    const { data: activeOrders } = await supabase.from('orders')
+      .select('table_id, tables(table_number)')
+      .in('status', ['pending','placed','in_progress'])
+      .eq('event_id', ev.id)
+    const takenNums = (activeOrders||[])
+      .map(o => o.tables?.table_number)
+      .filter(Boolean)
+    // Exclude current table — supervisor should always be able to reselect it
+    const filteredTaken = currentEventId === ev.id
+      ? takenNums.filter(n => n !== currentTableNumber)
+      : takenNums
+    setTakenTables(filteredTaken)
+  }
+
+  async function reclaimTable(tNum) {
+    if (!selectedEvent) return
+    const confirmMsg = 'Table ' + tNum + ' has an active order.\n\nDo you want to claim this table anyway?\n\n(The existing order will remain active — only the table assignment changes)'
+    if (!window.confirm(confirmMsg)) return
+    setSelectedTable(tNum)
   }
 
   async function confirmTable() {
@@ -320,21 +326,28 @@ export default function SetupScreen({ onSetupComplete }) {
               {Array.from({ length: selectedEvent.number_of_tables || 0 }, (_, i) => i + 1).map(tNum => {
                 const isTaken = takenTables.includes(tNum)
                 const isSelected = selectedTable === tNum
+                const isCurrent = currentEventId === selectedEvent.id && tNum === currentTableNumber
                 return (
                   <button key={tNum}
-                    onClick={() => !isTaken && setSelectedTable(tNum)}
+                    onClick={() => {
+                      if (isTaken) reclaimTable(tNum)
+                      else setSelectedTable(tNum)
+                    }}
+                    title={isTaken ? 'Active order — tap to reclaim' : isCurrent ? 'Your current table' : 'Available'}
                     style={{
-                      padding: '14px 4px',
+                      padding: '10px 4px',
                       borderRadius: 10,
                       border: '2px solid',
-                      borderColor: isSelected ? '#E8890C' : isTaken ? '#DC2626' : '#16A34A',
-                      background: isSelected ? '#E8890C' : isTaken ? 'rgba(220,38,38,0.15)' : 'rgba(22,163,74,0.1)',
-                      color: isSelected ? '#fff' : isTaken ? '#FC8181' : '#4ADE80',
-                      fontSize: 18, fontWeight: 900,
-                      cursor: isTaken ? 'not-allowed' : 'pointer',
-                      opacity: isTaken ? 0.6 : 1
+                      borderColor: isSelected ? '#E8890C' : isCurrent ? '#E8890C' : isTaken ? '#DC2626' : '#16A34A',
+                      background: isSelected ? '#E8890C' : isCurrent ? 'rgba(232,137,12,0.2)' : isTaken ? 'rgba(220,38,38,0.15)' : 'rgba(22,163,74,0.1)',
+                      color: isSelected ? '#fff' : isCurrent ? '#E8890C' : isTaken ? '#FC8181' : '#4ADE80',
+                      fontSize: 16, fontWeight: 900,
+                      cursor: 'pointer',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2
                     }}>
                     {tNum}
+                    {isCurrent && !isSelected && <span style={{ fontSize: 7, opacity: 0.8 }}>CURRENT</span>}
+                    {isTaken && !isCurrent && <span style={{ fontSize: 7, opacity: 0.7 }}>⚠️</span>}
                   </button>
                 )
               })}

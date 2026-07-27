@@ -265,7 +265,13 @@ export default function GuestApp() {
   }
 
   if (appState === 'setup') {
-    return <SetupScreen onSetupComplete={handleSetupComplete} />
+    return (
+      <SetupScreen
+        onSetupComplete={handleSetupComplete}
+        currentTableNumber={tableNumber}
+        currentEventId={eventData?.id}
+      />
+    )
   }
 
   return (
@@ -294,7 +300,10 @@ export default function GuestApp() {
           isOnline={isOnline}
           onShowSOS={() => setShowSOS(true)}
           onShowHistory={() => setShowHistory(true)}
-          onShowStatus={() => setAppState('status')}
+          onShowStatus={() => {
+            setAppState('status')
+            window.history.pushState({ kiosk: true, screen: 'status' }, '', '/')
+          }}
           currentOrderId={currentOrderId}
           showFeedbackBubble={false}
           onFeedbackBubbleClick={() => {}}
@@ -343,7 +352,12 @@ export default function GuestApp() {
               <button onClick={() => { setShowOrderConfirm(false); clearTimeout(orderConfirmTimer.current) }}
                 style={{ background:'rgba(255,255,255,0.1)', border:'none', borderRadius:999, width:32, height:32, color:'rgba(255,255,255,0.7)', fontSize:16, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>✕</button>
             </div>
-            <button onClick={() => { setShowOrderConfirm(false); setAppState('status') }}
+            <button onClick={() => {
+                setShowOrderConfirm(false)
+                setAppState('status')
+                // Push history entry so one back press returns to menu
+                window.history.pushState({ kiosk: true, screen: 'status' }, '', '/')
+              }}
               style={{ width:'100%', background:'#E8890C', color:'#fff', border:'none', borderRadius:12, padding:'13px', fontSize:15, fontWeight:800, cursor:'pointer' }}>
               📦 Track Your Order →
             </button>
