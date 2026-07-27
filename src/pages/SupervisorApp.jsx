@@ -33,6 +33,7 @@ export default function SupervisorApp() {
   const [currentUser, setCurrentUser] = useState(null)
   const [activeTab, setActiveTab] = useState('kot')
   const [eventData, setEventData] = useState(null)
+  const eventManuallySet = useRef(false) // true once user or initial load sets event
   const [allEvents, setAllEvents] = useState([])
   const [orderCount, setOrderCount] = useState(0)
   const [sosCount, setSosCount] = useState(0)
@@ -93,24 +94,28 @@ export default function SupervisorApp() {
     window.history.pushState({ kiosk: true }, '')
     const handlePop = () => window.history.pushState({ kiosk: true }, '')
     window.addEventListener('popstate', handlePop)
-    loadEvents()
-    // Silent poll every 30s so new events appear without logout/login
-    const poll = setInterval(() => loadEvents(), 30000)
+    loadEvents(true) // first load — auto-select event
+    // Silent poll every 30s — only refreshes event list, never changes selected event
+    const poll = setInterval(() => loadEvents(false), 30000)
     return () => { clearInterval(poll); window.removeEventListener('popstate', handlePop) }
   }, [authed])
 
-  async function loadEvents() {
+  async function loadEvents(isFirstLoad = false) {
     const { data } = await supabase.from('events').select('*').order('created_at', { ascending:false })
     const evs = data || []
     setAllEvents(evs)
 
+    // Only auto-select event on first load — never override manual selection
+    if (!isFirstLoad || eventManuallySet.current) return
+
     if (currentUser?.role === 'supervisor' && currentUser?.assignedEvent) {
       setEventData(currentUser.assignedEvent)
-    } else if (!eventData) {
-      // Admin: auto-select today's active event, fall back to most recent
+      eventManuallySet.current = true
+    } else {
+      // Admin: auto-select today's active event on first load only
       const todayActive = evs.find(e => eventStatus(e.date) === 'active')
-      if (todayActive) setEventData(todayActive)
-      else if (evs.length) setEventData(evs[0])
+      if (todayActive) { setEventData(todayActive); eventManuallySet.current = true }
+      else if (evs.length) { setEventData(evs[0]); eventManuallySet.current = true }
     }
   }
 
@@ -235,7 +240,7 @@ export default function SupervisorApp() {
               .map(ev => {
                 const st = eventStatus(ev.date)
                 return (
-                  <button key={ev.id} onClick={() => { setEventData(ev); setShowEventPicker(false) }} style={{
+                  <button key={ev.id} onClick={() => { setEventData(ev); eventManuallySet.current = true; setShowEventPicker(false) }} style={{
                     width:'100%', background: eventData?.id===ev.id ? 'var(--ink)' : '#f5f5f5',
                     color: eventData?.id===ev.id ? '#fff' : '#333',
                     border:'none', borderRadius:12, padding:'14px 16px', marginBottom:8,

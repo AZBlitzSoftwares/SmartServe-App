@@ -119,14 +119,167 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     const d = new Date(order.created_at)
     const dateStr = d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
     const timeStr = d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})
-    const w = window.open('','_blank','width=320,height=500')
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>KOT ${orderId}</title><style>body{font-family:'Courier New',monospace;font-size:13px;padding:16px;width:280px;margin:0 auto}.app{font-size:15px;font-weight:bold;text-align:center;text-transform:uppercase}.event{font-size:12px;text-align:center;margin-bottom:6px;font-weight:bold}.divider{border-top:1px dashed #000;margin:8px 0}.row{display:flex;justify-content:space-between;font-size:12px;margin:2px 0}.table-num{font-size:26px;font-weight:900;text-align:center;border:2px solid #000;padding:6px;margin:8px 0}.waiter{text-align:center;font-size:14px;font-weight:bold;border:1px solid #000;padding:4px;margin:6px 0}.item{font-size:13px;padding:3px 0}.footer{text-align:center;font-size:10px;color:#666;margin-top:10px}</style></head><body>
-<div class="app">Janu's Smart Serve</div><div class="event">${eventName}</div><div class="divider"></div>
-<div class="row"><span>Date:</span><span>${dateStr}</span></div><div class="row"><span>Time:</span><span>${timeStr}</span></div><div class="row"><span>Order:</span><span>${orderId}</span></div>
-<div class="divider"></div><div class="table-num">TABLE ${tableNum}</div><div class="waiter">Waiter: ${waiterName}</div><div class="divider"></div>
-${(order.order_items||[]).map(i=>`<div class="item">• ${i.menu_items?.name} x${i.quantity}${i.menu_items?.is_live_counter?' [Live]':''}</div>`).join('')}
-<div class="divider"></div><div class="footer">Powered by Janu's Smart Serve</div></body></html>`)
-    w.document.close(); w.focus(); setTimeout(()=>{ w.print(); w.close() },300)
+
+    // Epson TM-m30III — 80mm thermal paper — ALL DARK BOLD fonts for clear printing
+    const w = window.open('','_blank','width=400,height=600')
+    w.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>KOT ${orderId}</title>
+<style>
+  @page {
+    size: 80mm auto;
+    margin: 0mm;
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12pt;
+    font-weight: bold;
+    width: 72mm;
+    margin: 2mm auto;
+    padding: 0;
+    color: #000000;
+    background: #ffffff;
+  }
+  .app-name {
+    font-size: 14pt;
+    font-weight: 900;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 1mm;
+    color: #000000;
+  }
+  .event-name {
+    font-size: 12pt;
+    font-weight: 900;
+    text-align: center;
+    margin-bottom: 2mm;
+    color: #000000;
+  }
+  .divider {
+    border: none;
+    border-top: 2px solid #000000;
+    margin: 2mm 0;
+  }
+  .divider-dash {
+    border: none;
+    border-top: 1px dashed #000000;
+    margin: 2mm 0;
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11pt;
+    font-weight: bold;
+    margin: 1mm 0;
+    color: #000000;
+  }
+  .table-box {
+    border: 3px solid #000000;
+    text-align: center;
+    padding: 2mm;
+    margin: 3mm 0;
+  }
+  .table-label {
+    font-size: 11pt;
+    font-weight: 900;
+    letter-spacing: 3px;
+    color: #000000;
+  }
+  .table-num {
+    font-size: 28pt;
+    font-weight: 900;
+    line-height: 1.1;
+    color: #000000;
+  }
+  .waiter-box {
+    border: 2px solid #000000;
+    text-align: center;
+    padding: 2mm;
+    margin: 2mm 0;
+    font-size: 12pt;
+    font-weight: 900;
+    color: #000000;
+  }
+  .item-row {
+    font-size: 12pt;
+    font-weight: 900;
+    padding: 1.5mm 0;
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px dashed #000000;
+    color: #000000;
+  }
+  .item-name { flex: 1; }
+  .item-qty {
+    font-weight: 900;
+    margin-left: 4mm;
+    color: #000000;
+  }
+  .item-tag {
+    font-size: 9pt;
+    font-weight: 900;
+    background: #000000;
+    color: #ffffff;
+    padding: 0 2mm;
+    margin-left: 2mm;
+  }
+  .total-row {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 900;
+    font-size: 13pt;
+    margin-top: 2mm;
+    padding-top: 1mm;
+    border-top: 2px solid #000000;
+    color: #000000;
+  }
+  .footer {
+    text-align: center;
+    font-size: 10pt;
+    font-weight: bold;
+    color: #000000;
+    margin-top: 3mm;
+  }
+</style>
+</head>
+<body>
+<div class="app-name">Janu's Smart Serve</div>
+<div class="event-name">${eventName}</div>
+<hr class="divider"/>
+<div class="row"><span>Date:</span><span>${dateStr}</span></div>
+<div class="row"><span>Time:</span><span>${timeStr}</span></div>
+<div class="row"><span>Order:</span><span>${orderId}</span></div>
+<hr class="divider-dash"/>
+<div class="table-box">
+  <div class="table-label">TABLE</div>
+  <div class="table-num">${tableNum}</div>
+</div>
+<div class="waiter-box">Waiter: ${waiterName}</div>
+<hr class="divider"/>
+${(order.order_items||[]).map(i => `
+<div class="item-row">
+  <span class="item-name">${i.menu_items?.name||'Item'}${i.menu_items?.is_live_counter ? '<span class=\"item-tag\">LIVE</span>' : ''}</span>
+  <span class="item-qty">x${i.quantity}</span>
+</div>`).join('')}
+<hr class="divider"/>
+<div class="total-row">
+  <span>Total Items</span>
+  <span>${(order.order_items||[]).reduce((s,i)=>s+i.quantity,0)}</span>
+</div>
+<div class="footer">-- Janu's Smart Serve --</div>
+</body>
+</html>`)
+    w.document.close()
+    w.focus()
+    setTimeout(() => { w.print(); w.close() }, 500)
   }
 
   const busyWaiterIds = orders.filter(o=>o.status==='in_progress'&&o.waiter_id).map(o=>o.waiter_id)
