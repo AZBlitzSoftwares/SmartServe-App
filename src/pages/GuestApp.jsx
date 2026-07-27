@@ -12,38 +12,9 @@ import FeedbackModal from '../components/guest/FeedbackModal'
 
 const FEEDBACK_DELAY_SECONDS = 5
 
-// ── Exit Confirmation Dialog ──────────────────────────────────────────────
-function ExitConfirmDialog({ onStay, onExit }) {
-  return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', zIndex:999,
-      display:'flex', alignItems:'center', justifyContent:'center', padding:'0 24px' }}>
-      <div style={{ background:'#fff', borderRadius:24, padding:'32px 28px',
-        width:'100%', maxWidth:380, textAlign:'center', boxShadow:'0 20px 60px rgba(0,0,0,0.5)' }}>
-        <div style={{ fontSize:48, marginBottom:16 }}>👋</div>
-        <div style={{ fontSize:20, fontWeight:900, color:'#1A0A0A', marginBottom:8 }}>Exit Smart Serve?</div>
-        <div style={{ fontSize:14, color:'#888', marginBottom:28, lineHeight:1.6 }}>
-          You will lose your cart items if you exit now.
-        </div>
-        <div style={{ display:'flex', gap:12 }}>
-          <button onClick={onStay}
-            style={{ flex:1, background:'#1A0A0A', color:'#fff', border:'none', borderRadius:14,
-              padding:'16px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
-            Stay
-          </button>
-          <button onClick={onExit}
-            style={{ flex:1, background:'#F5F5F5', color:'#888', border:'1.5px solid #E5E7EB',
-              borderRadius:14, padding:'16px', fontSize:16, fontWeight:700, cursor:'pointer' }}>
-            Exit
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export default function GuestApp() {
-  // ── State ──────────────────────────────────────────────────────────────
-  const [appState, setAppState] = useState('loading') // 'loading'|'setup'|'welcome'|'menu'|'status'
+
+  const [appState, setAppState] = useState('loading')
   const [eventData, setEventData] = useState(null)
   const [tableData, setTableData] = useState(null)
   const [tableNumber, setTableNumber] = useState(null)
@@ -54,19 +25,19 @@ export default function GuestApp() {
   const [showHistory, setShowHistory] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [showOrderConfirm, setShowOrderConfirm] = useState(false)
-  const [showExitConfirm, setShowExitConfirm] = useState(false)
   const [cartOpen, setCartOpen] = useState(false)
-  const cartOpenRef = useRef(false)
   const [activeEventCount, setActiveEventCount] = useState(0)
 
-  // Refs for back button handler (always current values)
-  const appStateRef = useRef(appState)
+  // Always-current refs — back handler reads these
+  const appStateRef = useRef('loading')
+  const cartOpenRef = useRef(false)
   const showSOSRef = useRef(false)
   const showHistoryRef = useRef(false)
   const showFeedbackRef = useRef(false)
   const showOrderConfirmRef = useRef(false)
   const feedbackTimerRef = useRef(null)
   const orderConfirmTimer = useRef(null)
+  const backHandlerRef = useRef(null)
 
   useEffect(() => { appStateRef.current = appState }, [appState])
   useEffect(() => { cartOpenRef.current = cartOpen }, [cartOpen])
@@ -75,7 +46,95 @@ export default function GuestApp() {
   useEffect(() => { showFeedbackRef.current = showFeedback }, [showFeedback])
   useEffect(() => { showOrderConfirmRef.current = showOrderConfirm }, [showOrderConfirm])
 
-  // ── On Mount: check if already set up ─────────────────────────────────
+  // ── BACK BUTTON — PERMANENT INTERCEPT ─────────────────────────────────
+  // Strategy: use a permanent interval to keep history buffer always full.
+  // Every back press: intercept → handle → immediately refill buffer.
+  // Buffer never depletes — back can never exit the app.
+
+  const goToMenu = useCallback(() => {
+    setShowFeedback(false)
+    setShowSOS(false)
+    setShowHistory(false)
+    setShowOrderConfirm(false)
+    setCartOpen(false)
+    setAppState('menu')
+    appStateRef.current = 'menu'
+  }, [])
+
+  const handleBack = useCallback(() => {
+    const state = appStateRef.current
+
+    // If on setup screen — do nothing, cannot go back from setup
+    if (state === 'setup' || state === 'loading') return
+
+    // Close cart first if open
+    if (cartOpenRef.current) {
+      setCartOpen(false)
+      return
+    }
+
+    // Close any open overlay — then go to menu
+    if (showOrderConfirmRef.current) { setShowOrderConfirm(false); setAppState('menu'); return }
+    if (showFeedbackRef.current)     { setShowFeedback(false);     setAppState('menu'); return }
+    if (showSOSRef.current)          { setShowSOS(false);          setAppState('menu'); return }
+    if (showHistoryRef.current)      { setShowHistory(false);      setAppState('menu'); return }
+
+    // On status/track order screen — go to menu
+    if (state === 'status') { setAppState('menu'); return }
+
+    // On menu — do nothing (already on menu)
+    if (state === 'menu') return
+
+    // On welcome — do nothing (guest cannot go behind welcome)
+    if (state === 'welcome') return
+
+  }, [])
+
+  // Store latest handleBack in ref so popstate always calls latest version
+  useEffect(() => { backHandlerRef.current = handleBack }, [handleBack])
+
+  // ── PERMANENT HISTORY BUFFER ───────────────────────────────────────────
+  useEffect(() => {
+    // Fill buffer immediately
+    function fillBuffer() {
+      window.history.pushState({ kiosk: true }, '', '/')
+      window.history.pushState({ kiosk: true }, '', '/')
+      window.history.pushState({ kiosk: true }, '', '/')
+    }
+
+    fillBuffer()
+
+    // On every back press: handle it + immediately refill buffer
+    function handlePop() {
+      // Handle the back action
+      backHandlerRef.current?.()
+      // Refill buffer so next back press is also intercepted
+      setTimeout(() => fillBuffer(), 0)
+    }
+
+    // Android hardware back (keyCode 4)
+    function handleKeyDown(e) {
+      if (e.key === 'GoBack' || e.keyCode === 4) {
+        e.preventDefault()
+        e.stopPropagation()
+        backHandlerRef.current?.()
+      }
+    }
+
+    window.addEventListener('popstate', handlePop)
+    document.addEventListener('keydown', handleKeyDown, true)
+
+    // Keep buffer topped up every 2 seconds as extra safety
+    const keepAlive = setInterval(fillBuffer, 2000)
+
+    return () => {
+      window.removeEventListener('popstate', handlePop)
+      document.removeEventListener('keydown', handleKeyDown, true)
+      clearInterval(keepAlive)
+    }
+  }, []) // runs once on mount — always uses latest handleBack via ref
+
+  // ── LOAD SAVED SETUP ──────────────────────────────────────────────────
   useEffect(() => {
     const setupComplete = localStorage.getItem('ss_setup_complete')
     const savedEvent = localStorage.getItem('ss_setup_event')
@@ -87,48 +146,36 @@ export default function GuestApp() {
         const ev = JSON.parse(savedEvent)
         const td = JSON.parse(savedTable)
         const tNum = parseInt(savedTableNum)
-        setEventData(ev)
-        setTableData(td)
-        setTableNumber(tNum)
-        // Restore last order of today
+        setEventData(ev); setTableData(td); setTableNumber(tNum)
         const todayKey = 'ss_order_' + tNum + '_' + new Date().toISOString().slice(0,10)
         const lastOrder = localStorage.getItem(todayKey)
         if (lastOrder) setCurrentOrderId(lastOrder)
         setAppState('welcome')
       } catch(e) {
-        localStorage.clear()
-        setAppState('setup')
+        localStorage.clear(); setAppState('setup')
       }
     } else {
       setAppState('setup')
     }
   }, [])
 
-  // ── Setup complete callback ────────────────────────────────────────────
   function handleSetupComplete(ev, td) {
-    setEventData(ev)
-    setTableData(td)
-    setTableNumber(td.table_number)
-    setCurrentOrderId(null)
-    setCart([])
+    setEventData(ev); setTableData(td); setTableNumber(td.table_number)
+    setCurrentOrderId(null); setCart([])
     setAppState('welcome')
   }
 
-  // ── Re-setup (long press on table number) ─────────────────────────────
   function triggerReSetup() {
     localStorage.removeItem('ss_setup_complete')
     localStorage.removeItem('ss_setup_event')
     localStorage.removeItem('ss_setup_table')
     localStorage.removeItem('ss_setup_table_number')
-    setEventData(null)
-    setTableData(null)
-    setTableNumber(null)
-    setCart([])
-    setCurrentOrderId(null)
+    setEventData(null); setTableData(null); setTableNumber(null)
+    setCart([]); setCurrentOrderId(null)
     setAppState('setup')
   }
 
-  // ── Online/offline ─────────────────────────────────────────────────────
+  // ── ONLINE/OFFLINE ────────────────────────────────────────────────────
   useEffect(() => {
     const on = () => { setIsOnline(true); syncOfflineOrders() }
     const off = () => setIsOnline(false)
@@ -137,7 +184,7 @@ export default function GuestApp() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
-  // ── Save current order ID ──────────────────────────────────────────────
+  // ── SAVE ORDER ID ─────────────────────────────────────────────────────
   useEffect(() => {
     if (currentOrderId && tableNumber && !currentOrderId.startsWith('offline-')) {
       const key = 'ss_order_' + tableNumber + '_' + new Date().toISOString().slice(0,10)
@@ -145,7 +192,7 @@ export default function GuestApp() {
     }
   }, [currentOrderId, tableNumber])
 
-  // ── Feedback trigger on delivery ──────────────────────────────────────
+  // ── FEEDBACK ON DELIVERY ──────────────────────────────────────────────
   useEffect(() => {
     if (!tableData?.id) return
     const sub = supabase.channel('feedback-watch-' + tableData.id)
@@ -158,57 +205,7 @@ export default function GuestApp() {
     return () => supabase.removeChannel(sub)
   }, [tableData?.id])
 
-  // ── BACK BUTTON HANDLER ────────────────────────────────────────────────
-  const handleBack = useCallback(() => {
-    // Priority 1 — close cart if open
-    if (cartOpenRef.current) { setCartOpen(false); return }
-
-    // Priority 2 — close overlays
-    if (showFeedbackRef.current)    { setShowFeedback(false); return }
-    if (showSOSRef.current)         { setShowSOS(false); return }
-    if (showHistoryRef.current)     { setShowHistory(false); return }
-    if (showOrderConfirmRef.current){ setShowOrderConfirm(false); return }
-
-    // Priority 3 — navigate screens
-    const current = appStateRef.current
-    if (current === 'status') { setAppState('menu'); return }
-
-    // Priority 4 — on menu or welcome → exit dialog
-    // NEVER go back to setup screen
-    if (current === 'menu' || current === 'welcome') {
-      setShowExitConfirm(true)
-    }
-  }, [])
-
-  // ── BACK BUTTON INTERCEPT ──────────────────────────────────────────────
-  useEffect(() => {
-    // Push buffer history entries — URL always stays at /
-    window.history.replaceState({ kiosk: true, idx: 0 }, '', '/')
-    for (let i = 1; i <= 20; i++) {
-      window.history.pushState({ kiosk: true, idx: i }, '', '/')
-    }
-
-    const handlePop = () => {
-      window.history.pushState({ kiosk: true }, '', '/')
-      handleBack()
-    }
-
-    // Android hardware back button (keyCode 4 or key 'GoBack')
-    const handleKeyDown = (e) => {
-      if (e.key === 'GoBack' || e.keyCode === 4) {
-        e.preventDefault(); handleBack()
-      }
-    }
-
-    window.addEventListener('popstate', handlePop)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('popstate', handlePop)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [handleBack])
-
-  // ── CART HELPERS ───────────────────────────────────────────────────────
+  // ── CART HELPERS ──────────────────────────────────────────────────────
   function addToCart(item) {
     setCart(prev => {
       const e = prev.find(c => c.id === item.id)
@@ -232,13 +229,6 @@ export default function GuestApp() {
     orderConfirmTimer.current = setTimeout(() => setShowOrderConfirm(false), 10000)
   }
 
-  function handleExit() {
-    setShowExitConfirm(false)
-    if (window.Android?.closeApp) window.Android.closeApp()
-    else if (window.webkit?.messageHandlers?.closeApp) window.webkit.messageHandlers.closeApp.postMessage('close')
-    else setAppState('welcome') // browser fallback
-  }
-
   async function syncOfflineOrders() {
     const pending = await getPendingOrders()
     for (const order of pending) {
@@ -255,24 +245,20 @@ export default function GuestApp() {
     }
   }
 
-  // ── RENDER ─────────────────────────────────────────────────────────────
-  if (appState === 'loading') {
-    return (
-      <div style={{ minHeight:'100vh', background:'#1A0A0A', display:'flex', alignItems:'center', justifyContent:'center' }}>
-        <div style={{ color:'rgba(255,255,255,0.4)', fontSize:14 }}>Loading...</div>
-      </div>
-    )
-  }
+  // ── RENDER ────────────────────────────────────────────────────────────
+  if (appState === 'loading') return (
+    <div style={{ minHeight:'100vh', background:'#1A0A0A', display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ color:'rgba(255,255,255,0.4)', fontSize:14 }}>Loading...</div>
+    </div>
+  )
 
-  if (appState === 'setup') {
-    return (
-      <SetupScreen
-        onSetupComplete={handleSetupComplete}
-        currentTableNumber={tableNumber}
-        currentEventId={eventData?.id}
-      />
-    )
-  }
+  if (appState === 'setup') return (
+    <SetupScreen
+      onSetupComplete={handleSetupComplete}
+      currentTableNumber={tableNumber}
+      currentEventId={eventData?.id}
+    />
+  )
 
   return (
     <div style={{ minHeight:'100vh', background:'var(--bg)', position:'relative' }}>
@@ -300,10 +286,7 @@ export default function GuestApp() {
           isOnline={isOnline}
           onShowSOS={() => setShowSOS(true)}
           onShowHistory={() => setShowHistory(true)}
-          onShowStatus={() => {
-            setAppState('status')
-            window.history.pushState({ kiosk: true, screen: 'status' }, '', '/')
-          }}
+          onShowStatus={() => setAppState('status')}
           currentOrderId={currentOrderId}
           showFeedbackBubble={false}
           onFeedbackBubbleClick={() => {}}
@@ -352,12 +335,8 @@ export default function GuestApp() {
               <button onClick={() => { setShowOrderConfirm(false); clearTimeout(orderConfirmTimer.current) }}
                 style={{ background:'rgba(255,255,255,0.1)', border:'none', borderRadius:999, width:32, height:32, color:'rgba(255,255,255,0.7)', fontSize:16, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>✕</button>
             </div>
-            <button onClick={() => {
-                setShowOrderConfirm(false)
-                setAppState('status')
-                // Push history entry so one back press returns to menu
-                window.history.pushState({ kiosk: true, screen: 'status' }, '', '/')
-              }}
+            <button
+              onClick={() => { setShowOrderConfirm(false); setAppState('status') }}
               style={{ width:'100%', background:'#E8890C', color:'#fff', border:'none', borderRadius:12, padding:'13px', fontSize:15, fontWeight:800, cursor:'pointer' }}>
               📦 Track Your Order →
             </button>
@@ -365,8 +344,6 @@ export default function GuestApp() {
         </div>
       )}
 
-      {/* Exit dialog */}
-      {showExitConfirm && <ExitConfirmDialog onStay={() => setShowExitConfirm(false)} onExit={handleExit} />}
     </div>
   )
 }
