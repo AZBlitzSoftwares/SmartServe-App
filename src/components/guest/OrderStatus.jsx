@@ -6,6 +6,7 @@ function mapStatus(raw) {
   if (['pending','placed'].includes(raw)) return 'placed'
   if (['in_progress','in_preparation','ready'].includes(raw)) return 'on_the_way'
   if (raw === 'delivered') return 'delivered'
+  if (raw === 'cancelled') return 'cancelled'
   return 'placed'
 }
 
@@ -13,6 +14,7 @@ const STATUS_CONFIG = {
   placed:     { label:'Order Placed',      icon:'📋', color:'#D97706', desc:'Your order has been received and will be assigned shortly.' },
   on_the_way: { label:'Waiter On The Way', icon:'🏃', color:'#2563EB', desc:'Your food is being brought to your table.' },
   delivered:  { label:'Delivered',         icon:'✓',  color:'#16A34A', desc:'Enjoy your meal!' },
+  cancelled:  { label:'Order Cancelled',   icon:'✕',  color:'#DC2626', desc:'This order has been cancelled. Please place a new order.' },
 }
 
 export default function OrderStatus({ orderId, tableNumber, onBack }) {
@@ -33,7 +35,7 @@ export default function OrderStatus({ orderId, tableNumber, onBack }) {
   async function fetchOrder() {
     if (!orderId) return
     const { data } = await supabase.from('orders')
-      .select('*, order_items(quantity, menu_items(name))').eq('id', orderId).single()
+      .select('*, order_items(quantity, menu_items(name)), cancel_reason').eq('id', orderId).single()
     if (data) setOrder(data)
     setLoading(false)
   }
@@ -57,7 +59,7 @@ export default function OrderStatus({ orderId, tableNumber, onBack }) {
 
   const displayStatus = mapStatus(order?.status)
   const cfg = STATUS_CONFIG[displayStatus]
-  const allStatuses = ['placed','on_the_way','delivered']
+  const allStatuses = displayStatus === 'cancelled' ? ['placed','cancelled'] : ['placed','on_the_way','delivered']
   const currentIdx = allStatuses.indexOf(displayStatus)
 
   return (
@@ -74,6 +76,11 @@ export default function OrderStatus({ orderId, tableNumber, onBack }) {
           </div>
           <div style={{ fontSize:22, fontWeight:900, color:cfg.color, marginBottom:8 }}>{cfg.label}</div>
           <div style={{ fontSize:14, color:'#888', lineHeight:1.6 }}>{cfg.desc}</div>
+          {displayStatus === 'cancelled' && order?.cancel_reason && (
+            <div style={{ marginTop:10, background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:10, padding:'8px 14px', fontSize:13, color:'#DC2626', fontWeight:600 }}>
+              Reason: {order.cancel_reason}
+            </div>
+          )}
         </div>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'center', marginBottom:20, background:'#fff', borderRadius:16, padding:'16px 20px', boxShadow:'0 2px 8px rgba(0,0,0,0.06)' }}>
           {allStatuses.map((s, idx) => {

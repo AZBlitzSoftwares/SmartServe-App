@@ -26,6 +26,7 @@ export default function GuestApp() {
   const [showFeedback, setShowFeedback] = useState(false)
   const [showOrderConfirm, setShowOrderConfirm] = useState(false)
   const [cartOpen, setCartOpen] = useState(false)
+  // Cancel notification removed — status shown in Track screen only
   const [activeEventCount, setActiveEventCount] = useState(0)
 
   // Always-current refs — back handler reads these
@@ -93,46 +94,59 @@ export default function GuestApp() {
   // Store latest handleBack in ref so popstate always calls latest version
   useEffect(() => { backHandlerRef.current = handleBack }, [handleBack])
 
-  // ── PERMANENT HISTORY BUFFER ───────────────────────────────────────────
+  // ── PERMANENT HISTORY BUFFER — works on Android WebView ──────────────
   useEffect(() => {
-    // Fill buffer immediately
     function fillBuffer() {
-      window.history.pushState({ kiosk: true }, '', '/')
-      window.history.pushState({ kiosk: true }, '', '/')
-      window.history.pushState({ kiosk: true }, '', '/')
+      try {
+        for (let i = 0; i < 5; i++) {
+          window.history.pushState({ kiosk: true, ts: Date.now() }, '', '/')
+        }
+      } catch(e) {}
     }
 
     fillBuffer()
 
-    // On every back press: handle it + immediately refill buffer
-    function handlePop() {
-      // Handle the back action
+    function handlePop(e) {
       backHandlerRef.current?.()
-      // Refill buffer so next back press is also intercepted
-      setTimeout(() => fillBuffer(), 0)
+      // Immediately refill buffer after consuming one entry
+      setTimeout(fillBuffer, 10)
     }
 
-    // Android hardware back (keyCode 4)
+    // Method 1: popstate (standard browsers)
+    window.addEventListener('popstate', handlePop)
+
+    // Method 2: Android hardware back button keyCode
     function handleKeyDown(e) {
-      if (e.key === 'GoBack' || e.keyCode === 4) {
+      if (e.key === 'GoBack' || e.keyCode === 4 || e.keyCode === 27) {
         e.preventDefault()
         e.stopPropagation()
         backHandlerRef.current?.()
+        setTimeout(fillBuffer, 10)
+        return false
       }
     }
-
-    window.addEventListener('popstate', handlePop)
     document.addEventListener('keydown', handleKeyDown, true)
+    window.addEventListener('keydown', handleKeyDown, true)
 
-    // Keep buffer topped up every 2 seconds as extra safety
-    const keepAlive = setInterval(fillBuffer, 2000)
+    // Method 3: beforeunload — prevent accidental page exit
+    function handleBeforeUnload(e) {
+      e.preventDefault()
+      e.returnValue = ''
+      return ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
+    // Method 4: Keep buffer full every 1 second
+    const keepAlive = setInterval(fillBuffer, 1000)
 
     return () => {
       window.removeEventListener('popstate', handlePop)
       document.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
       clearInterval(keepAlive)
     }
-  }, []) // runs once on mount — always uses latest handleBack via ref
+  }, [])
 
   // ── LOAD SAVED SETUP ──────────────────────────────────────────────────
   useEffect(() => {
@@ -192,14 +206,19 @@ export default function GuestApp() {
     }
   }, [currentOrderId, tableNumber])
 
-  // ── FEEDBACK ON DELIVERY ──────────────────────────────────────────────
+  // ── WATCH ORDERS — feedback on delivery + cancelled notification ────────
   useEffect(() => {
     if (!tableData?.id) return
-    const sub = supabase.channel('feedback-watch-' + tableData.id)
+    const sub = supabase.channel('order-watch-' + tableData.id)
       .on('postgres_changes', { event:'UPDATE', schema:'public', table:'orders' }, payload => {
-        if (payload.new.table_id === tableData.id && payload.new.status === 'delivered') {
+        if (payload.new.table_id !== tableData.id) return
+        if (payload.new.status === 'delivered') {
           if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current)
           feedbackTimerRef.current = setTimeout(() => setShowFeedback(true), FEEDBACK_DELAY_SECONDS * 1000)
+        }
+        if (payload.new.status === 'cancelled') {
+          // Cancel shown in Track screen only
+          setTimeout(() => setShowCancelledNotif(false), 12000)
         }
       }).subscribe()
     return () => supabase.removeChannel(sub)
@@ -335,11 +354,9 @@ export default function GuestApp() {
               <button onClick={() => { setShowOrderConfirm(false); clearTimeout(orderConfirmTimer.current) }}
                 style={{ background:'rgba(255,255,255,0.1)', border:'none', borderRadius:999, width:32, height:32, color:'rgba(255,255,255,0.7)', fontSize:16, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>✕</button>
             </div>
-            <button
-              onClick={() => { setShowOrderConfirm(false); setAppState('status') }}
-              style={{ width:'100%', background:'#E8890C', color:'#fff', border:'none', borderRadius:12, padding:'13px', fontSize:15, fontWeight:800, cursor:'pointer' }}>
-              📦 Track Your Order →
-            </button>
+            <div style={{ background:'rgba(232,137,12,0.15)', border:'1px solid rgba(232,137,12,0.3)', borderRadius:10, padding:'10px 14px', textAlign:'center' }}>
+              <span style={{ color:'rgba(255,255,255,0.85)', fontSize:14 }}>Track your order using the <strong style={{color:'#E8890C'}}>Track</strong> button below</span>
+            </div>
           </div>
         </div>
       )}

@@ -11,6 +11,9 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const [filter, setFilter] = useState('active')
   const [loading, setLoading] = useState(true)
   const [assigning, setAssigning] = useState(null)
+  const [showCancelDialog, setShowCancelDialog] = useState(null) // order id being cancelled
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelCustomReason, setCancelCustomReason] = useState('')
   const [waiterFilter, setWaiterFilter] = useState(null)
   const [tableFilter, setTableFilter] = useState(null)
   const [now, setNow] = useState(Date.now())
@@ -106,8 +109,22 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   }
 
   async function cancelOrder(id) {
-    if (!confirm('Cancel this order?')) return
-    await supabase.from('orders').update({ status:'cancelled' }).eq('id', id)
+    setShowCancelDialog(id)
+    setCancelReason('')
+    setCancelCustomReason('')
+  }
+
+  async function confirmCancel() {
+    if (!showCancelDialog) return
+    const reason = cancelReason === 'other' ? cancelCustomReason.trim() : cancelReason
+    if (!reason) { alert('Please select or enter a reason for cancellation.'); return }
+    await supabase.from('orders').update({
+      status: 'cancelled',
+      cancel_reason: reason
+    }).eq('id', showCancelDialog)
+    setShowCancelDialog(null)
+    setCancelReason('')
+    setCancelCustomReason('')
     loadOrders(false)
   }
 
@@ -282,7 +299,11 @@ ${(order.order_items||[]).map(i => `
     setTimeout(() => { w.print(); w.close() }, 500)
   }
 
-  const busyWaiterIds = orders.filter(o=>o.status==='in_progress'&&o.waiter_id).map(o=>o.waiter_id)
+  // Waiters busy on orders OR on active SOS requests
+  const busyWaiterIds = [
+    ...orders.filter(o=>o.status==='in_progress'&&o.waiter_id).map(o=>o.waiter_id),
+    ...sosRequests.filter(s=>s.status==='in_progress'&&s.waiter_id).map(s=>s.waiter_id)
+  ].filter(Boolean)
   const waiterOrderCount = {}
   waiters.forEach(w => { waiterOrderCount[w.id] = 0 })
   orders.forEach(o => { if (o.waiter_id && waiterOrderCount[o.waiter_id]!==undefined) waiterOrderCount[o.waiter_id]++ })
@@ -296,6 +317,15 @@ ${(order.order_items||[]).map(i => `
   })
 
   const filteredSOS = filter!=='delivered' ? sosRequests.filter(r=>!tableFilter||r.tables?.table_number===tableFilter) : []
+
+  const CANCEL_REASONS = [
+    'Item not available',
+    'Food preparation issue',
+    'Guest changed their mind',
+    'Duplicate order',
+    'Event ended',
+    'other'
+  ]
 
   return (
     <div>
@@ -442,6 +472,44 @@ ${(order.order_items||[]).map(i => `
             </div>
           ))}
         </>
+      )}
+      {/* Cancel reason dialog */}
+      {showCancelDialog && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 16px' }}>
+          <div style={{ background:'#fff', borderRadius:20, padding:'24px 20px', width:'100%', maxWidth:400, boxShadow:'0 20px 60px rgba(0,0,0,0.4)' }}>
+            <h3 style={{ fontSize:18, fontWeight:800, marginBottom:4, color:'#DC2626' }}>❌ Cancel Order</h3>
+            <p style={{ fontSize:13, color:'#888', marginBottom:16 }}>Select a reason for cancellation. The guest will be notified.</p>
+            <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:14 }}>
+              {CANCEL_REASONS.map(r => (
+                <button key={r} onClick={() => setCancelReason(r)}
+                  style={{ padding:'10px 14px', borderRadius:10, border:'1.5px solid', textAlign:'left',
+                    borderColor: cancelReason===r ? '#DC2626' : '#E5E7EB',
+                    background: cancelReason===r ? '#FEF2F2' : '#fff',
+                    color: cancelReason===r ? '#DC2626' : '#333',
+                    fontSize:14, fontWeight: cancelReason===r ? 700 : 500, cursor:'pointer' }}>
+                  {r === 'other' ? '✏️ Other (type below)' : r}
+                </button>
+              ))}
+            </div>
+            {cancelReason === 'other' && (
+              <input value={cancelCustomReason} onChange={e=>setCancelCustomReason(e.target.value)}
+                placeholder="Enter reason..."
+                style={{ width:'100%', border:'1.5px solid #E5E7EB', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', marginBottom:14, boxSizing:'border-box' }} />
+            )}
+            <div style={{ display:'flex', gap:10 }}>
+              <button onClick={() => setShowCancelDialog(null)}
+                style={{ flex:1, background:'#F5F5F5', border:'none', borderRadius:12, padding:'13px', fontSize:14, fontWeight:700, color:'#888', cursor:'pointer' }}>
+                Back
+              </button>
+              <button onClick={confirmCancel} disabled={!cancelReason || (cancelReason==='other' && !cancelCustomReason.trim())}
+                style={{ flex:2, background: (!cancelReason || (cancelReason==='other' && !cancelCustomReason.trim())) ? '#ccc' : '#DC2626',
+                  color:'#fff', border:'none', borderRadius:12, padding:'13px', fontSize:14, fontWeight:800,
+                  cursor: (!cancelReason || (cancelReason==='other' && !cancelCustomReason.trim())) ? 'not-allowed' : 'pointer' }}>
+                Confirm Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
