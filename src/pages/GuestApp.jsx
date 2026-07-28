@@ -10,172 +10,257 @@ import SOSPanel from '../components/guest/SOSPanel'
 import OrderHistory from '../components/guest/OrderHistory'
 import FeedbackModal from '../components/guest/FeedbackModal'
 
-const FEEDBACK_DELAY_SECONDS = 5
+const FEEDBACK_DELAY_MS = 5000
 
 export default function GuestApp() {
 
+  // ── App state machine ────────────────────────────────────────────
+  // States: loading → setup → welcome → menu → status
+  // welcome is the PERMANENT HOME — back button always returns here
+  // setup is LOCKED — back button does nothing on setup
   const [appState, setAppState] = useState('loading')
   const [eventData, setEventData] = useState(null)
   const [tableData, setTableData] = useState(null)
   const [tableNumber, setTableNumber] = useState(null)
   const [cart, setCart] = useState([])
-  const [currentOrderId, setCurrentOrderId] = useState(null)
+  const [activeOrders, setActiveOrders] = useState([]) // all active orders for table
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [showSOS, setShowSOS] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
-  const [showOrderConfirm, setShowOrderConfirm] = useState(false)
+  const [feedbackOrderId, setFeedbackOrderId] = useState(null)
   const [cartOpen, setCartOpen] = useState(false)
-  // Cancel notification removed — status shown in Track screen only
-  const [activeEventCount, setActiveEventCount] = useState(0)
+  const [menuSheetOpen, setMenuSheetOpen] = useState(false)
+  const menuSheetRef = useRef(false)
 
-  // Always-current refs — back handler reads these
-  const appStateRef = useRef('loading')
-  const cartOpenRef = useRef(false)
-  const showSOSRef = useRef(false)
+  // ── Refs for back button (always read current value, never stale) ─
+  const appStateRef    = useRef('loading')
+  const cartOpenRef    = useRef(false)
+  const showSOSRef     = useRef(false)
   const showHistoryRef = useRef(false)
-  const showFeedbackRef = useRef(false)
-  const showOrderConfirmRef = useRef(false)
-  const feedbackTimerRef = useRef(null)
-  const orderConfirmTimer = useRef(null)
+  const showFeedbackRef= useRef(false)
   const backHandlerRef = useRef(null)
+  const feedbackTimerRef = useRef(null)
 
-  useEffect(() => { appStateRef.current = appState }, [appState])
-  useEffect(() => { cartOpenRef.current = cartOpen }, [cartOpen])
-  useEffect(() => { showSOSRef.current = showSOS }, [showSOS])
+  useEffect(() => { appStateRef.current = appState },       [appState])
+  useEffect(() => { menuSheetRef.current = menuSheetOpen }, [menuSheetOpen])
+  useEffect(() => { cartOpenRef.current = cartOpen },       [cartOpen])
+  useEffect(() => { showSOSRef.current = showSOS },         [showSOS])
   useEffect(() => { showHistoryRef.current = showHistory }, [showHistory])
-  useEffect(() => { showFeedbackRef.current = showFeedback }, [showFeedback])
-  useEffect(() => { showOrderConfirmRef.current = showOrderConfirm }, [showOrderConfirm])
+  useEffect(() => { showFeedbackRef.current = showFeedback },[showFeedback])
 
-  // ── BACK BUTTON — PERMANENT INTERCEPT ─────────────────────────────────
-  // Strategy: use a permanent interval to keep history buffer always full.
-  // Every back press: intercept → handle → immediately refill buffer.
-  // Buffer never depletes — back can never exit the app.
-
-  const goToMenu = useCallback(() => {
-    setShowFeedback(false)
-    setShowSOS(false)
-    setShowHistory(false)
-    setShowOrderConfirm(false)
-    setCartOpen(false)
-    setAppState('menu')
-    appStateRef.current = 'menu'
-  }, [])
+  // ── BACK BUTTON ──────────────────────────────────────────────────
+  // Approved sequence (confirmed by client):
+  //   Feedback        → Welcome
+  //   SOS panel       → Menu
+  //   Order History   → Menu
+  //   Cart            → Menu
+  //   Track/Status    → Menu
+  //   Menu            → Welcome
+  //   Welcome         → STOP (never exits)
+  //   Setup           → STOP (never exits)
 
   const handleBack = useCallback(() => {
     const state = appStateRef.current
 
-    // If on setup screen — do nothing, cannot go back from setup
+    // Setup/loading — never go back
     if (state === 'setup' || state === 'loading') return
 
-    // Close cart first if open
+    // Feedback open → close → welcome
+    if (showFeedbackRef.current) {
+      setShowFeedback(false)
+      setAppState('welcome')
+      appStateRef.current = 'welcome'
+      return
+    }
+
+    // Browse Menu sheet open → close sheet → stay on menu
+    if (menuSheetRef.current) {
+      setMenuSheetOpen(false)
+      menuSheetRef.current = false
+      return
+    }
+
+    // Cart open → close → stay on menu
     if (cartOpenRef.current) {
       setCartOpen(false)
       return
     }
 
-    // Close any open overlay — then go to menu
-    if (showOrderConfirmRef.current) { setShowOrderConfirm(false); setAppState('menu'); return }
-    if (showFeedbackRef.current)     { setShowFeedback(false);     setAppState('menu'); return }
-    if (showSOSRef.current)          { setShowSOS(false);          setAppState('menu'); return }
-    if (showHistoryRef.current)      { setShowHistory(false);      setAppState('menu'); return }
+    // SOS open → close → menu
+    if (showSOSRef.current) {
+      setShowSOS(false)
+      setAppState('menu')
+      appStateRef.current = 'menu'
+      return
+    }
 
-    // On status/track order screen — go to menu
-    if (state === 'status') { setAppState('menu'); return }
+    // History open → close → menu
+    if (showHistoryRef.current) {
+      setShowHistory(false)
+      setAppState('menu')
+      appStateRef.current = 'menu'
+      return
+    }
 
-    // On menu — do nothing (already on menu)
-    if (state === 'menu') return
+    // Track/Status → menu
+    if (state === 'status') {
+      setAppState('menu')
+      appStateRef.current = 'menu'
+      return
+    }
 
-    // On welcome — do nothing (guest cannot go behind welcome)
+    // Menu → welcome (always — regardless of active orders)
+    if (state === 'menu') {
+      setMenuSheetOpen(false)
+      menuSheetRef.current = false
+      appStateRef.current = 'welcome'
+      setAppState('welcome')
+      return
+    }
+
+    // Welcome → STOP
     if (state === 'welcome') return
 
   }, [])
 
-  // Store latest handleBack in ref so popstate always calls latest version
+  // Keep ref always pointing to latest handleBack
   useEffect(() => { backHandlerRef.current = handleBack }, [handleBack])
 
-  // ── PERMANENT HISTORY BUFFER — works on Android WebView ──────────────
+  // ── BACK BUTTON INTERCEPT — bulletproof approach ──────────────
   useEffect(() => {
+    let isProgrammaticPush = false
+
     function fillBuffer() {
       try {
-        for (let i = 0; i < 5; i++) {
-          window.history.pushState({ kiosk: true, ts: Date.now() }, '', '/')
+        isProgrammaticPush = true
+        for (let i = 0; i < 8; i++) {
+          window.history.pushState({ kiosk: true, idx: i, ts: Date.now() }, '', '/')
         }
-      } catch(e) {}
+        // Reset flag after all pushes complete
+        setTimeout(() => { isProgrammaticPush = false }, 50)
+      } catch(e) { isProgrammaticPush = false }
     }
 
     fillBuffer()
 
-    function handlePop(e) {
+    // Only handle popstate if it's a REAL back press (not our programmatic push)
+    function onPop(e) {
+      if (isProgrammaticPush) return // ignore our own pushes
       backHandlerRef.current?.()
-      // Immediately refill buffer after consuming one entry
-      setTimeout(fillBuffer, 10)
+      // Immediately refill so next back press is also caught
+      setTimeout(fillBuffer, 0)
     }
+    window.addEventListener('popstate', onPop)
 
-    // Method 1: popstate (standard browsers)
-    window.addEventListener('popstate', handlePop)
-
-    // Method 2: Android hardware back button keyCode
-    function handleKeyDown(e) {
-      if (e.key === 'GoBack' || e.keyCode === 4 || e.keyCode === 27) {
+    // Android hardware back — keyCode 4
+    function onKeyDown(e) {
+      if (e.key === 'GoBack' || e.keyCode === 4) {
         e.preventDefault()
         e.stopPropagation()
         backHandlerRef.current?.()
-        setTimeout(fillBuffer, 10)
+        setTimeout(fillBuffer, 0)
         return false
       }
     }
-    document.addEventListener('keydown', handleKeyDown, true)
-    window.addEventListener('keydown', handleKeyDown, true)
+    document.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('keydown', onKeyDown, true)
 
-    // Method 3: beforeunload — prevent accidental page exit
-    function handleBeforeUnload(e) {
+    // Prevent page exit
+    function onBeforeUnload(e) {
       e.preventDefault()
       e.returnValue = ''
       return ''
     }
-    window.addEventListener('beforeunload', handleBeforeUnload)
+    window.addEventListener('beforeunload', onBeforeUnload)
 
-    // Method 4: Keep buffer full every 1 second
-    const keepAlive = setInterval(fillBuffer, 1000)
+    // Keep buffer topped up every 2 seconds
+    const keepAlive = setInterval(fillBuffer, 2000)
 
     return () => {
-      window.removeEventListener('popstate', handlePop)
-      document.removeEventListener('keydown', handleKeyDown, true)
-      window.removeEventListener('keydown', handleKeyDown, true)
-      window.removeEventListener('beforeunload', handleBeforeUnload)
+      window.removeEventListener('popstate', onPop)
+      document.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('beforeunload', onBeforeUnload)
       clearInterval(keepAlive)
     }
-  }, [])
+  }, []) // runs once — always uses latest handler via ref
 
-  // ── LOAD SAVED SETUP ──────────────────────────────────────────────────
+  // ── LOAD SAVED SETUP ─────────────────────────────────────────────
   useEffect(() => {
     const setupComplete = localStorage.getItem('ss_setup_complete')
-    const savedEvent = localStorage.getItem('ss_setup_event')
-    const savedTable = localStorage.getItem('ss_setup_table')
+    const savedEvent    = localStorage.getItem('ss_setup_event')
+    const savedTable    = localStorage.getItem('ss_setup_table')
     const savedTableNum = localStorage.getItem('ss_setup_table_number')
 
     if (setupComplete && savedEvent && savedTable) {
       try {
-        const ev = JSON.parse(savedEvent)
-        const td = JSON.parse(savedTable)
+        const ev   = JSON.parse(savedEvent)
+        const td   = JSON.parse(savedTable)
         const tNum = parseInt(savedTableNum)
         setEventData(ev); setTableData(td); setTableNumber(tNum)
-        const todayKey = 'ss_order_' + tNum + '_' + new Date().toISOString().slice(0,10)
-        const lastOrder = localStorage.getItem(todayKey)
-        if (lastOrder) setCurrentOrderId(lastOrder)
         setAppState('welcome')
-      } catch(e) {
-        localStorage.clear(); setAppState('setup')
-      }
+      } catch(e) { localStorage.clear(); setAppState('setup') }
     } else {
       setAppState('setup')
     }
   }, [])
 
+  // ── WATCH ACTIVE ORDERS for this table ───────────────────────────
+  // Used for: Track button visibility, auto-redirect after delivery,
+  //           feedback trigger, multiple order display
+  useEffect(() => {
+    if (!tableData?.id || !eventData?.id) return
+
+    loadActiveOrders()
+
+    const sub = supabase.channel('orders-table-' + tableData.id)
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'orders' }, payload => {
+        if (payload.new.table_id === tableData.id) loadActiveOrders()
+      })
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'orders' }, payload => {
+        if (payload.new.table_id !== tableData.id) return
+        loadActiveOrders()
+        // Trigger feedback on delivery
+        if (payload.new.status === 'delivered') {
+          if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current)
+          feedbackTimerRef.current = setTimeout(() => {
+            setFeedbackOrderId(payload.new.id)
+            setShowFeedback(true)
+          }, FEEDBACK_DELAY_MS)
+        }
+      })
+      .subscribe()
+
+    const poll = setInterval(loadActiveOrders, 8000)
+
+    return () => {
+      supabase.removeChannel(sub)
+      clearInterval(poll)
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current)
+    }
+  }, [tableData?.id, eventData?.id])
+
+  async function loadActiveOrders() {
+    if (!tableData?.id) return
+    const { data } = await supabase.from('orders')
+      .select('*, order_items(quantity, menu_items(name, is_veg))')
+      .eq('table_id', tableData.id)
+      .eq('event_id', eventData.id)
+      .in('status', ['pending','placed','in_progress'])
+      .order('created_at', { ascending: true })
+    setActiveOrders(data || [])
+  }
+
+  // ── NO AUTO-REDIRECT from Track screen ───────────────────────────
+  // Auto-redirect was causing wrong redirects when one order delivered
+  // but another still active. Guest must use back button to navigate.
+  // The only auto-redirect is after feedback is submitted (handleFeedbackClose)
+
+  // ── SETUP ─────────────────────────────────────────────────────────
   function handleSetupComplete(ev, td) {
     setEventData(ev); setTableData(td); setTableNumber(td.table_number)
-    setCurrentOrderId(null); setCart([])
+    setCart([])
     setAppState('welcome')
   }
 
@@ -185,46 +270,20 @@ export default function GuestApp() {
     localStorage.removeItem('ss_setup_table')
     localStorage.removeItem('ss_setup_table_number')
     setEventData(null); setTableData(null); setTableNumber(null)
-    setCart([]); setCurrentOrderId(null)
+    setCart([]); setActiveOrders([])
     setAppState('setup')
   }
 
-  // ── ONLINE/OFFLINE ────────────────────────────────────────────────────
+  // ── ONLINE/OFFLINE ────────────────────────────────────────────────
   useEffect(() => {
-    const on = () => { setIsOnline(true); syncOfflineOrders() }
+    const on  = () => { setIsOnline(true);  syncOfflineOrders() }
     const off = () => setIsOnline(false)
     window.addEventListener('online', on)
     window.addEventListener('offline', off)
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
-  // ── SAVE ORDER ID ─────────────────────────────────────────────────────
-  useEffect(() => {
-    if (currentOrderId && tableNumber && !currentOrderId.startsWith('offline-')) {
-      const key = 'ss_order_' + tableNumber + '_' + new Date().toISOString().slice(0,10)
-      localStorage.setItem(key, currentOrderId)
-    }
-  }, [currentOrderId, tableNumber])
-
-  // ── WATCH ORDERS — feedback on delivery + cancelled notification ────────
-  useEffect(() => {
-    if (!tableData?.id) return
-    const sub = supabase.channel('order-watch-' + tableData.id)
-      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'orders' }, payload => {
-        if (payload.new.table_id !== tableData.id) return
-        if (payload.new.status === 'delivered') {
-          if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current)
-          feedbackTimerRef.current = setTimeout(() => setShowFeedback(true), FEEDBACK_DELAY_SECONDS * 1000)
-        }
-        if (payload.new.status === 'cancelled') {
-          // Cancel shown in Track screen only
-          setTimeout(() => setShowCancelledNotif(false), 12000)
-        }
-      }).subscribe()
-    return () => supabase.removeChannel(sub)
-  }, [tableData?.id])
-
-  // ── CART HELPERS ──────────────────────────────────────────────────────
+  // ── CART ──────────────────────────────────────────────────────────
   function addToCart(item) {
     setCart(prev => {
       const e = prev.find(c => c.id === item.id)
@@ -241,11 +300,26 @@ export default function GuestApp() {
   }
   const cartCount = cart.reduce((s,i) => s + i.quantity, 0)
 
+  // Point 3: order placed → directly to status (no popup)
   function handleOrderPlaced(id) {
-    setCurrentOrderId(id); setCart([])
-    setShowOrderConfirm(true)
-    if (orderConfirmTimer.current) clearTimeout(orderConfirmTimer.current)
-    orderConfirmTimer.current = setTimeout(() => setShowOrderConfirm(false), 10000)
+    setCart([])
+    loadActiveOrders()
+    appStateRef.current = 'status'
+    setAppState('status')
+  }
+
+  // After feedback: if active orders remain → stay on menu so guest can track
+  // If no active orders → go to welcome (the true home)
+  function handleFeedbackClose() {
+    setShowFeedback(false)
+    setFeedbackOrderId(null)
+    if (activeOrders.length > 0) {
+      appStateRef.current = 'menu'
+      setAppState('menu')
+    } else {
+      appStateRef.current = 'welcome'
+      setAppState('welcome')
+    }
   }
 
   async function syncOfflineOrders() {
@@ -264,7 +338,7 @@ export default function GuestApp() {
     }
   }
 
-  // ── RENDER ────────────────────────────────────────────────────────────
+  // ── RENDER ────────────────────────────────────────────────────────
   if (appState === 'loading') return (
     <div style={{ minHeight:'100vh', background:'#1A0A0A', display:'flex', alignItems:'center', justifyContent:'center' }}>
       <div style={{ color:'rgba(255,255,255,0.4)', fontSize:14 }}>Loading...</div>
@@ -278,6 +352,9 @@ export default function GuestApp() {
       currentEventId={eventData?.id}
     />
   )
+
+  // Track button visible only when active orders exist (Point 5)
+  const hasActiveOrders = activeOrders.length > 0
 
   return (
     <div style={{ minHeight:'100vh', background:'var(--bg)', position:'relative' }}>
@@ -305,18 +382,25 @@ export default function GuestApp() {
           isOnline={isOnline}
           onShowSOS={() => setShowSOS(true)}
           onShowHistory={() => setShowHistory(true)}
-          onShowStatus={() => setAppState('status')}
-          currentOrderId={currentOrderId}
+          onShowStatus={() => {
+            appStateRef.current = 'status'
+            setAppState('status')
+          }}
+          hasActiveOrders={hasActiveOrders}
           showFeedbackBubble={false}
           onFeedbackBubbleClick={() => {}}
           onShowFeedback={() => setShowFeedback(true)}
+          menuSheetOpen={menuSheetOpen}
+          setMenuSheetOpen={setMenuSheetOpen}
         />
       )}
 
       {appState === 'status' && (
         <OrderStatus
-          orderId={currentOrderId}
+          tableData={tableData}
+          eventData={eventData}
           tableNumber={tableNumber}
+          activeOrders={activeOrders}
           onBack={() => setAppState('menu')}
         />
       )}
@@ -335,30 +419,15 @@ export default function GuestApp() {
         />
       )}
 
-      {showSOS && <SOSPanel tableData={tableData} eventData={eventData} onClose={() => setShowSOS(false)} />}
-      {showHistory && <OrderHistory tableData={tableData} eventData={eventData} onClose={() => setShowHistory(false)} />}
-      {showFeedback && <FeedbackModal orderId={currentOrderId} tableData={tableData} eventData={eventData} onClose={() => setShowFeedback(false)} />}
-
-      {/* Order placed popup */}
-      {showOrderConfirm && (
-        <div style={{ position:'fixed', inset:0, zIndex:95, display:'flex', alignItems:'flex-end', justifyContent:'center', pointerEvents:'none' }}>
-          <div style={{ pointerEvents:'all', background:'#1A0A0A', borderRadius:'24px 24px 0 0', padding:'28px 24px 40px', width:'100%', maxWidth:520, boxShadow:'0 -8px 32px rgba(0,0,0,0.4)' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:16 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                <div style={{ width:48, height:48, background:'#16A34A', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, color:'#fff' }}>✓</div>
-                <div>
-                  <div style={{ color:'#fff', fontWeight:900, fontSize:19 }}>Order Placed! 🎉</div>
-                  <div style={{ color:'rgba(255,255,255,0.6)', fontSize:13, marginTop:2 }}>Sit back and relax — your food is on its way.</div>
-                </div>
-              </div>
-              <button onClick={() => { setShowOrderConfirm(false); clearTimeout(orderConfirmTimer.current) }}
-                style={{ background:'rgba(255,255,255,0.1)', border:'none', borderRadius:999, width:32, height:32, color:'rgba(255,255,255,0.7)', fontSize:16, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>✕</button>
-            </div>
-            <div style={{ background:'rgba(232,137,12,0.15)', border:'1px solid rgba(232,137,12,0.3)', borderRadius:10, padding:'10px 14px', textAlign:'center' }}>
-              <span style={{ color:'rgba(255,255,255,0.85)', fontSize:14 }}>Track your order using the <strong style={{color:'#E8890C'}}>Track</strong> button below</span>
-            </div>
-          </div>
-        </div>
+      {showSOS     && <SOSPanel     tableData={tableData} eventData={eventData} onClose={() => { setShowSOS(false); setAppState('menu') }} />}
+      {showHistory && <OrderHistory tableData={tableData} eventData={eventData} onClose={() => { setShowHistory(false); setAppState('menu') }} />}
+      {showFeedback && (
+        <FeedbackModal
+          orderId={feedbackOrderId}
+          tableData={tableData}
+          eventData={eventData}
+          onClose={handleFeedbackClose}
+        />
       )}
 
     </div>

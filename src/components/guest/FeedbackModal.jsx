@@ -50,6 +50,15 @@ function FacePicker({ onSelect, onClose }) {
   )
 }
 
+// Flash animation for Skip button
+const skipFlashStyle = `
+  @keyframes skipFlash {
+    0%, 100% { background: transparent; border-color: #D1D5DB; color: #9CA3AF; }
+    50% { background: #1A0A0A; border-color: #E8890C; color: #E8890C; }
+  }
+  .skip-flash { animation: skipFlash 2s ease-in-out infinite; }
+`
+
 function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDone }) {
   const cfg = SENTIMENT_CONFIG[sentiment]
   const [foodRating, setFoodRating] = useState(null)
@@ -156,9 +165,19 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
           </div>
         </div>
         <div style={{ padding:'12px 24px 32px', flexShrink:0, borderTop:'1px solid #F0F0F0', display:'flex', gap:10 }}>
-          <button onClick={onClose} style={{ flex:1, background:'#F5F5F5', border:'none', borderRadius:14, padding:'15px', fontSize:15, fontWeight:700, color:'#888', cursor:'pointer' }}>Skip</button>
+          <style>{skipFlashStyle}</style>
+          {/* Skip — flashes between grey and amber to attract attention */}
+          <button onClick={onClose} className="skip-flash"
+            style={{ flex:1, border:'2px solid #D1D5DB',
+              borderRadius:14, padding:'15px', fontSize:14, fontWeight:700,
+              cursor:'pointer', letterSpacing:'0.3px', transition:'all 0.3s' }}>
+            Skip
+          </button>
+          {/* Submit — solid dark, amber text, larger */}
           <button onClick={submit} disabled={submitting}
-            style={{ flex:2, background:submitting?'#999':'#1A0A0A', color:'#E8890C', border:'none', borderRadius:14, padding:'15px', fontSize:15, fontWeight:800, cursor:submitting?'wait':'pointer' }}>
+            style={{ flex:2, background:submitting?'#555':'#1A0A0A', color:'#E8890C',
+              border:'none', borderRadius:14, padding:'15px', fontSize:16,
+              fontWeight:900, cursor:submitting?'wait':'pointer' }}>
             {submitting ? 'Submitting...' : 'Submit →'}
           </button>
         </div>

@@ -96,13 +96,14 @@ function HeaderCarousel({ eventData, tableNumber, isOnline }) {
   )
 }
 
-function MenuModal({ categories, items, onSelect, cartCount, currentOrderId, onShowStatus }) {
-  const [open, setOpen] = useState(false)
+function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, onShowStatus, menuSheetOpen, onMenuSheetChange }) {
+  const open = menuSheetOpen
+  const setOpen = onMenuSheetChange
   return (
     <>
       {/* Bottom-right button group: Track Order + MENU */}
       <div style={{ position:'fixed', bottom: cartCount>0 ? 110 : 28, right:16, zIndex:60, display:'flex', gap:8, alignItems:'center' }}>
-        {currentOrderId && (
+        {hasActiveOrders && (
           <button onClick={onShowStatus} style={{
             background:'#16A34A', color:'#fff', border:'none', borderRadius:999,
             padding:'12px 18px', fontSize:13, fontWeight:800, cursor:'pointer',
@@ -148,7 +149,7 @@ function MenuModal({ categories, items, onSelect, cartCount, currentOrderId, onS
   )
 }
 
-export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, currentOrderId, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback }) {
+export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen }) {
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [search, setSearch] = useState('')
@@ -208,11 +209,27 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   // Detect which category is in view while scrolling
   function handleScroll(e) {
     if (search.length > 0) return
-    const scrollTop = e.target.scrollTop + 20 // small offset for sticky header
-    let current = 'all'
+    const container = e.target
+    const scrollTop = container.scrollTop
+    const containerHeight = container.clientHeight
+
+    // Find which category section is most visible
+    let current = categories[0]?.id || 'all'
+    let bestVisibility = -1
+
     categories.forEach(cat => {
       const el = sectionRefs.current[cat.id]
-      if (el && el.offsetTop <= scrollTop) current = cat.id
+      if (!el) return
+      const elTop = el.offsetTop - scrollTop
+      const elBottom = elTop + el.offsetHeight
+      // How much of this section is in the top half of the screen
+      const visibleTop = Math.max(0, elTop)
+      const visibleBottom = Math.min(containerHeight * 0.6, elBottom)
+      const visibility = visibleBottom - visibleTop
+      if (visibility > bestVisibility) {
+        bestVisibility = visibility
+        current = cat.id
+      }
     })
     setActiveChip(current)
   }
@@ -361,7 +378,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
 
       {/* FLOATING BOTTOM BUTTONS — MENU (right) + Track Order (left of menu) */}
       {search.length === 0 && categories.length > 0 && (
-        <MenuModal categories={categories} items={items} onSelect={scrollToCategory} cartCount={cartCount} currentOrderId={currentOrderId} onShowStatus={onShowStatus} />
+        <MenuModal categories={categories} items={items} onSelect={scrollToCategory} cartCount={cartCount} hasActiveOrders={hasActiveOrders} onShowStatus={onShowStatus} menuSheetOpen={menuSheetOpen} onMenuSheetChange={setMenuSheetOpen} />
       )}
 
       {/* FEEDBACK BUBBLE */}
