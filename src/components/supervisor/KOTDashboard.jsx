@@ -318,7 +318,7 @@ ${(order.order_items||[]).map(i => `
   const availableWaiters = waiters.filter(w=>!busyWaiterIds.includes(w.id)).sort((a,b)=>(waiterOrderCount[a.id]||0)-(waiterOrderCount[b.id]||0))
 
   const filteredOrders = orders.filter(o => {
-    const matchFilter = filter==='active'?!['delivered','cancelled'].includes(o.status):filter==='delivered'?o.status==='delivered':true
+    const matchFilter = filter==='active'?!['delivered','cancelled'].includes(o.status):filter==='delivered'?o.status==='delivered':filter==='cancelled'?o.status==='cancelled':true
     const matchWaiter = !waiterFilter||o.waiter_id===waiterFilter
     const matchTable = !tableFilter||o.tables?.table_number===tableFilter
     return matchFilter&&matchWaiter&&matchTable
@@ -373,7 +373,7 @@ ${(order.order_items||[]).map(i => `
       )}
 
       <div style={{ display:'flex', gap:8, marginBottom:14 }}>
-        {[['active','Active'],['delivered','Delivered'],['all','All']].map(([val,label]) => (
+        {[['active','Active'],['delivered','Delivered'],['cancelled','Cancelled'],['all','All']].map(([val,label]) => (
           <button key={val} onClick={()=>setFilter(val)} style={{ flex:1, padding:'8px 4px', background:filter===val?'var(--ink)':'#fff', color:filter===val?'#fff':'var(--ink)', border:'1.5px solid', borderColor:filter===val?'var(--ink)':'var(--line)', borderRadius:10, fontSize:13, fontWeight:700 }}>{label}</button>
         ))}
       </div>

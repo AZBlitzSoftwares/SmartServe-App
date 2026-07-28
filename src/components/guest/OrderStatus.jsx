@@ -114,48 +114,24 @@ export default function OrderStatus({ activeOrders, tableNumber, onBack, tableDa
     await supabase.from('orders')
       .update({ status: 'cancelled', cancel_reason: 'Cancelled by guest' })
       .eq('id', orderId)
+    // Navigate to menu after cancel
+    if (onBack) onBack()
   }
 
   if (!activeOrders || activeOrders.length === 0) return (
     <div style={{ minHeight:'100vh', background:'#F5F5F5', display:'flex', flexDirection:'column' }}>
       <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 16px', background:'#1A0A0A' }}>
-        <button onClick={onBack} style={{ background:'rgba(255,255,255,0.1)', border:'none',
-          borderRadius:10, padding:'8px 14px', fontSize:14, fontWeight:600, cursor:'pointer', color:'#fff' }}>
-          ← Back
-        </button>
+        <button onClick={onBack} style={{ background:'rgba(255,255,255,0.1)', border:'none', borderRadius:10, padding:'8px 14px', fontSize:14, fontWeight:600, cursor:'pointer', color:'#fff' }}>← Back</button>
         <h2 style={{ fontSize:17, fontWeight:800, color:'#fff', flex:1 }}>Track Orders</h2>
-        <div style={{ background:'#E8890C', color:'#fff', fontSize:12, fontWeight:800,
-          padding:'5px 12px', borderRadius:999 }}>TABLE {tableNumber}</div>
+        <div style={{ background:'#E8890C', color:'#fff', fontSize:12, fontWeight:800, padding:'5px 12px', borderRadius:999 }}>TABLE {tableNumber}</div>
       </div>
-      <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center',
-        justifyContent:'center', padding:24, textAlign:'center' }}>
-        <div style={{ fontSize:48, marginBottom:12 }}>✅</div>
-        <div style={{ fontSize:18, fontWeight:800, marginBottom:8 }}>All orders delivered!</div>
-        <div style={{ fontSize:14, color:'#888', marginBottom:24 }}>Returning to home...</div>
-      </div>
-    </div>
-  )
-
-  return (
-    <div style={{ minHeight:'100vh', background:'#F5F5F5', display:'flex', flexDirection:'column' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 16px', background:'#1A0A0A', flexShrink:0 }}>
-        <button onClick={onBack} style={{ background:'rgba(255,255,255,0.1)', border:'none',
-          borderRadius:10, padding:'8px 14px', fontSize:14, fontWeight:600, cursor:'pointer', color:'#fff' }}>
-          ← Back
-        </button>
-        <h2 style={{ fontSize:17, fontWeight:800, color:'#fff', flex:1 }}>
-          Track Orders {activeOrders.length > 1 ? '(' + activeOrders.length + ')' : ''}
-        </h2>
-        <div style={{ background:'#E8890C', color:'#fff', fontSize:12, fontWeight:800,
-          padding:'5px 12px', borderRadius:999 }}>TABLE {tableNumber}</div>
-      </div>
-      <div style={{ flex:1, overflowY:'auto', padding:'16px 16px 32px' }}>
-        {activeOrders.map(order => (
-          <OrderCard key={order.id} order={order} tableNumber={tableNumber} onCancel={handleGuestCancel} />
-        ))}
-        <button onClick={onBack} style={{ width:'100%', marginTop:8, background:'#1A0A0A',
-          color:'#fff', border:'none', borderRadius:14, padding:'16px',
-          fontSize:16, fontWeight:800, cursor:'pointer' }}>
+      <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24, textAlign:'center' }}>
+        <div style={{ fontSize:48, marginBottom:12 }}>🍽️</div>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:8, color:'#1A0A0A' }}>No active orders</div>
+        <div style={{ fontSize:14, color:'#888', marginBottom:24, lineHeight:1.6, maxWidth:300 }}>
+          Your order was cancelled or delivered.<br/>Go back to menu to place a new order.
+        </div>
+        <button onClick={onBack} style={{ background:'#1A0A0A', color:'#fff', border:'none', borderRadius:14, padding:'16px 32px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
           ← Back to Menu
         </button>
       </div>
