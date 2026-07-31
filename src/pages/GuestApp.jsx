@@ -109,29 +109,39 @@ export default function GuestApp() {
   backHandlerRef.current = handleBack
 
   // ── History sentinel ──────────────────────────────────────────────────────
-  // Chrome and Android WebView apply the "History Manipulation Intervention":
-  // history entries pushed WITHOUT user activation are marked skippable, and
-  // the back button jumps straight over them without ever firing popstate.
-  // The buffer must therefore be built from real user gestures, never from a
-  // mount effect. Every tap tops it back up, so history can never run dry and
-  // the app can never be closed by the back button.
+  // Guard entries are marked in the URL hash (#g1 .. #g5) rather than tracked
+  // in a counter. Depth is therefore READ from the URL on every check, so it
+  // self-corrects after a bfcache restore, a reload, or any navigation that
+  // would otherwise leave a stale counter believing the buffer was full.
+  // Entries are only ever created inside a user gesture, because Chrome and
+  // Android WebView mark non-activated history entries as skippable and the
+  // back button jumps straight over them without firing popstate.
   useEffect(() => {
-    const url = window.location.href
     const GUARD_DEPTH = 5
-    let depth = 0
+    const base = window.location.pathname + window.location.search
 
-    function pushOne() {
-      try {
-        // Preserve React Router's own state fields so the router is not confused
-        const cur = window.history.state || {}
-        window.history.pushState({ ...cur, ssGuard: true }, '', url)
-        depth++
-        return true
-      } catch (e) { return false }
+    // Normalise on load: never start part-way up a stale guard chain
+    if (/^#g\d+$/.test(window.location.hash)) {
+      try { window.history.replaceState({}, '', base) } catch (e) {}
+    }
+
+    function currentDepth() {
+      const m = /^#g(\d+)$/.exec(window.location.hash)
+      return m ? parseInt(m[1], 10) : 0
     }
 
     function topUp() {
-      while (depth < GUARD_DEPTH) { if (!pushOne()) break }
+      let d = currentDepth()
+      let added = 0
+      while (d < GUARD_DEPTH && added < GUARD_DEPTH) {
+        d++
+        try {
+          const cur = window.history.state || {}
+          window.history.pushState({ ...cur, ssGuard: true, d }, '', base + '#g' + d)
+          added++
+        } catch (e) { break }
+      }
+      return added
     }
 
     function onGesture() {
@@ -144,18 +154,28 @@ export default function GuestApp() {
     document.addEventListener('click', onGesture, true)
     document.addEventListener('keydown', onGesture, true)
 
-    function onPop(e) {
+    function onNav() {
       // After a valid exit PIN we stop refilling and let history drain,
       // which is what allows the native shell to close the app.
       if (allowExitRef.current) return
-      depth = (e.state && e.state.ssGuard) ? Math.max(0, depth - 1) : 0
       topUp()                    // refill FIRST, synchronously
       backHandlerRef.current()   // then act
     }
 
-    window.addEventListener('popstate', onPop)
+    // popstate covers same-document back; hashchange is a second safety net
+    window.addEventListener('popstate', onNav)
+    window.addEventListener('hashchange', onNav)
+
+    // bfcache restore or tab re-focus: rebuild whatever was lost
+    function onRestore() { if (!allowExitRef.current) topUp() }
+    window.addEventListener('pageshow', onRestore)
+    document.addEventListener('visibilitychange', onRestore)
+
     return () => {
-      window.removeEventListener('popstate', onPop)
+      window.removeEventListener('popstate', onNav)
+      window.removeEventListener('hashchange', onNav)
+      window.removeEventListener('pageshow', onRestore)
+      document.removeEventListener('visibilitychange', onRestore)
       document.removeEventListener('pointerdown', onGesture, true)
       document.removeEventListener('touchstart', onGesture, true)
       document.removeEventListener('click', onGesture, true)
@@ -168,7 +188,11 @@ export default function GuestApp() {
     allowExitRef.current = true
     setShowExitGate(false)
     try { window.close() } catch (e) {}
-    try { window.history.go(-(window.history.length - 1)) } catch (e) {}
+    try {
+      const m = /^#g(\d+)$/.exec(window.location.hash)
+      const d = m ? parseInt(m[1], 10) : 0
+      window.history.go(-(d + 1))
+    } catch (e) {}
     setTimeout(() => setExitReady(true), 700)
   }
 
