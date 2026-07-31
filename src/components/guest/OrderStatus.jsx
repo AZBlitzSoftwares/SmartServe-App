@@ -195,11 +195,8 @@ export default function OrderStatus({ activeOrders, tableNumber, onBack }) {
       {confirmId && (
         <Modal>
           <div style={{ fontSize:44, marginBottom:12 }}>🗑️</div>
-          <div style={{ fontSize:20, fontWeight:800, color:'#1A0A0A', marginBottom:8 }}>
+          <div style={{ fontSize:20, fontWeight:800, color:'#1A0A0A', marginBottom:24 }}>
             Cancel this order?
-          </div>
-          <div style={{ fontSize:14, color:'#888', lineHeight:1.6, marginBottom:24 }}>
-            This cannot be undone. You can place a new order any time.
           </div>
           <div style={{ display:'flex', gap:12 }}>
             <button onClick={() => setConfirmId(null)} disabled={busy}
