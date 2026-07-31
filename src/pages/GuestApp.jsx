@@ -109,18 +109,20 @@ export default function GuestApp() {
   backHandlerRef.current = handleBack
 
   // ── History sentinel ──────────────────────────────────────────────────────
-  // Guard entries are marked in the URL hash (#g1 .. #g5) rather than tracked
-  // in a counter. Depth is therefore READ from the URL on every check, so it
-  // self-corrects after a bfcache restore, a reload, or any navigation that
-  // would otherwise leave a stale counter believing the buffer was full.
-  // Entries are only ever created inside a user gesture, because Chrome and
-  // Android WebView mark non-activated history entries as skippable and the
-  // back button jumps straight over them without firing popstate.
+  // Chromium's History Manipulation Intervention: a history entry created
+  // WITHOUT a fresh user activation is marked skippable, and ALL same-document
+  // entries share one skippable state. So a single un-activated push poisons
+  // every guard we ever created, and the back button then skips the lot — on
+  // Android that closes the app outright.
+  //
+  // Therefore: entries are created ONLY inside real user gestures. Never in
+  // popstate, never in pageshow, never in a mount effect. Guests tap
+  // constantly, so the buffer refills naturally as the app is used.
   useEffect(() => {
-    const GUARD_DEPTH = 5
+    const GUARD_DEPTH = 10
     const base = window.location.pathname + window.location.search
 
-    // Normalise on load: never start part-way up a stale guard chain
+    // Never resume part-way up a stale guard chain after a reload
     if (/^#g\d+$/.test(window.location.hash)) {
       try { window.history.replaceState({}, '', base) } catch (e) {}
     }
@@ -130,56 +132,54 @@ export default function GuestApp() {
       return m ? parseInt(m[1], 10) : 0
     }
 
+    // Only true while the browser considers a user gesture active
+    function activationLive() {
+      try {
+        const ua = navigator.userActivation
+        if (ua && typeof ua.isActive === 'boolean') return ua.isActive
+      } catch (e) {}
+      return true   // older engines: assume the gesture handler is trustworthy
+    }
+
     function topUp() {
+      if (allowExitRef.current) return
+      if (!activationLive()) return          // pushing now would poison the buffer
       let d = currentDepth()
       let added = 0
       while (d < GUARD_DEPTH && added < GUARD_DEPTH) {
         d++
         try {
-          const cur = window.history.state || {}
-          window.history.pushState({ ...cur, ssGuard: true, d }, '', base + '#g' + d)
+          window.history.pushState({ ssGuard: true, d }, '', base + '#g' + d)
           added++
         } catch (e) { break }
       }
-      return added
     }
 
-    function onGesture() {
-      if (allowExitRef.current) return
-      topUp()
-    }
+    // The ONLY places a history entry is ever created
+    document.addEventListener('pointerdown', topUp, true)
+    document.addEventListener('touchstart', topUp, true)
+    document.addEventListener('mousedown', topUp, true)
+    document.addEventListener('click', topUp, true)
+    document.addEventListener('keydown', topUp, true)
 
-    document.addEventListener('pointerdown', onGesture, true)
-    document.addEventListener('touchstart', onGesture, true)
-    document.addEventListener('click', onGesture, true)
-    document.addEventListener('keydown', onGesture, true)
-
+    // Handles the back press. Deliberately does NOT push — the buffer is deep
+    // and the guest's next tap tops it back up.
     function onNav() {
-      // After a valid exit PIN we stop refilling and let history drain,
-      // which is what allows the native shell to close the app.
       if (allowExitRef.current) return
-      topUp()                    // refill FIRST, synchronously
-      backHandlerRef.current()   // then act
+      backHandlerRef.current()
     }
 
-    // popstate covers same-document back; hashchange is a second safety net
     window.addEventListener('popstate', onNav)
     window.addEventListener('hashchange', onNav)
-
-    // bfcache restore or tab re-focus: rebuild whatever was lost
-    function onRestore() { if (!allowExitRef.current) topUp() }
-    window.addEventListener('pageshow', onRestore)
-    document.addEventListener('visibilitychange', onRestore)
 
     return () => {
       window.removeEventListener('popstate', onNav)
       window.removeEventListener('hashchange', onNav)
-      window.removeEventListener('pageshow', onRestore)
-      document.removeEventListener('visibilitychange', onRestore)
-      document.removeEventListener('pointerdown', onGesture, true)
-      document.removeEventListener('touchstart', onGesture, true)
-      document.removeEventListener('click', onGesture, true)
-      document.removeEventListener('keydown', onGesture, true)
+      document.removeEventListener('pointerdown', topUp, true)
+      document.removeEventListener('touchstart', topUp, true)
+      document.removeEventListener('mousedown', topUp, true)
+      document.removeEventListener('click', topUp, true)
+      document.removeEventListener('keydown', topUp, true)
     }
   }, [])
 
