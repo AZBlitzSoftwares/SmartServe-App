@@ -115,14 +115,11 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             )}
 
             {orderLimitHit && (
-              <div style={{ background:'#FFF1F2', border:'2px solid #FDA4AF', borderRadius:16, padding:'20px 18px', marginBottom:12, textAlign:'center' }}>
-                <div style={{ fontSize:36, marginBottom:8 }}>⏳</div>
-                <div style={{ fontWeight:900, fontSize:22, color:'#BE123C', marginBottom:6 }}>Waiting</div>
-                <div style={{ fontSize:14, color:'#9F1239', lineHeight:1.6, marginBottom:14 }}>
-                  {activeOrderCount === 1
-                    ? 'Your current order is still being delivered.'
-                    : activeOrderCount + ' orders are being delivered.'}
-                  {' '}Place Order will unlock once one is delivered.
+              <div style={{ background:'#FFF1F2', border:'2px solid #FDA4AF', borderRadius:16, padding:'22px 18px', marginBottom:12, textAlign:'center' }}>
+                <div style={{ fontSize:36, marginBottom:10 }}>⏳</div>
+                <div style={{ fontWeight:900, fontSize:26, color:'#BE123C', marginBottom:8, letterSpacing:'0.5px' }}>PLEASE WAIT</div>
+                <div style={{ fontSize:16, color:'#9F1239', lineHeight:1.6, marginBottom:16, fontWeight:500 }}>
+                  Your current order is in progress
                 </div>
                 <button onClick={() => setOpen(false)}
                   style={{ background:'#1A0A0A', color:'#E8890C', border:'none', borderRadius:12, padding:'11px 20px', fontSize:14, fontWeight:800, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }}>
@@ -142,7 +139,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
               {placing
                 ? '⏳ Placing Order...'
                 : orderLimitHit
-                  ? '🔒 Locked — Waiting for Delivery'
+                  ? '🔒 Please Wait'
                   : '✓ Place Order'}
             </button>
           </div>

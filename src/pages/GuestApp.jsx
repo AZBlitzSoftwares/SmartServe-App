@@ -9,8 +9,16 @@ import OrderStatus from '../components/guest/OrderStatus'
 import SOSPanel from '../components/guest/SOSPanel'
 import OrderHistory from '../components/guest/OrderHistory'
 import FeedbackModal from '../components/guest/FeedbackModal'
+import ExitGate from '../components/guest/ExitGate'
 
 const FEEDBACK_DELAY_MS = 5000
+
+// Two back presses within this window on the Welcome screen open the exit dialog.
+const EXIT_DOUBLE_PRESS_MS = 3000
+
+// Anywhere EXCEPT Welcome, presses closer together than this are treated as one
+// press. A guest jabbing back three times moves back one screen, not three.
+const BACK_DEBOUNCE_MS = 1500
 
 export default function GuestApp() {
   const [appState, setAppState] = useState('loading')
@@ -26,16 +34,24 @@ export default function GuestApp() {
   const [feedbackOrderId, setFeedbackOrderId] = useState(null)
   const [cartOpen, setCartOpen] = useState(false)
   const [menuSheetOpen, setMenuSheetOpen] = useState(false)
+  const [showExitGate, setShowExitGate] = useState(false)
+  const [exitReady, setExitReady] = useState(false)
 
-  const appStateRef     = useRef('loading')
-  const cartOpenRef     = useRef(false)
-  const showSOSRef      = useRef(false)
-  const showHistoryRef  = useRef(false)
-  const showFeedbackRef = useRef(false)
-  const menuSheetRef    = useRef(false)
-  const activeOrdersRef = useRef([])
+  const appStateRef      = useRef('loading')
+  const cartOpenRef      = useRef(false)
+  const showSOSRef       = useRef(false)
+  const showHistoryRef   = useRef(false)
+  const showFeedbackRef  = useRef(false)
+  const menuSheetRef     = useRef(false)
+  const activeOrdersRef  = useRef([])
+  const showExitGateRef  = useRef(false)
   const feedbackTimerRef = useRef(null)
-  const backLock = useRef(false)
+
+  // Back-button machinery
+  const allowExitRef    = useRef(false) // true only after a valid exit PIN
+  const lastBackAtRef   = useRef(0)     // last back press on Welcome (exit double-press)
+  const lastActionAtRef = useRef(0)     // last back press we actually acted on (debounce)
+  const backHandlerRef  = useRef(() => {})
 
   useEffect(() => { appStateRef.current = appState },         [appState])
   useEffect(() => { cartOpenRef.current = cartOpen },         [cartOpen])
@@ -44,64 +60,124 @@ export default function GuestApp() {
   useEffect(() => { showFeedbackRef.current = showFeedback }, [showFeedback])
   useEffect(() => { menuSheetRef.current = menuSheetOpen },   [menuSheetOpen])
   useEffect(() => { activeOrdersRef.current = activeOrders }, [activeOrders])
+  useEffect(() => { showExitGateRef.current = showExitGate }, [showExitGate])
 
   function goTo(screen) {
     appStateRef.current = screen
     setAppState(screen)
+    lastBackAtRef.current = 0   // leaving a screen resets the double-press counter
   }
 
+  // ── ONE back press = exactly ONE action, always in sequence ──────────────
   function handleBack() {
-    if (backLock.current) return
-    backLock.current = true
-    setTimeout(() => { backLock.current = false }, 400)
     const s = appStateRef.current
     if (s === 'setup' || s === 'loading') return
-    if (showFeedbackRef.current) { setShowFeedback(false); goTo('welcome'); return }
+
+    const now = Date.now()
+
+    // ── Welcome is the ONLY screen where a double press means something ──
+    if (s === 'welcome' && !showExitGateRef.current) {
+      if (lastBackAtRef.current && now - lastBackAtRef.current <= EXIT_DOUBLE_PRESS_MS) {
+        lastBackAtRef.current = 0
+        setShowExitGate(true)
+      } else {
+        lastBackAtRef.current = now   // first press — nothing visible happens
+      }
+      return
+    }
+
+    // ── Everywhere else: a rapid flurry counts as a single step ──
+    if (now - lastActionAtRef.current < BACK_DEBOUNCE_MS) return
+    lastActionAtRef.current = now
+
+    // Exit gate is its own overlay — back closes it and stays on Welcome
+    if (showExitGateRef.current) { setShowExitGate(false); return }
+
+    // Overlays close one at a time, innermost first
+    if (showFeedbackRef.current) { handleFeedbackClose(); return }
     if (menuSheetRef.current)    { setMenuSheetOpen(false); menuSheetRef.current = false; return }
     if (cartOpenRef.current)     { setCartOpen(false); return }
-    if (showSOSRef.current)      { setShowSOS(false); goTo('menu'); return }
-    if (showHistoryRef.current)  { setShowHistory(false); goTo('menu'); return }
-    if (s === 'status')          { goTo('menu'); return }
-    if (s === 'menu')            { setMenuSheetOpen(false); menuSheetRef.current = false; goTo('welcome'); return }
+    if (showSOSRef.current)      { setShowSOS(false); return }
+    if (showHistoryRef.current)  { setShowHistory(false); return }
+
+    // Screen sequence: Track -> Menu -> Welcome
+    if (s === 'status') { goTo('menu'); return }
+    if (s === 'menu')   { setMenuSheetOpen(false); menuSheetRef.current = false; goTo('welcome'); return }
   }
 
-  // Back button — safe approach, no loops
+  // Always keep the freshest handler — avoids stale closures
+  backHandlerRef.current = handleBack
+
+  // ── History sentinel ──────────────────────────────────────────────────────
+  // Chrome and Android WebView apply the "History Manipulation Intervention":
+  // history entries pushed WITHOUT user activation are marked skippable, and
+  // the back button jumps straight over them without ever firing popstate.
+  // The buffer must therefore be built from real user gestures, never from a
+  // mount effect. Every tap tops it back up, so history can never run dry and
+  // the app can never be closed by the back button.
   useEffect(() => {
-    function push() {
-      try { window.history.pushState({ k: 1 }, '', '/') } catch(e) {}
-    }
-    push(); push(); push()
+    const url = window.location.href
+    const GUARD_DEPTH = 5
+    let depth = 0
 
-    function onPop() {
-      handleBack()
-      setTimeout(() => { push(); push() }, 200)
-    }
-
-    function onKey(e) {
-      if (e.key === 'GoBack' || e.keyCode === 4) {
-        e.preventDefault(); e.stopPropagation()
-        handleBack()
-        setTimeout(() => { push(); push() }, 200)
-        return false
-      }
+    function pushOne() {
+      try {
+        // Preserve React Router's own state fields so the router is not confused
+        const cur = window.history.state || {}
+        window.history.pushState({ ...cur, ssGuard: true }, '', url)
+        depth++
+        return true
+      } catch (e) { return false }
     }
 
-    function onUnload(e) { e.preventDefault(); e.returnValue = ''; return '' }
+    function topUp() {
+      while (depth < GUARD_DEPTH) { if (!pushOne()) break }
+    }
+
+    function onGesture() {
+      if (allowExitRef.current) return
+      topUp()
+    }
+
+    document.addEventListener('pointerdown', onGesture, true)
+    document.addEventListener('touchstart', onGesture, true)
+    document.addEventListener('click', onGesture, true)
+    document.addEventListener('keydown', onGesture, true)
+
+    function onPop(e) {
+      // After a valid exit PIN we stop refilling and let history drain,
+      // which is what allows the native shell to close the app.
+      if (allowExitRef.current) return
+      depth = (e.state && e.state.ssGuard) ? Math.max(0, depth - 1) : 0
+      topUp()                    // refill FIRST, synchronously
+      backHandlerRef.current()   // then act
+    }
 
     window.addEventListener('popstate', onPop)
-    document.addEventListener('keydown', onKey, true)
-    window.addEventListener('keydown', onKey, true)
-    window.addEventListener('beforeunload', onUnload)
-    const t = setInterval(() => { push() }, 5000)
-
     return () => {
       window.removeEventListener('popstate', onPop)
-      document.removeEventListener('keydown', onKey, true)
-      window.removeEventListener('keydown', onKey, true)
-      window.removeEventListener('beforeunload', onUnload)
-      clearInterval(t)
+      document.removeEventListener('pointerdown', onGesture, true)
+      document.removeEventListener('touchstart', onGesture, true)
+      document.removeEventListener('click', onGesture, true)
+      document.removeEventListener('keydown', onGesture, true)
     }
   }, [])
+
+  // Called only after ExitGate verifies a supervisor/admin PIN
+  function performExit() {
+    allowExitRef.current = true
+    setShowExitGate(false)
+    try { window.close() } catch (e) {}
+    try { window.history.go(-(window.history.length - 1)) } catch (e) {}
+    setTimeout(() => setExitReady(true), 700)
+  }
+
+  function cancelExit() {
+    allowExitRef.current = false
+    lastBackAtRef.current = 0
+    setShowExitGate(false)
+    setExitReady(false)
+  }
 
   // Load saved setup from localStorage
   useEffect(() => {
@@ -261,6 +337,28 @@ export default function GuestApp() {
         onClose={() => { setShowHistory(false); goTo('menu') }} />}
       {showFeedback && <FeedbackModal orderId={feedbackOrderId} tableData={tableData}
         eventData={eventData} onClose={handleFeedbackClose} />}
+
+      {showExitGate && (
+        <ExitGate eventId={eventData?.id} onCancel={cancelExit} onVerified={performExit} />
+      )}
+
+      {exitReady && (
+        <div style={{ position:'fixed', inset:0, background:'#1A0A0A', zIndex:400,
+          display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+          padding:24, textAlign:'center' }}>
+          <div style={{ fontSize:52, marginBottom:14 }}>✅</div>
+          <div style={{ fontSize:21, fontWeight:800, color:'#fff', marginBottom:10 }}>PIN accepted</div>
+          <div style={{ fontSize:14, color:'rgba(255,255,255,0.6)', lineHeight:1.6,
+            maxWidth:300, marginBottom:26 }}>
+            Press the Back button once more to close the app.
+          </div>
+          <button onClick={cancelExit}
+            style={{ background:'#E8890C', color:'#fff', border:'none', borderRadius:14,
+              padding:'16px 34px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
+            Stay in App
+          </button>
+        </div>
+      )}
     </div>
   )
 }

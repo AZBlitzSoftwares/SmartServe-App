@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 
 function mapStatus(raw) {
-  if (!raw) return { label:'Order Placed', color:'#D97706' }
-  if (['pending','placed'].includes(raw)) return { label:'Order Placed', color:'#D97706' }
+  if (!raw) return { label:'Order Received', color:'#D97706' }
+  if (['pending','placed'].includes(raw)) return { label:'Order Received', color:'#D97706' }
   if (['in_progress','in_preparation','ready'].includes(raw)) return { label:'Waiter On The Way', color:'#2563EB' }
   if (raw === 'delivered') return { label:'Delivered', color:'#16A34A' }
   if (raw === 'cancelled') return { label:'Cancelled', color:'#DC2626' }

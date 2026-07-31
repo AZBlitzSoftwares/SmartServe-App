@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
-const STATUS_LABELS = { pending:'New Order', placed:'New Order', in_progress:'In Progress', delivered:'Delivered', cancelled:'Cancelled' }
+const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
 
 export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder }) {

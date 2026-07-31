@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
 function mapStatus(raw) {
@@ -9,11 +10,25 @@ function mapStatus(raw) {
   return 'placed'
 }
 
+// Labels mirror the SOS "Request Received" screen: large icon above a
+// black, bold, 20px title. No badge pill.
 const STATUS_CONFIG = {
-  placed:     { label:'Order Placed',      icon:'📋', color:'#D97706', bg:'#FEF3C7' },
+  placed:     { label:'Order Received',    icon:'📋', color:'#D97706', bg:'#FEF3C7' },
   on_the_way: { label:'Waiter On The Way', icon:'🏃', color:'#2563EB', bg:'#EFF6FF' },
   delivered:  { label:'Delivered',         icon:'✓',  color:'#16A34A', bg:'#DCFCE7' },
   cancelled:  { label:'Cancelled',         icon:'✕',  color:'#DC2626', bg:'#FEF2F2' },
+}
+
+function Modal({ children }) {
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.72)', zIndex:200,
+      display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+      <div style={{ width:'100%', maxWidth:370, background:'#fff', borderRadius:22,
+        padding:'28px 24px 24px', boxShadow:'0 24px 60px rgba(0,0,0,0.35)', textAlign:'center' }}>
+        {children}
+      </div>
+    </div>
+  )
 }
 
 function OrderCard({ order, onCancel }) {
@@ -27,22 +42,28 @@ function OrderCard({ order, onCancel }) {
   const items = Array.isArray(order?.order_items) ? order.order_items : []
 
   return (
-    <div style={{ background:'#fff', borderRadius:20, padding:20, marginBottom:14,
+    <div style={{ background:'#fff', borderRadius:20, padding:'20px 18px 20px', marginBottom:14,
       boxShadow:'0 4px 16px rgba(0,0,0,0.08)', border:'2px solid ' + cfg.color + '33' }}>
 
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-        <span style={{ fontSize:13, fontWeight:700, color:'#888' }}>{orderId}</span>
-        <span style={{ background:cfg.bg, color:cfg.color, fontSize:12, fontWeight:800,
-          padding:'4px 12px', borderRadius:999 }}>{cfg.icon} {cfg.label}</span>
+      {/* Order reference */}
+      <div style={{ fontSize:13, fontWeight:700, color:'#888', marginBottom:14 }}>{orderId}</div>
+
+      {/* ── Status headline — matches the SOS Request Received styling ── */}
+      <div style={{ textAlign:'center', marginBottom:18 }}>
+        <div style={{ fontSize:44, marginBottom:8 }}>{cfg.icon}</div>
+        <div style={{ fontSize:20, fontWeight:800, color:'#1A0A0A', marginBottom:10 }}>
+          {cfg.label}
+        </div>
       </div>
 
+      {/* Progress dots — unchanged */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'center', marginBottom:14 }}>
         {statuses.map((s, idx) => {
           const sCfg = STATUS_CONFIG[s] || STATUS_CONFIG.placed
           const done = idx < currentIdx, active = idx === currentIdx
           return (
             <div key={s} style={{ display:'flex', alignItems:'center' }}>
-              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
+              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
                 <div style={{ width:32, height:32, borderRadius:'50%',
                   background: done?'#16A34A' : active?sCfg.color : '#E5E7EB',
                   border:'2px solid '+(done?'#16A34A':active?sCfg.color:'#D1D5DB'),
@@ -50,13 +71,13 @@ function OrderCard({ order, onCancel }) {
                   fontSize:13, color:done||active?'#fff':'#9CA3AF', fontWeight:900 }}>
                   {done ? '✓' : sCfg.icon}
                 </div>
-                <span style={{ fontSize:8, fontWeight:active?800:500,
-                  color:active?sCfg.color:done?'#16A34A':'#9CA3AF',
-                  whiteSpace:'nowrap', maxWidth:52, textAlign:'center' }}>{sCfg.label}</span>
+                <span style={{ fontSize:9, fontWeight:active?800:600,
+                  color:active?'#1A0A0A':done?'#16A34A':'#9CA3AF',
+                  maxWidth:62, textAlign:'center', lineHeight:1.25 }}>{sCfg.label}</span>
               </div>
               {idx < statuses.length-1 && (
-                <div style={{ width:28, height:2, background:done?'#16A34A':'#E5E7EB',
-                  margin:'0 4px 16px', transition:'background 0.3s' }} />
+                <div style={{ width:26, height:2, background:done?'#16A34A':'#E5E7EB',
+                  margin:'0 5px 18px', transition:'background 0.3s' }} />
               )}
             </div>
           )
@@ -110,61 +131,106 @@ function Header({ tableNumber, onBack }) {
 
 export default function OrderStatus({ activeOrders, tableNumber, onBack }) {
   const orders = Array.isArray(activeOrders) ? activeOrders.filter(Boolean) : []
+  const [confirmId, setConfirmId] = useState(null)   // Yes/No cancel modal
+  const [notice, setNotice] = useState('')           // styled replacement for alert()
+  const [busy, setBusy] = useState(false)
 
-  async function handleGuestCancel(orderId) {
+  async function reallyCancel(orderId) {
+    setBusy(true)
     try {
       const { data } = await supabase.from('orders')
         .select('waiter_id, status').eq('id', orderId).single()
       if (data?.waiter_id || (data?.status !== 'pending' && data?.status !== 'placed')) {
-        alert('This order can no longer be cancelled — a waiter has been assigned.')
+        setConfirmId(null)
+        setNotice('A waiter has already been assigned, so this order can no longer be cancelled.')
         return
       }
-      if (!window.confirm('Are you sure you want to cancel this order?')) return
       await supabase.from('orders')
         .update({ status: 'cancelled', cancel_reason: 'Cancelled by guest' })
         .eq('id', orderId)
+      setConfirmId(null)
       if (onBack) onBack()
     } catch (e) {
-      alert('Could not cancel right now. Please ask your waiter.')
+      setConfirmId(null)
+      setNotice('Could not cancel right now. Please ask your waiter.')
+    } finally {
+      setBusy(false)
     }
   }
 
-  if (orders.length === 0) {
-    return (
-      <div style={{ minHeight:'100vh', background:'#F5F5F5', display:'flex', flexDirection:'column' }}>
-        <Header tableNumber={tableNumber} onBack={onBack} />
-        <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center',
-          justifyContent:'center', padding:24, textAlign:'center' }}>
-          <div style={{ fontSize:48, marginBottom:12 }}>🍽️</div>
-          <div style={{ fontSize:18, fontWeight:800, marginBottom:8, color:'#1A0A0A' }}>No active orders</div>
-          <div style={{ fontSize:14, color:'#888', marginBottom:24, lineHeight:1.6, maxWidth:300 }}>
-            Your order was cancelled or delivered.<br/>Go back to menu to place a new order.
-          </div>
-          <button onClick={onBack} style={{ background:'#1A0A0A', color:'#fff', border:'none',
-            borderRadius:14, padding:'16px 32px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
-            ← Back to Menu
-          </button>
-        </div>
+  const body = orders.length === 0 ? (
+    <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center',
+      justifyContent:'center', padding:24, textAlign:'center' }}>
+      <div style={{ fontSize:48, marginBottom:12 }}>🍽️</div>
+      <div style={{ fontSize:18, fontWeight:800, marginBottom:8, color:'#1A0A0A' }}>No active orders</div>
+      <div style={{ fontSize:14, color:'#888', marginBottom:24, lineHeight:1.6, maxWidth:300 }}>
+        Your order was cancelled or delivered.<br/>Go back to menu to place a new order.
       </div>
-    )
-  }
+      <button onClick={onBack} style={{ background:'#1A0A0A', color:'#fff', border:'none',
+        borderRadius:14, padding:'16px 32px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
+        ← Back to Menu
+      </button>
+    </div>
+  ) : (
+    <div style={{ flex:1, padding:'16px 14px 40px' }}>
+      <div style={{ fontSize:13, fontWeight:700, color:'#888', marginBottom:12, paddingLeft:4 }}>
+        {orders.length} active {orders.length === 1 ? 'order' : 'orders'}
+      </div>
+      {orders.map(o => (
+        <OrderCard key={o.id} order={o} onCancel={id => setConfirmId(id)} />
+      ))}
+      <button onClick={onBack} style={{ width:'100%', marginTop:6, background:'#1A0A0A',
+        color:'#fff', border:'none', borderRadius:14, padding:'16px', fontSize:16,
+        fontWeight:800, cursor:'pointer' }}>
+        ← Back to Menu
+      </button>
+    </div>
+  )
 
   return (
     <div style={{ minHeight:'100vh', background:'#F5F5F5', display:'flex', flexDirection:'column' }}>
       <Header tableNumber={tableNumber} onBack={onBack} />
-      <div style={{ flex:1, padding:'16px 14px 90px' }}>
-        <div style={{ fontSize:13, fontWeight:700, color:'#888', marginBottom:12, paddingLeft:4 }}>
-          {orders.length} active {orders.length === 1 ? 'order' : 'orders'}
-        </div>
-        {orders.map(o => (
-          <OrderCard key={o.id} order={o} onCancel={handleGuestCancel} />
-        ))}
-        <button onClick={onBack} style={{ width:'100%', marginTop:6, background:'#1A0A0A',
-          color:'#fff', border:'none', borderRadius:14, padding:'16px', fontSize:16,
-          fontWeight:800, cursor:'pointer' }}>
-          ← Back to Menu
-        </button>
-      </div>
+      {body}
+
+      {confirmId && (
+        <Modal>
+          <div style={{ fontSize:44, marginBottom:12 }}>🗑️</div>
+          <div style={{ fontSize:20, fontWeight:800, color:'#1A0A0A', marginBottom:8 }}>
+            Cancel this order?
+          </div>
+          <div style={{ fontSize:14, color:'#888', lineHeight:1.6, marginBottom:24 }}>
+            This cannot be undone. You can place a new order any time.
+          </div>
+          <div style={{ display:'flex', gap:12 }}>
+            <button onClick={() => setConfirmId(null)} disabled={busy}
+              style={{ flex:1, background:'#F3F4F6', color:'#374151', border:'none',
+                borderRadius:14, padding:'16px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
+              No
+            </button>
+            <button onClick={() => reallyCancel(confirmId)} disabled={busy}
+              style={{ flex:1, background: busy ? '#999' : '#DC2626', color:'#fff', border:'none',
+                borderRadius:14, padding:'16px', fontSize:16, fontWeight:800,
+                cursor: busy ? 'wait' : 'pointer' }}>
+              {busy ? 'Please wait...' : 'Yes'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {notice && (
+        <Modal>
+          <div style={{ fontSize:44, marginBottom:12 }}>🏃</div>
+          <div style={{ fontSize:19, fontWeight:800, color:'#1A0A0A', marginBottom:10 }}>
+            Order already on the way
+          </div>
+          <div style={{ fontSize:14, color:'#888', lineHeight:1.6, marginBottom:22 }}>{notice}</div>
+          <button onClick={() => setNotice('')}
+            style={{ width:'100%', background:'#1A0A0A', color:'#fff', border:'none',
+              borderRadius:14, padding:'16px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
+            OK
+          </button>
+        </Modal>
+      )}
     </div>
   )
 }

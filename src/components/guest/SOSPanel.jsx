@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 
+// If a supervisor has not acted within this time, the guest may raise another
+// request. The original request is NEVER auto-resolved — it stays in the
+// supervisor queue so nothing is lost.
+const REQUEST_UNBLOCK_MS = 15 * 60 * 1000
+
 export default function SOSPanel({ tableData, eventData, onClose }) {
   const [sending, setSending] = useState(false)
   const [activeRequest, setActiveRequest] = useState(null)
@@ -49,7 +54,8 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
   }
 
   async function callWaiter() {
-    if (sending || activeRequest) return
+    if (sending) return
+    if (activeRequest && !canRaiseAnother) return
     if (!tableData?.id || !eventData?.id) {
       alert('Table not set up. Please ask your supervisor.')
       return
@@ -76,10 +82,6 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
     }
   }
 
-  function formatTime(ts) {
-    return new Date(ts).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:true })
-  }
-
   function getStatusDisplay() {
     if (!activeRequest) return null
     if (activeRequest.status === 'open') return {
@@ -96,6 +98,12 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
   }
 
   const statusDisplay = getStatusDisplay()
+
+  // Stale = supervisor has not acted within the window -> guest may raise another
+  const requestAgeMs = activeRequest?.created_at
+    ? Date.now() - new Date(activeRequest.created_at).getTime()
+    : 0
+  const canRaiseAnother = !!activeRequest && requestAgeMs >= REQUEST_UNBLOCK_MS
 
   if (loading) return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:70, display:'flex', alignItems:'flex-end' }}>
@@ -146,7 +154,6 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
                 <div style={{ width:28,height:28,borderRadius:'50%',background:'#16A34A',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'#fff',flexShrink:0 }}>✓</div>
                 <div>
                   <div style={{ fontSize:13, fontWeight:700 }}>Request Sent</div>
-                  <div style={{ fontSize:11, color:'#888' }}>{formatTime(activeRequest.created_at)}</div>
                 </div>
               </div>
               {activeRequest.status === 'in_progress' && (
@@ -160,9 +167,12 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
               )}
             </div>
 
-            <div style={{ background:'#FFF8EE',border:'1px solid rgba(232,137,12,0.3)',borderRadius:12,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#C06A00',textAlign:'center' }}>
-              🔒 Cannot place another request until this one is resolved
-            </div>
+            {canRaiseAnother && (
+              <button onClick={callWaiter} disabled={sending}
+                style={{ width:'100%', background:sending?'#999':'#E8890C', color:'#fff', border:'none', borderRadius:14, padding:'16px', fontSize:16, fontWeight:800, cursor:sending?'wait':'pointer', marginBottom:12, boxShadow:'0 8px 24px rgba(232,137,12,0.35)' }}>
+                {sending ? 'Sending...' : '🛎️ Call Waiter Again'}
+              </button>
+            )}
             <button onClick={onClose} style={{ width:'100%',background:'#1A0A0A',color:'#fff',border:'none',borderRadius:14,padding:'16px',fontSize:16,fontWeight:800,cursor:'pointer' }}>
               Close
             </button>
@@ -180,7 +190,6 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
                 <div style={{ width:32, height:32, borderRadius:'50%', background:'#16A34A', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, color:'#fff', flexShrink:0 }}>✓</div>
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:13, fontWeight:700, color:'#16A34A' }}>Request Resolved</div>
-                  <div style={{ fontSize:11, color:'#888' }}>Raised at {formatTime(req.created_at)}</div>
                 </div>
               </div>
             ))}
