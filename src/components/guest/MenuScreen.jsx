@@ -136,7 +136,7 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
                 return (
                   <button key={cat.id} onClick={()=>{ onSelect(cat.id); setOpen(false) }}
                     style={{ background:'#F8F8F8', border:'1.5px solid #EBEBEB', borderRadius:14, padding:'16px 12px', textAlign:'left', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                    <span style={{ fontWeight:700, fontSize:14, color:'#1A1A1A' }}>{cat.name}</span>
+                    <span style={{ fontWeight:700, fontSize:14, color:'#1A1A1A' }}>{catLabel(cat.name)}</span>
                     <span style={{ fontSize:12, color:'#888', fontWeight:600 }}>{count}</span>
                   </button>
                 )
@@ -160,18 +160,20 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   const chipBarRef = useRef()
   const scrollRef = useRef()
 
-  // Preferred category order for catering events
-  const CAT_ORDER = ['starters','starter','main course','main','breads','bread','rice','rice and biryani','biryani','desserts','dessert','beverages','beverage','drinks','drink','mocktails','cocktails','soup','salad']
-
+  // Category order comes straight from sort_order, which the CSV importer sets
+  // from the order categories first appear in the import file. This gives full
+  // control from the sheet and supports custom names like "Lunch - Starters".
   function sortCategories(cats) {
-    return [...cats].sort((a, b) => {
-      const ai = CAT_ORDER.findIndex(k => a.name.toLowerCase().includes(k))
-      const bi = CAT_ORDER.findIndex(k => b.name.toLowerCase().includes(k))
-      if (ai === -1 && bi === -1) return a.sort_order - b.sort_order
-      if (ai === -1) return 1
-      if (bi === -1) return -1
-      return ai - bi
-    })
+    return [...cats].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  }
+
+  // Categories are stored session-prefixed ("Lunch - Starters") so the
+  // supervisor can show or hide a whole meal. Guests only ever see the
+  // course part ("Starters").
+  function catLabel(name) {
+    if (!name) return ''
+    const i = name.indexOf(' - ')
+    return i === -1 ? name : name.slice(i + 3).trim()
   }
 
   useEffect(() => {
@@ -337,7 +339,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
                 color: activeChip===cat.id ? '#fff' : '#C06A00',
                 boxShadow: activeChip===cat.id ? '0 3px 10px rgba(232,137,12,0.4)' : 'none',
                 transition:'all 0.15s' }}>
-              {cat.name}
+              {catLabel(cat.name)}
               <span style={{ fontSize:11, marginLeft:5, opacity: activeChip===cat.id ? 0.85 : 0.65 }}>
                 ({items.filter(i=>i.category_id===cat.id).length})
               </span>
@@ -367,7 +369,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
               <div key={cat.id} ref={el=>sectionRefs.current[cat.id]=el}>
                 {/* Sticky category header — dark, bold, unmissable */}
                 <div style={{ position:'sticky', top:0, zIndex:10, background:'#1A0A0A', padding:'10px 16px', display:'flex', alignItems:'center', gap:10 }}>
-                  <span style={{ fontWeight:900, fontSize:15, color:'#E8890C', letterSpacing:'0.5px', textTransform:'uppercase' }}>{cat.name}</span>
+                  <span style={{ fontWeight:900, fontSize:15, color:'#E8890C', letterSpacing:'0.5px', textTransform:'uppercase' }}>{catLabel(cat.name)}</span>
                   <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)', background:'rgba(255,255,255,0.1)', padding:'2px 8px', borderRadius:999, fontWeight:600 }}>{catItems.length} item{catItems.length!==1?'s':''}</span>
                 </div>
                 {catItems.map(item => <ItemCard key={item.id} item={item} />)}
