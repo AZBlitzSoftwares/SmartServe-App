@@ -193,6 +193,12 @@ export default function MenuManager({ eventData }) {
       .filter(n => n && !n.toLowerCase().includes('all day'))
   )]
 
+  // Which session is currently showing on the guest tablets? Read it from
+  // the data rather than local state, so the highlight survives a reload.
+  const activeSession = sessionGroups.find(sg =>
+    categories.some(c => (c.name || '').startsWith(sg + ' - ') && c.is_visible !== false)
+  ) || null
+
   // Every dish created anywhere in the app is also filed into the global
   // Food Master library so future events can reuse it. Matching is by name
   // (case-insensitive) - an existing entry is left untouched, never duplicated.
@@ -267,11 +273,21 @@ export default function MenuManager({ eventData }) {
         <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap',
           background:'#FFF8EE', border:'1.5px solid #FCD34D', borderRadius:14,
           padding:'10px 14px', marginBottom:12 }}>
-          <span style={{ fontSize:12, fontWeight:800, color:'#92400E' }}>SHOW ON GUEST TABLETS:</span>
+          <span style={{ fontSize:12, fontWeight:800, color:'#92400E' }}>
+            SHOW ON GUEST TABLETS:
+            {activeSession && <span style={{ marginLeft:8, color:'#E8890C' }}>
+              (now showing: {activeSession})
+            </span>}
+          </span>
           {sessionGroups.map(sg => (
             <button key={sg} onClick={()=>showSessionOnly(sg)}
-              style={{ background:'#1A0A0A', color:'#fff', border:'none', borderRadius:999,
-                padding:'7px 16px', fontSize:13, fontWeight:800, cursor:'pointer' }}>
+              style={{ background: activeSession===sg ? '#E8890C' : '#fff',
+                color: activeSession===sg ? '#fff' : '#1A0A0A',
+                border: activeSession===sg ? '2px solid #E8890C' : '2px solid #D6D3D1',
+                borderRadius:999, padding:'7px 16px', fontSize:13, fontWeight:800,
+                cursor:'pointer', display:'flex', alignItems:'center', gap:6,
+                boxShadow: activeSession===sg ? '0 3px 10px rgba(232,137,12,0.4)' : 'none' }}>
+              {activeSession===sg && <span>✓</span>}
               {sg} only
             </button>
           ))}
