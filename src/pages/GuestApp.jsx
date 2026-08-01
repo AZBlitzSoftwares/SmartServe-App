@@ -211,15 +211,46 @@ export default function GuestApp() {
     const tNum = localStorage.getItem('ss_setup_table_number')
     if (ok && ev && td) {
       try {
-        setEventData(JSON.parse(ev))
+        const evObj = JSON.parse(ev)
+        setEventData(evObj)
         setTableData(JSON.parse(td))
         setTableNumber(parseInt(tNum))
         goTo('welcome')
+        // localStorage holds a snapshot taken at setup time. Pull the live
+        // record so branding changes (catering name, logo, welcome note,
+        // video) reach the tablet without a re-setup.
+        refreshEvent(evObj.id)
       } catch(e) { localStorage.clear(); goTo('setup') }
     } else {
       goTo('setup')
     }
   }, [])
+
+  // Keep event branding in sync with the supervisor's edits
+  async function refreshEvent(eventId) {
+    if (!eventId) return
+    try {
+      const { data } = await supabase.from('events')
+        .select('*').eq('id', eventId).single()
+      if (data) {
+        setEventData(data)
+        localStorage.setItem('ss_setup_event', JSON.stringify(data))
+      }
+    } catch (e) {}
+  }
+
+  // Live branding updates while the event is running
+  useEffect(() => {
+    if (!eventData?.id) return
+    const id = eventData.id
+    const sub = supabase.channel('event-' + id)
+      .on('postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'events', filter: 'id=eq.' + id },
+          () => refreshEvent(id))
+      .subscribe()
+    const poll = setInterval(() => refreshEvent(id), 60000)
+    return () => { supabase.removeChannel(sub); clearInterval(poll) }
+  }, [eventData?.id])
 
   // Watch active orders
   useEffect(() => {

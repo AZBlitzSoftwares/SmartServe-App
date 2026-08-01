@@ -106,12 +106,22 @@ function HeaderCarousel({ eventData, tableNumber, isOnline }) {
   )
 }
 
-function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, onShowStatus, menuSheetOpen, onMenuSheetChange }) {
+function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, onShowStatus, menuSheetOpen, onMenuSheetChange, onBack }) {
   const open = menuSheetOpen
   const setOpen = onMenuSheetChange
   return (
     <>
       {/* Bottom-right button group: Track Order + MENU */}
+      {onBack && (
+        <button onClick={onBack} aria-label="Back"
+          style={{ position:'fixed', bottom: cartCount>0 ? 110 : 28, left:16, zIndex:60,
+            background:'#E8890C', color:'#fff', border:'3px solid #fff', borderRadius:999,
+            padding:'14px 24px', fontSize:16, fontWeight:900, cursor:'pointer',
+            display:'flex', alignItems:'center', gap:8,
+            boxShadow:'0 8px 28px rgba(232,137,12,0.55)' }}>
+          ← Back
+        </button>
+      )}
       <div style={{ position:'fixed', bottom: cartCount>0 ? 110 : 28, right:16, zIndex:60, display:'flex', gap:8, alignItems:'center' }}>
         {hasActiveOrders && (
           <button onClick={onShowStatus} style={{
@@ -303,7 +313,6 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       {/* ACTION BAR */}
       <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff', borderBottom:'1px solid #eee', overflowX:'auto', flexShrink:0, scrollbarWidth:'none' }}>
         
-        {onBack && <button onClick={onBack} style={{ flexShrink:0, background:'#E8890C', color:'#fff', border:'none', borderRadius:999, padding:'7px 18px', fontSize:13, fontWeight:800, cursor:'pointer', boxShadow:'0 3px 10px rgba(232,137,12,0.45)' }}>← Back</button>}
         <button onClick={onShowHistory} style={{ flexShrink:0, background:'#fff', color:'#333', border:'1.5px solid #ddd', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:600, cursor:'pointer' }}>📋 History</button>
         {eventData?.call_waiter_enabled!==false && <button onClick={onShowSOS} style={{ flexShrink:0, background:'#FEF3C7', color:'#92400E', border:'1.5px solid #FCD34D', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>🛎️ Call Waiter</button>}
         <button onClick={onShowFeedback} style={{ flexShrink:0, background:'#FFF7ED', color:'#C2410C', border:'1.5px solid #FED7AA', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>⭐ Feedback</button>
@@ -389,7 +398,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
 
       {/* FLOATING BOTTOM BUTTONS — MENU (right) + Track Order (left of menu) */}
       {search.length === 0 && categories.length > 0 && (
-        <MenuModal categories={categories} items={items} onSelect={scrollToCategory} cartCount={cartCount} hasActiveOrders={hasActiveOrders} onShowStatus={onShowStatus} menuSheetOpen={menuSheetOpen} onMenuSheetChange={setMenuSheetOpen} />
+        <MenuModal categories={categories} items={items} onSelect={scrollToCategory} cartCount={cartCount} hasActiveOrders={hasActiveOrders} onShowStatus={onShowStatus} menuSheetOpen={menuSheetOpen} onMenuSheetChange={setMenuSheetOpen} onBack={onBack} />
       )}
 
       {/* FEEDBACK BUBBLE */}
