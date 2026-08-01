@@ -63,6 +63,7 @@ export default function MenuManager({ eventData }) {
       await supabase.from('menu_items').update({ name:newItem.name.trim(), description:newItem.description.trim(), category_id:catId, is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null }).eq('id', editItem.id)
     } else {
       const { error } = await supabase.from('menu_items').insert({ category_id:catId, name:newItem.name.trim(), description:newItem.description.trim(), is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, is_available:true })
+      if (!error) await syncToFoodMaster({ name:newItem.name.trim(), description:newItem.description.trim(), category:categories.find(c=>c.id===catId)?.name, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null })
       if (error) { alert('Error adding dish: ' + error.message); setSaving(false); return }
     }
     setNewItem({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'' })
@@ -153,12 +154,63 @@ export default function MenuManager({ eventData }) {
           catCache[catKey] = nc.id
         }
         const { error: ie } = await supabase.from('menu_items').insert({ category_id:catCache[catKey], name:itemName, description:desc, is_live_counter:isLive, is_veg:isVeg, photo_url:imgUrl||null, is_available:true })
+        if (!ie) await syncToFoodMaster({ name:itemName, description:desc, category:catName, is_veg:isVeg, photo_url:imgUrl||null })
         if (ie) { errors.push(itemName+': '+ie.message); skipped++ }
         else { added++; existingNames.add(itemName.toLowerCase().trim()) } // track newly added too
       } catch(err) { errors.push('Row '+(i+1)+': '+err.message); skipped++ }
     }
     setImportResult({ added, skipped, errors:errors.slice(0,5) })
     setImporting(false); loadMenu(); e.target.value=''
+  }
+
+  // Show or hide an entire category (guest tablets update live via Realtime)
+  async function toggleCategoryVisible(cat) {
+    await supabase.from('menu_categories')
+      .update({ is_visible: !(cat.is_visible !== false) }).eq('id', cat.id)
+    loadMenu()
+  }
+
+  // Show one meal session and hide the others in a single tap.
+  // "All Day Items" always stays visible.
+  async function showSessionOnly(session) {
+    for (const c of categories) {
+      const nm = (c.name || '').toLowerCase()
+      const isAllDay = nm.includes('all day')
+      const belongs = nm.startsWith(session.toLowerCase())
+      await supabase.from('menu_categories')
+        .update({ is_visible: isAllDay ? true : belongs }).eq('id', c.id)
+    }
+    loadMenu()
+  }
+
+  // A session group only exists when categories are named "Session - Section"
+  // (e.g. "Lunch - Rajasthani"). Events whose categories have no prefix show
+  // no session bar at all - there is nothing to switch between.
+  const sessionGroups = [...new Set(
+    categories
+      .filter(c => (c.name || '').includes(' - '))
+      .map(c => c.name.split(' - ')[0].trim())
+      .filter(n => n && !n.toLowerCase().includes('all day'))
+  )]
+
+  // Every dish created anywhere in the app is also filed into the global
+  // Food Master library so future events can reuse it. Matching is by name
+  // (case-insensitive) - an existing entry is left untouched, never duplicated.
+  async function syncToFoodMaster(dish) {
+    try {
+      const nm = (dish?.name || '').trim()
+      if (!nm) return
+      const { data: existing } = await supabase.from('food_master')
+        .select('id').ilike('name', nm).limit(1)
+      if (existing && existing.length > 0) return   // already in the library
+      await supabase.from('food_master').insert({
+        name: nm,
+        description: dish.description || null,
+        category: dish.category || 'General',
+        is_veg: dish.is_veg !== false,
+        photo_url: dish.photo_url || null,
+      })
+    } catch (e) { /* library sync must never block a menu import */ }
   }
 
   async function clearAllMenu() {
@@ -211,14 +263,36 @@ export default function MenuManager({ eventData }) {
         📋 CSV: <strong>name, description, category, is_live_counter, is_veg, image_url</strong> — only name required. Save as .csv not .xlsx
       </div>
 
+      {sessionGroups.length > 1 && (
+        <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap',
+          background:'#FFF8EE', border:'1.5px solid #FCD34D', borderRadius:14,
+          padding:'10px 14px', marginBottom:12 }}>
+          <span style={{ fontSize:12, fontWeight:800, color:'#92400E' }}>SHOW ON GUEST TABLETS:</span>
+          {sessionGroups.map(sg => (
+            <button key={sg} onClick={()=>showSessionOnly(sg)}
+              style={{ background:'#1A0A0A', color:'#fff', border:'none', borderRadius:999,
+                padding:'7px 16px', fontSize:13, fontWeight:800, cursor:'pointer' }}>
+              {sg} only
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Category tabs */}
       <div style={{ display:'flex', gap:8, marginBottom:12, overflowX:'auto', flexWrap:'nowrap', paddingBottom:4 }}>
+
         <button onClick={()=>setActiveCategory('all')} style={{ flexShrink:0, background:activeCategory==='all'?'var(--ink)':'#fff', color:activeCategory==='all'?'#fff':'var(--ink)', border:'1.5px solid', borderColor:activeCategory==='all'?'var(--ink)':'var(--line)', borderRadius:999, padding:'8px 18px', fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
           All ({items.length})
         </button>
         {categories.map(cat => (
           <button key={cat.id} onClick={()=>setActiveCategory(cat.id)} style={{ flexShrink:0, background:activeCategory===cat.id?'var(--ink)':'#fff', color:activeCategory===cat.id?'#fff':'var(--ink)', border:'1.5px solid', borderColor:activeCategory===cat.id?'var(--ink)':'var(--line)', borderRadius:999, padding:'8px 18px', fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
             {cat.name} ({items.filter(i=>i.category_id===cat.id).length})
+            <span onClick={e=>{ e.stopPropagation(); toggleCategoryVisible(cat) }}
+              style={{ marginLeft:8, fontSize:11, fontWeight:800, padding:'2px 8px', borderRadius:999,
+                background: cat.is_visible===false ? '#FEF2F2' : '#F0FDF4',
+                color: cat.is_visible===false ? '#DC2626' : '#16A34A' }}>
+              {cat.is_visible===false ? 'HIDDEN' : 'LIVE'}
+            </span>
           </button>
         ))}
         <button onClick={()=>setShowAddCat(true)} style={{ flexShrink:0, background:'#FEF3C7', border:'1.5px solid #FCD34D', color:'#92400E', borderRadius:999, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Category</button>
@@ -344,6 +418,7 @@ export default function MenuManager({ eventData }) {
                   if (nc) catCache[catKey] = nc.id
                 }
                 await supabase.from('menu_items').insert({ category_id:catCache[catKey], name:item.name, description:item.description, is_veg:item.is_veg, is_live_counter:item.is_live_counter, photo_url:item.photo_url, is_available:true })
+                await syncToFoodMaster({ name:item.name, description:item.description, category:catKey, is_veg:item.is_veg, photo_url:item.photo_url })
                 destNames.add(item.name.toLowerCase().trim())
                 copyAdded++
               }
