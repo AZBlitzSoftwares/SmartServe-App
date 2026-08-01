@@ -3,6 +3,16 @@ import { supabase } from '../../lib/supabase'
 import janusLogo from '../../assets/janus_logo.jpg'
 import igQrCode from '../../assets/ig_qr.jpg'
 
+// Categories may be stored session-prefixed ("Lunch - Starters") so the
+// supervisor can show or hide a whole meal. Guests only ever see the
+// course part ("Starters"). Module scope so every component here can use it.
+function catLabel(name) {
+  if (!name) return ''
+  const i = name.indexOf(' - ')
+  return i === -1 ? name : name.slice(i + 3).trim()
+}
+
+
 /* ── Animated Header Carousel ─────────────────────────────────────────── */
 function HeaderCarousel({ eventData, tableNumber, isOnline }) {
   const hasWelcomeNote = !!(eventData?.welcome_note)
@@ -165,15 +175,6 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   // control from the sheet and supports custom names like "Lunch - Starters".
   function sortCategories(cats) {
     return [...cats].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-  }
-
-  // Categories are stored session-prefixed ("Lunch - Starters") so the
-  // supervisor can show or hide a whole meal. Guests only ever see the
-  // course part ("Starters").
-  function catLabel(name) {
-    if (!name) return ''
-    const i = name.indexOf(' - ')
-    return i === -1 ? name : name.slice(i + 3).trim()
   }
 
   useEffect(() => {
