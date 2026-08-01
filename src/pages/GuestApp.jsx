@@ -339,6 +339,7 @@ export default function GuestApp() {
           onShowSOS={() => setShowSOS(true)}
           onShowHistory={() => setShowHistory(true)}
           onShowStatus={() => goTo('status')}
+          onBack={() => goTo('welcome')}
           hasActiveOrders={hasActiveOrders}
           menuSheetOpen={menuSheetOpen} setMenuSheetOpen={setMenuSheetOpen}
           showFeedbackBubble={false} onFeedbackBubbleClick={() => {}}

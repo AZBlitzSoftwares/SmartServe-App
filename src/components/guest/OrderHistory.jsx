@@ -37,7 +37,7 @@ export default function OrderHistory({ tableData, eventData, onClose }) {
         <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 20px' }} />
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
           <h3 style={{ fontSize:20, fontWeight:800 }}>Order History</h3>
-          <button onClick={onClose} style={{ background:'none', border:'none', fontSize:22, color:'#999', cursor:'pointer' }}>✕</button>
+          <button onClick={onClose} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
         </div>
         {loading ? (
           <div style={{ textAlign:'center', padding:48 }}>

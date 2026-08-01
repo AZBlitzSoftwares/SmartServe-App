@@ -139,7 +139,11 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:200, display:'flex', alignItems:'flex-end' }} onClick={()=>setOpen(false)}>
           <div onClick={e=>e.stopPropagation()} style={{ width:'100%', background:'#fff', borderRadius:'20px 20px 0 0', padding:'20px 16px 40px', maxHeight:'70vh', overflowY:'auto' }}>
             <div style={{ width:40, height:4, background:'#ddd', borderRadius:999, margin:'0 auto 16px' }}></div>
-            <h3 style={{ fontSize:18, fontWeight:800, marginBottom:16, textAlign:'center' }}>Browse Menu</h3>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
+              <div style={{ width:40 }}></div>
+              <h3 style={{ fontSize:18, fontWeight:800, textAlign:'center', flex:1 }}>Browse Menu</h3>
+              <button onClick={()=>setOpen(false)} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
+            </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
               {categories.map(cat => {
                 const count = items.filter(i=>i.category_id===cat.id).length
@@ -152,6 +156,9 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
                 )
               })}
             </div>
+            <button onClick={()=>setOpen(false)} style={{ width:'100%', marginTop:16, background:'#1A0A0A', color:'#fff', border:'none', borderRadius:14, padding:'15px', fontSize:15, fontWeight:800, cursor:'pointer' }}>
+              ✕ Close
+            </button>
           </div>
         </div>
       )}
@@ -159,7 +166,7 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
   )
 }
 
-export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen }) {
+export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen, onBack }) {
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [search, setSearch] = useState('')
@@ -296,6 +303,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       {/* ACTION BAR */}
       <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff', borderBottom:'1px solid #eee', overflowX:'auto', flexShrink:0, scrollbarWidth:'none' }}>
         
+        {onBack && <button onClick={onBack} style={{ flexShrink:0, background:'#E8890C', color:'#fff', border:'none', borderRadius:999, padding:'7px 18px', fontSize:13, fontWeight:800, cursor:'pointer', boxShadow:'0 3px 10px rgba(232,137,12,0.45)' }}>← Back</button>}
         <button onClick={onShowHistory} style={{ flexShrink:0, background:'#fff', color:'#333', border:'1.5px solid #ddd', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:600, cursor:'pointer' }}>📋 History</button>
         {eventData?.call_waiter_enabled!==false && <button onClick={onShowSOS} style={{ flexShrink:0, background:'#FEF3C7', color:'#92400E', border:'1.5px solid #FCD34D', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>🛎️ Call Waiter</button>}
         <button onClick={onShowFeedback} style={{ flexShrink:0, background:'#FFF7ED', color:'#C2410C', border:'1.5px solid #FED7AA', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>⭐ Feedback</button>

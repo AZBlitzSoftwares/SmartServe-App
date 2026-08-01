@@ -33,7 +33,7 @@ function FacePicker({ onSelect, onClose }) {
         <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 20px' }} />
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
           <h3 style={{ fontSize:19, fontWeight:800, color:'#1A1A1A', margin:0 }}>How was your experience?</h3>
-          <button onClick={onClose} style={{ background:'#F5F5F5', border:'none', borderRadius:999, width:36, height:36, fontSize:20, color:'#888', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
+          <button onClick={onClose} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
         </div>
         <p style={{ fontSize:14, color:'#888', marginBottom:24, marginTop:0 }}>Tap a face to share your feedback</p>
         <div style={{ display:'flex', justifyContent:'space-around', alignItems:'center', paddingBottom:8 }}>
@@ -138,7 +138,7 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
           <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 16px' }} />
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
             <h3 style={{ fontSize:18, fontWeight:800, margin:0 }}>Your Feedback</h3>
-            <button onClick={onClose} style={{ background:'#F5F5F5', border:'none', borderRadius:999, width:34, height:34, fontSize:18, color:'#888', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
+            <button onClick={onClose} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
           </div>
           <div style={{ display:'inline-flex', alignItems:'center', gap:8, background:cfg.bg, border:'1.5px solid '+cfg.border, borderRadius:999, padding:'6px 14px', marginBottom:16 }}>
             <FaceSVG type={sentiment} size={22} />

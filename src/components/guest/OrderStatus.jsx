@@ -119,12 +119,15 @@ function OrderCard({ order, onCancel }) {
 
 function Header({ tableNumber, onBack }) {
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 16px', background:'#1A0A0A' }}>
-      <button onClick={onBack} style={{ background:'rgba(255,255,255,0.1)', border:'none',
-        borderRadius:10, padding:'8px 14px', fontSize:14, fontWeight:600, cursor:'pointer', color:'#fff' }}>← Back</button>
+    <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 16px',
+      background:'#1A0A0A', position:'sticky', top:0, zIndex:50,
+      boxShadow:'0 2px 12px rgba(0,0,0,0.35)' }}>
+      <button onClick={onBack} style={{ background:'#E8890C', border:'none',
+        borderRadius:10, padding:'11px 20px', fontSize:15, fontWeight:800, cursor:'pointer',
+        color:'#fff', boxShadow:'0 3px 12px rgba(232,137,12,0.5)', flexShrink:0 }}>← Back</button>
       <h2 style={{ fontSize:17, fontWeight:800, color:'#fff', flex:1 }}>Track Orders</h2>
-      <div style={{ background:'#E8890C', color:'#fff', fontSize:12, fontWeight:800,
-        padding:'5px 12px', borderRadius:999 }}>TABLE {tableNumber}</div>
+      <div style={{ background:'transparent', color:'#E8890C', fontSize:12, fontWeight:800,
+        padding:'5px 12px', borderRadius:999, border:'1.5px solid #E8890C', flexShrink:0 }}>TABLE {tableNumber}</div>
     </div>
   )
 }
