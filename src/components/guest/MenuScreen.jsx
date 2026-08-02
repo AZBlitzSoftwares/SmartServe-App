@@ -112,16 +112,6 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
   return (
     <>
       {/* Bottom-right button group: Track Order + MENU */}
-      {onBack && (
-        <button onClick={onBack} aria-label="Back"
-          style={{ position:'fixed', bottom: cartCount>0 ? 110 : 28, left:16, zIndex:60,
-            background:'#E8890C', color:'#fff', border:'3px solid #fff', borderRadius:999,
-            padding:'12px 22px', fontSize:15, fontWeight:900, cursor:'pointer',
-            display:'flex', alignItems:'center', gap:8,
-            boxShadow:'0 8px 28px rgba(232,137,12,0.55)' }}>
-          ← Back
-        </button>
-      )}
       <div style={{ position:'fixed', bottom: cartCount>0 ? 110 : 28, right:16, zIndex:60, display:'flex', gap:8, alignItems:'center' }}>
         {hasActiveOrders && (
           <button onClick={onShowStatus} style={{
@@ -367,7 +357,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       )}
 
       {/* SCROLLABLE MENU CONTENT */}
-      <div ref={scrollRef} onScroll={handleScroll} style={{ flex:1, overflowY:'auto', paddingBottom: cartCount>0?190:120 }}>
+      <div ref={scrollRef} onScroll={handleScroll} style={{ flex:1, overflowY:'auto', paddingBottom: cartCount>0?170:100 }}>
         {loading ? (
           <div style={{ textAlign:'center', padding:60, color:'#888' }}>Loading menu...</div>
         ) : search.length>0 ? (
