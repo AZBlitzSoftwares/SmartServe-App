@@ -86,10 +86,34 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     } catch(e) { alert('Could not enable sound on this device.') }
   }
 
+  // Auto-print is remembered per device
+  const [autoPrint, setAutoPrint] = useState(() => {
+    try { return localStorage.getItem('ss_auto_print') !== 'off' } catch (e) { return true }
+  })
+  function toggleAutoPrint() {
+    setAutoPrint(v => {
+      const nv = !v
+      try { localStorage.setItem('ss_auto_print', nv ? 'on' : 'off') } catch (e) {}
+      return nv
+    })
+  }
+
   async function assignWaiter(orderId, waiterId) {
     setAssigning(orderId)
     await supabase.from('orders').update({ status:'in_progress', waiter_id:waiterId||null, assigned_at:waiterId?new Date().toISOString():null }).eq('id', orderId)
     setAssigning(null); loadOrders(false)
+
+    // Auto-print the KOT the moment a waiter is assigned. The manual
+    // "Print KOT" button stays available for reprints, printer outages,
+    // network drops or power cuts - nothing about it changes.
+    if (waiterId && autoPrint) {
+      try {
+        const { data: fresh } = await supabase.from('orders')
+          .select('*, tables(table_number), waiters(name), order_items(quantity, menu_items(name, is_veg))')
+          .eq('id', orderId).single()
+        if (fresh) setTimeout(() => printKOT(fresh), 300)
+      } catch (e) { /* never block assignment if printing fails */ }
+    }
   }
 
   async function assignSOSWaiter(sosId, waiterId) {
@@ -339,6 +363,13 @@ ${(order.order_items||[]).map(i => `
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
         <h2 style={{ fontSize:20, fontWeight:800 }}>Live Orders</h2>
+        <button onClick={toggleAutoPrint} title="Print the KOT automatically when a waiter is assigned"
+          style={{ marginLeft:12, background: autoPrint ? '#DCFCE7' : '#F3F4F6',
+            border: '1.5px solid ' + (autoPrint ? '#16A34A' : '#D1D5DB'),
+            color: autoPrint ? '#15803D' : '#6B7280', borderRadius:999,
+            padding:'6px 14px', fontSize:12, fontWeight:800, cursor:'pointer' }}>
+          🖨 Auto-print KOT: {autoPrint ? 'ON' : 'OFF'}
+        </button>
         <div style={{ display:'flex', gap:8 }}>
           <button onClick={enableSound} style={{ background:'#FEF3C7', border:'1px solid #FCD34D', color:'#92400E', borderRadius:10, padding:'7px 12px', fontSize:12, fontWeight:700 }}>🔔 Sound</button>
           <button onClick={()=>{ loadOrders(false); loadSOS() }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'7px 14px', fontSize:13, fontWeight:700 }}>Refresh</button>
