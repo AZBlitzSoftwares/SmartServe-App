@@ -6,6 +6,7 @@ import SOSRequests, { useSOSAlert } from '../components/supervisor/SOSRequests'
 import MenuManager from '../components/supervisor/MenuManager'
 import ReportsDashboard from '../components/supervisor/ReportsDashboard'
 import EventManager from '../components/supervisor/EventManager'
+import TableManager from '../components/supervisor/TableManager'
 import FeedbackReport from '../components/supervisor/FeedbackReport'
 
 
@@ -128,6 +129,9 @@ export default function SupervisorApp() {
     { id:'menu',    label:'Menu',     emoji:'📋', badge:0 },
     { id:'reports', label:'Reports',  emoji:'📊', badge:0 },
     { id:'feedback', label:'Feedback', emoji:'⭐', badge:0 },
+    // Supervisors get table release here rather than through Events,
+    // which would also expose every other event and staff deletion.
+    { id:'tables',  label:'Tables',   emoji:'📱', badge:0 },
     ...(isAdmin ? [{ id:'events', label:'Events', emoji:'📅', badge:0 }] : []),
   ]
 
@@ -275,6 +279,7 @@ export default function SupervisorApp() {
         {activeTab==='menu'    && <MenuManager eventData={eventData} />}
         {activeTab==='reports' && <ReportsDashboard eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='feedback' && <FeedbackReport eventData={eventData} />}
+        {activeTab==='tables'  && <TableManager eventData={eventData} />}
         {activeTab==='events'  && <EventManager onEventChange={(ev) => { setEventData(ev); loadEvents() }} />}
       </div>
 

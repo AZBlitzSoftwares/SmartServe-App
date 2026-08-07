@@ -37,8 +37,10 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   async function loadSOS() {
     if (!eventData) return
     const { data } = await supabase.from('sos_requests')
-      .select('*, tables(table_number)').eq('event_id', eventData.id)
-      .eq('request_type', 'call_waiter').in('status', ['open','in_progress'])
+      .select('*, tables(table_number), sos_request_items(item_name, quantity)').eq('event_id', eventData.id)
+      // No request_type filter. Every open request belongs on this screen,
+      // whatever type it is - help, call_waiter, or the older Phase 1 types.
+      .in('status', ['open','in_progress'])
       .order('created_at', { ascending: false })
     setSosRequests(data || [])
   }
@@ -108,6 +110,35 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     setAssigning('sos-'+sosId)
     await supabase.from('sos_requests').update({ status:'in_progress', waiter_id:waiterId||null, assigned_at:waiterId?new Date().toISOString():null }).eq('id', sosId)
     setAssigning(null); loadSOS()
+
+    // Help requests auto-print exactly like orders do, so the waiter
+    // walks over already knowing what to carry.
+    if (waiterId) {
+      try {
+        const { data: fresh } = await supabase.from('sos_requests')
+          .select('*, tables(table_number), waiters(name), sos_request_items(item_name, quantity)')
+          .eq('id', sosId).single()
+        if (fresh) setTimeout(() => printHelpKOT(fresh), 300)
+      } catch (e) { /* never block assignment if printing fails */ }
+    }
+  }
+
+  // Reshape a help request into the object printKOT already understands,
+  // so both slips come off one code path and cannot drift apart.
+  function printHelpKOT(sos) {
+    const lines = (sos.sos_request_items || []).length
+      ? sos.sos_request_items
+      : [{ item_name:'Help Request', quantity:1 }]
+    printKOT({
+      id: sos.id,
+      created_at: sos.created_at,
+      tables: sos.tables,
+      waiters: sos.waiters,
+      order_items: lines.map(li => ({
+        quantity: li.quantity,
+        menu_items: { name: li.item_name }
+      }))
+    }, true)
   }
 
   async function markDelivered(order) {
@@ -140,7 +171,10 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     loadOrders(false)
   }
 
-  function printKOT(order) {
+  // isHelp only swaps the "Order:" label for "Help:". The slip layout,
+  // width and margins are deliberately identical so the printer setup
+  // and the waiters' habits stay unchanged.
+  function printKOT(order, isHelp) {
     const eventName = eventData?.name || 'Event'
     const tableNum = order.tables?.table_number || '?'
     const waiterName = order.waiters?.name || (order.waiter_id ? 'Assigned' : 'Unassigned')
@@ -293,7 +327,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
 <hr class="divider"/>
 <div class="row"><span>Date:</span><span>${dateStr}</span></div>
 <div class="row"><span>Time:</span><span>${timeStr}</span></div>
-<div class="row"><span>Order:</span><span>${orderId}</span></div>
+<div class="row"><span>${isHelp ? 'Help' : 'Order'}:</span><span>${orderId}</span></div>
 <hr class="divider-dash"/>
 <div class="table-box">
   <div class="table-label">TABLE</div>
@@ -408,6 +442,19 @@ ${(order.order_items||[]).map(i => `
                 style={{ fontSize:24, fontWeight:900, background:tableFilter===sos.tables?.table_number?'#1A0A0A':'transparent', color:tableFilter===sos.tables?.table_number?'#E8890C':'#1A1A1A', border:'none', padding:tableFilter===sos.tables?.table_number?'2px 10px':'0', borderRadius:8, cursor:'pointer', marginBottom:12, display:'block' }}>
                 Table {sos.tables?.table_number}
               </button>
+              {/* What the table actually asked for, so the waiter carries it in one trip */}
+              {sos.sos_request_items?.length > 0 && (
+                <div style={{ background:'#FFF7ED', border:'1px solid #FED7AA', borderRadius:12,
+                  padding:'10px 12px', marginBottom:12 }}>
+                  {sos.sos_request_items.map((li, i) => (
+                    <div key={i} style={{ display:'flex', justifyContent:'space-between',
+                      fontSize:14, fontWeight:700, color:'#9A3412', padding:'3px 0' }}>
+                      <span>{li.item_name}</span>
+                      <span>x{li.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {sos.status==='open' && (
                 <div style={{ marginBottom:10 }}>
                   <div style={{ fontSize:12, fontWeight:700, color:'var(--ink2)', marginBottom:6 }}>Assign Waiter</div>
@@ -421,6 +468,14 @@ ${(order.order_items||[]).map(i => `
                     ))}
                   </div>
                 </div>
+              )}
+              {sos.status!=='open' && (
+                <button onClick={()=>printHelpKOT(sos)}
+                  style={{ width:'100%', background:'var(--bg)', border:'1px solid var(--line)',
+                    borderRadius:12, padding:'10px', fontSize:13, fontWeight:700,
+                    color:'var(--ink2)', cursor:'pointer', marginBottom:8 }}>
+                  🖨 Print Help Slip
+                </button>
               )}
               <button onClick={()=>resolveSOSRequest(sos.id)} style={{ width:'100%', background:'#16A34A', color:'#fff', border:'none', borderRadius:12, padding:'12px', fontSize:14, fontWeight:800, cursor:'pointer' }}>
                 ✓ Mark Resolved

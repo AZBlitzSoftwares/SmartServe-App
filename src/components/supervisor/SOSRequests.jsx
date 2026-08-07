@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 
-const TYPE_LABELS = { sos:'Call Waiter', call_waiter:'Call Waiter', clean_table:'Clean Table', extra_cutlery:'Extra Cutlery', water_refill:'Water Refill' }
-const TYPE_EMOJI  = { sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', water_refill:'💧' }
-const TYPE_COLOR  = { sos:'#DC2626', clean_table:'#2563EB', extra_cutlery:'#7C3AED', water_refill:'#0891B2' }
+const TYPE_LABELS = {
+  help: 'Help Request', sos:'Call Waiter', call_waiter:'Call Waiter', clean_table:'Clean Table', extra_cutlery:'Extra Cutlery', water_refill:'Water Refill' }
+const TYPE_EMOJI = {
+  help: '\u{1F514}', sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', water_refill:'💧' }
+const TYPE_COLOR = {
+  help: '#E8890C', sos:'#DC2626', clean_table:'#2563EB', extra_cutlery:'#7C3AED', water_refill:'#0891B2' }
 
 // This is exported so SupervisorApp can show the floating alert on ALL screens
 export function useSOSAlert(eventData) {
@@ -21,7 +24,7 @@ export function useSOSAlert(eventData) {
   async function fetchRequests() {
     if (!eventData) return
     const { data } = await supabase.from('sos_requests')
-      .select('*, tables(table_number)').eq('event_id', eventData.id)
+      .select('*, tables(table_number), sos_request_items(item_name, quantity)').eq('event_id', eventData.id)
       .eq('status', 'open').order('created_at', { ascending:false })
     const reqs = data || []
     // New open request arrived
@@ -50,7 +53,7 @@ export default function SOSRequests({ eventData, onSosCountChange }) {
   async function loadRequests(showSpinner=false) {
     if (!eventData) return
     if (showSpinner) setLoading(true)
-    const { data } = await supabase.from('sos_requests').select('*, tables(table_number)').eq('event_id', eventData.id).order('created_at', { ascending:false })
+    const { data } = await supabase.from('sos_requests').select('*, tables(table_number), sos_request_items(item_name, quantity)').eq('event_id', eventData.id).order('created_at', { ascending:false })
     const reqs = data||[]
     setRequests(reqs)
     onSosCountChange(reqs.filter(r=>r.status==='open').length)
@@ -85,6 +88,17 @@ export default function SOSRequests({ eventData, onSosCountChange }) {
             {req.status==='open'?'Open':req.status==='acknowledged'?'Acknowledged':'Resolved'}
           </div>
         </div>
+        {req.sos_request_items?.length > 0 && (
+          <div style={{ background:'#FFF7ED', border:'1px solid #FED7AA', borderRadius:10,
+            padding:'9px 12px', marginBottom:10 }}>
+            {req.sos_request_items.map((li, i) => (
+              <div key={i} style={{ display:'flex', justifyContent:'space-between',
+                fontSize:13, fontWeight:700, color:'#9A3412', padding:'2px 0' }}>
+                <span>{li.item_name}</span><span>x{li.quantity}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div style={{ display:'flex', gap:8 }}>
           {req.status==='open' && <button onClick={()=>acknowledge(req.id)} style={{ flex:1, background:'#FEF3C7', border:'1px solid #FCD34D', color:'#92400E', borderRadius:10, padding:'10px', fontSize:13, fontWeight:700 }}>Acknowledge</button>}
           {req.status!=='resolved' && <button onClick={()=>resolve(req.id)} style={{ flex:1, background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#16A34A', borderRadius:10, padding:'10px', fontSize:13, fontWeight:700 }}>Mark Resolved</button>}

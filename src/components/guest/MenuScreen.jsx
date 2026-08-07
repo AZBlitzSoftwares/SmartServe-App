@@ -112,17 +112,26 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
   return (
     <>
       {/* Bottom-right button group: Track Order + MENU */}
-      <div style={{ position:'fixed', bottom: cartCount>0 ? 110 : 28, right:16, zIndex:60, display:'flex', gap:8, alignItems:'center' }}>
-        {hasActiveOrders && (
+      {/* TRACK - bottom CENTRE, only when something is live. Centre because
+          every menu row is left-aligned text with the image on the right,
+          so the middle column is clear on every row.
+          Lifts above the cart bar when the bar is showing. */}
+      {hasActiveOrders && (
+        <div style={{ position:'fixed', bottom: cartCount>0 ? 96 : 24, left:'50%',
+          transform:'translateX(-50%)', zIndex:60 }}>
           <button onClick={onShowStatus} style={{
             background:'#16A34A', color:'#fff', border:'none', borderRadius:999,
-            padding:'12px 18px', fontSize:13, fontWeight:800, cursor:'pointer',
+            padding:'12px 20px', fontSize:14, fontWeight:800, cursor:'pointer',
             boxShadow:'0 6px 20px rgba(22,163,74,0.45)',
             display:'flex', alignItems:'center', gap:6
           }}>
             📦 Track
           </button>
-        )}
+        </div>
+      )}
+
+      {/* MENU - bottom RIGHT corner, always present */}
+      <div style={{ position:'fixed', bottom: cartCount>0 ? 96 : 24, right:16, zIndex:60, display:'flex', gap:8, alignItems:'center' }}>
         <button onClick={()=>setOpen(true)} style={{
           background:'#1A0A0A', color:'#fff', border:'none', borderRadius:999,
           padding:'12px 22px', fontSize:14, fontWeight:800, cursor:'pointer',
@@ -293,6 +302,11 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
             fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>🔔 Help</button>
         )}
 
+        {/* Feedback - opens the detailed page directly, no face popup first */}
+        <button onClick={onShowFeedback} style={{ flexShrink:0, background:'#FFF7ED', color:'#C2410C',
+          border:'1.5px solid #FED7AA', borderRadius:999, padding:'8px 14px', fontSize:12,
+          fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>⭐ Feedback</button>
+
         <div style={{ flex:1, minWidth:0, background:'#F5F5F5', borderRadius:999,
           padding:'7px 14px', display:'flex', alignItems:'center', gap:6 }}>
           <span style={{ fontSize:14 }}>🔍</span>
@@ -316,7 +330,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       )}
 
       {/* SCROLLABLE MENU CONTENT */}
-      <div ref={scrollRef} style={{ flex:1, overflowY:'auto', paddingBottom: cartCount>0?170:100 }}>
+      <div ref={scrollRef} style={{ flex:1, overflowY:'auto', paddingBottom: cartCount>0?190:96 }}>
         {loading ? (
           <div style={{ textAlign:'center', padding:60, color:'#888' }}>Loading menu...</div>
         ) : search.length>0 ? (

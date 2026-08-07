@@ -5,6 +5,8 @@ import SetupScreen from '../components/guest/SetupScreen'
 import WelcomeScreen from '../components/guest/WelcomeScreen'
 import MenuScreen from '../components/guest/MenuScreen'
 import CartDrawer from '../components/guest/CartDrawer'
+import GenieScreen from '../components/guest/GenieScreen'
+import { getDeviceId } from '../lib/deviceId'
 import OrderStatus from '../components/guest/OrderStatus'
 import SOSPanel from '../components/guest/SOSPanel'
 import OrderHistory from '../components/guest/OrderHistory'
@@ -27,11 +29,13 @@ export default function GuestApp() {
   const [tableNumber, setTableNumber] = useState(null)
   const [cart, setCart] = useState([])
   const [activeOrders, setActiveOrders] = useState([])
+  const [activeHelp, setActiveHelp] = useState([])
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [showSOS, setShowSOS] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [feedbackOrderId, setFeedbackOrderId] = useState(null)
+  const [lastOrderId, setLastOrderId] = useState(null)
   const [cartOpen, setCartOpen] = useState(false)
   const [menuSheetOpen, setMenuSheetOpen] = useState(false)
   const [showExitGate, setShowExitGate] = useState(false)
@@ -101,6 +105,7 @@ export default function GuestApp() {
     if (showHistoryRef.current)  { setShowHistory(false); return }
 
     // Screen sequence: Track -> Menu -> Welcome
+    if (s === 'genie')  { goTo('menu'); return }
     if (s === 'status') { goTo('menu'); return }
     if (s === 'menu')   { setMenuSheetOpen(false); menuSheetRef.current = false; goTo('welcome'); return }
   }
@@ -303,6 +308,87 @@ export default function GuestApp() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
+
+  // ── Idle timeout: 5 minutes on the Menu screen only ──────────────────────
+  // Deliberately not applied to Cart, Track, the genie screen or any overlay.
+  // A guest watching their order status or typing feedback must never be
+  // thrown back to Welcome mid-task.
+
+  // Live help requests for this table. Track is about anything the guest
+  // is waiting on, not only food.
+  useEffect(() => {
+    if (!tableData?.id) return
+    let stop = false
+    async function loadHelp() {
+      const { data } = await supabase.from('sos_requests')
+        .select('*, sos_request_items(item_name, quantity)')
+        .eq('table_id', tableData.id)
+        .in('status', ['open', 'acknowledged', 'in_progress'])
+        .order('created_at', { ascending: false })
+      if (!stop) setActiveHelp(data || [])
+    }
+    loadHelp()
+    const t = setInterval(loadHelp, 8000)
+    return () => { stop = true; clearInterval(t) }
+  }, [tableData?.id])
+
+
+  // An empty cart cannot be open. This holds the invariant no matter how
+  // the cart got emptied - ordering, removing the last item, or a reset -
+  // so a stale flag can never make the drawer appear by itself.
+  useEffect(() => {
+    if (cart.length === 0 && cartOpen) setCartOpen(false)
+  }, [cart.length, cartOpen])
+
+
+  // Heartbeat. Keeps this tablet's table claim alive while it is in use,
+  // which is what lets a dead or swapped tablet's claim expire by itself
+  // instead of locking that table number out for the rest of the event.
+  useEffect(() => {
+    if (!tableData?.id) return
+    const deviceId = getDeviceId()
+    async function beat() {
+      try {
+        await supabase.from('tables')
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq('id', tableData.id)
+          .eq('claimed_by_device', deviceId)
+      } catch (e) { /* a missed beat is harmless, the next one covers it */ }
+    }
+    beat()
+    const t = setInterval(beat, 2 * 60 * 1000)
+    return () => clearInterval(t)
+  }, [tableData?.id])
+
+  const IDLE_MS = 5 * 60 * 1000
+  const idleTimerRef = useRef(null)
+
+  useEffect(() => {
+    const overlayOpen = showSOS || showHistory || showFeedback || showExitGate ||
+                        cartOpen || menuSheetOpen
+    const shouldRun = appState === 'menu' && !overlayOpen
+
+    function clear() {
+      if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null }
+    }
+    function arm() {
+      clear()
+      idleTimerRef.current = setTimeout(() => {
+        if (appStateRef.current === 'menu') goTo('welcome')
+      }, IDLE_MS)
+    }
+
+    if (!shouldRun) { clear(); return }
+
+    arm()
+    const events = ['touchstart', 'pointerdown', 'keydown', 'scroll', 'wheel']
+    events.forEach(e => window.addEventListener(e, arm, { passive: true }))
+    return () => {
+      clear()
+      events.forEach(e => window.removeEventListener(e, arm))
+    }
+  }, [appState, showSOS, showHistory, showFeedback, showExitGate, cartOpen, menuSheetOpen])
+
   function addToCart(item) {
     setCart(prev => {
       const e = prev.find(c => c.id === item.id)
@@ -319,12 +405,18 @@ export default function GuestApp() {
   }
   const cartCount = cart.reduce((s,i) => s+i.quantity, 0)
 
-  function handleOrderPlaced() { setCart([]); loadActiveOrders(); goTo('status') }
+  // After ordering the guest sees the genie screen, not the Track page.
+  function handleOrderPlaced(newOrderId) {
+    // cartOpen must not survive the cart being emptied, or CartDrawer
+    // reads it as true the next time it mounts and opens on its own.
+    setCart([]); setCartOpen(false)
+    loadActiveOrders(); setLastOrderId(newOrderId || null); goTo('genie')
+  }
 
   function handleFeedbackClose() {
     setShowFeedback(false); setFeedbackOrderId(null)
-    if (activeOrdersRef.current.length > 0) goTo('menu')
-    else goTo('welcome')
+    // Submit and Skip both land on Welcome
+    goTo('welcome')
   }
 
   async function syncOfflineOrders() {
@@ -354,7 +446,8 @@ export default function GuestApp() {
       currentTableNumber={tableNumber} currentEventId={eventData?.id} />
   )
 
-  const hasActiveOrders = activeOrders.length > 0
+  // Track turns on for a live order OR a live help request
+  const hasActiveOrders = activeOrders.length > 0 || activeHelp.length > 0
 
   return (
     <div style={{minHeight:'100vh',background:'var(--bg)',position:'relative'}}>
@@ -376,9 +469,14 @@ export default function GuestApp() {
           showFeedbackBubble={false} onFeedbackBubbleClick={() => {}}
           onShowFeedback={() => setShowFeedback(true)} />
       )}
+      {appState === 'genie' && (
+        <GenieScreen tableData={tableData} eventData={eventData} orderId={lastOrderId}
+          onOrderAgain={() => goTo('menu')}
+          onDone={() => goTo('welcome')} />
+      )}
       {appState === 'status' && (
         <OrderStatus tableData={tableData} eventData={eventData}
-          tableNumber={tableNumber} activeOrders={activeOrders}
+          tableNumber={tableNumber} activeOrders={activeOrders} activeHelp={activeHelp}
           onBack={() => goTo('menu')} />
       )}
       {cartCount > 0 && appState === 'menu' && (
@@ -390,9 +488,11 @@ export default function GuestApp() {
       {showSOS && <SOSPanel tableData={tableData} eventData={eventData}
         onClose={() => { setShowSOS(false); goTo('menu') }} />}
       {showHistory && <OrderHistory tableData={tableData} eventData={eventData}
+        addToCart={addToCart}
+        onReordered={() => { setShowHistory(false); goTo('menu'); setCartOpen(true) }}
         onClose={() => { setShowHistory(false); goTo('menu') }} />}
       {showFeedback && <FeedbackModal orderId={feedbackOrderId} tableData={tableData}
-        eventData={eventData} onClose={handleFeedbackClose} />}
+        eventData={eventData} onClose={handleFeedbackClose} mode="detailed" />}
 
       {showExitGate && (
         <ExitGate eventId={eventData?.id} onCancel={cancelExit} onVerified={performExit} />

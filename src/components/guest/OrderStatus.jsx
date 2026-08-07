@@ -132,8 +132,9 @@ function Header({ tableNumber, onBack }) {
   )
 }
 
-export default function OrderStatus({ activeOrders, tableNumber, onBack }) {
+export default function OrderStatus({ activeOrders, activeHelp, tableNumber, onBack }) {
   const orders = Array.isArray(activeOrders) ? activeOrders.filter(Boolean) : []
+  const help   = Array.isArray(activeHelp)   ? activeHelp.filter(Boolean)   : []
   const [confirmId, setConfirmId] = useState(null)   // Yes/No cancel modal
   const [notice, setNotice] = useState('')           // styled replacement for alert()
   const [busy, setBusy] = useState(false)
@@ -193,6 +194,35 @@ export default function OrderStatus({ activeOrders, tableNumber, onBack }) {
   return (
     <div style={{ minHeight:'100vh', background:'#F5F5F5', display:'flex', flexDirection:'column' }}>
       <Header tableNumber={tableNumber} onBack={onBack} />
+      {help.length > 0 && (
+        <div style={{ padding:'0 16px', marginTop:14 }}>
+          {help.map(h => {
+            const onWay = h.status === 'in_progress' || h.waiter_id
+            return (
+              <div key={h.id} style={{ background:'#fff', borderRadius:18, padding:'16px 18px',
+                marginBottom:12, borderLeft:'5px solid ' + (onWay ? '#2563EB' : '#D97706'),
+                boxShadow:'0 2px 10px rgba(0,0,0,0.06)' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                  marginBottom:10 }}>
+                  <span style={{ fontWeight:800, fontSize:15, color:'#1A0A0A' }}>🔔 Help Request</span>
+                  <span style={{ fontSize:12, fontWeight:800, padding:'4px 11px', borderRadius:999,
+                    background: onWay ? '#EFF6FF' : '#FEF3C7',
+                    color: onWay ? '#2563EB' : '#D97706' }}>
+                    {onWay ? 'Waiter On The Way' : 'Request Received'}
+                  </span>
+                </div>
+                {(h.sos_request_items || []).map((li, i) => (
+                  <div key={i} style={{ display:'flex', justifyContent:'space-between',
+                    fontSize:14, padding:'4px 0', borderBottom:'1px solid #F0F0F0' }}>
+                    <span style={{ fontWeight:600 }}>{li.item_name}</span>
+                    <span style={{ color:'#888' }}>x{li.quantity}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+        </div>
+      )}
       {body}
 
       {confirmId && (

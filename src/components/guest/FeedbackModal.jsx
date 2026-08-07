@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
-function FaceSVG({ type, size = 80 }) {
+export function FaceSVG({ type, size = 80 }) {
   const configs = {
     excellent: { outline: '#16A34A', fill: '#DCFCE7', eyeType: 'happy' },
     good:      { outline: '#65A30D', fill: '#ECFCCB', eyeType: 'smile' },
@@ -20,7 +20,7 @@ function FaceSVG({ type, size = 80 }) {
   )
 }
 
-const SENTIMENT_CONFIG = {
+export const SENTIMENT_CONFIG = {
   excellent: { label: 'Excellent', color: '#16A34A', bg: '#DCFCE7', border: '#86EFAC' },
   good:      { label: 'Good',      color: '#65A30D', bg: '#ECFCCB', border: '#BEF264' },
   average:   { label: 'Average',   color: '#D97706', bg: '#FEF3C7', border: '#FCD34D' },
@@ -60,7 +60,11 @@ const skipFlashStyle = `
 `
 
 function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDone }) {
-  const cfg = SENTIMENT_CONFIG[sentiment]
+  // When opened straight from the header button there is no face yet, so
+  // the overall rating becomes question one on this page instead of a
+  // separate popup. Coming from the old picker flow, sentiment is preset.
+  const [overall, setOverall] = useState(sentiment)
+  const cfg = SENTIMENT_CONFIG[overall]
   const [foodRating, setFoodRating] = useState(null)
   const [serviceRating, setServiceRating] = useState(null)
   const [name, setName] = useState('')
@@ -71,13 +75,13 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
 
   function FaceRow({ label, value, onChange }) {
     return (
-      <div style={{ marginBottom:18 }}>
-        <div style={{ fontWeight:700, fontSize:14, color:'#444', marginBottom:10 }}>{label}</div>
-        <div style={{ display:'flex', gap:12, justifyContent:'center' }}>
+      <div style={{ marginBottom:10 }}>
+        <div style={{ fontWeight:700, fontSize:13, color:'#444', marginBottom:6 }}>{label}</div>
+        <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
           {Object.entries(SENTIMENT_CONFIG).map(([key, c]) => (
             <button key={key} onClick={() => onChange(key)}
-              style={{ background: value===key ? c.bg : '#F9F9F9', border:'2px solid', borderColor: value===key ? c.border : '#E5E7EB', borderRadius:16, padding:'10px 14px', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:6, transition:'all 0.15s', flex:1 }}>
-              <FaceSVG type={key} size={36} />
+              style={{ background: value===key ? c.bg : '#F9F9F9', border:'2px solid', borderColor: value===key ? c.border : '#E5E7EB', borderRadius:12, padding:'6px 10px', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:3, transition:'all 0.15s', flex:1 }}>
+              <FaceSVG type={key} size={28} />
               <span style={{ fontSize:11, fontWeight:700, color: value===key ? c.color : '#888' }}>{c.label}</span>
             </button>
           ))}
@@ -93,7 +97,7 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
       const payload = {
         event_id:       eventData?.id || null,
         table_number:   tableData?.table_number || null,
-        rating:         sentimentToRating[sentiment] || 3,
+        rating:         sentimentToRating[overall] || 3,
         food_rating:    foodRating ? sentimentToRating[foodRating] : null,
         service_rating: serviceRating ? sentimentToRating[serviceRating] : null,
         guest_name:     name.trim() || null,
@@ -125,7 +129,7 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
 
   if (submitted) return (
     <div style={{ position:'fixed', inset:0, background:'linear-gradient(160deg,#1A0A0A,#3A1A2E)', zIndex:100, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24, textAlign:'center' }}>
-      <div style={{ marginBottom:20 }}><FaceSVG type={sentiment} size={100} /></div>
+      <div style={{ marginBottom:20 }}><FaceSVG type={overall || 'good'} size={100} /></div>
       <h2 style={{ color:'#fff', fontSize:26, fontWeight:800, marginBottom:10 }}>Thank You!</h2>
       <p style={{ color:'rgba(255,255,255,0.7)', fontSize:15, lineHeight:1.6, maxWidth:260 }}>Your feedback helps us serve you better!</p>
     </div>
@@ -133,38 +137,43 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
 
   return (
     <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, background:'rgba(0,0,0,0.65)', zIndex:100, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
-      <div style={{ background:'#fff', borderRadius:'24px 24px 0 0', width:'100%', maxHeight:'90vh', display:'flex', flexDirection:'column', boxSizing:'border-box' }}>
-        <div style={{ padding:'20px 24px 0', flexShrink:0 }}>
-          <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 16px' }} />
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+      <div style={{ background:'#fff', borderRadius:'24px 24px 0 0', width:'100%', maxHeight:'96dvh', display:'flex', flexDirection:'column', boxSizing:'border-box' }}>
+        <div style={{ padding:'12px 24px 0', flexShrink:0 }}>
+          <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 10px' }} />
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
             <h3 style={{ fontSize:18, fontWeight:800, margin:0 }}>Your Feedback</h3>
             <button onClick={onClose} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
           </div>
-          <div style={{ display:'inline-flex', alignItems:'center', gap:8, background:cfg.bg, border:'1.5px solid '+cfg.border, borderRadius:999, padding:'6px 14px', marginBottom:16 }}>
-            <FaceSVG type={sentiment} size={22} />
-            <span style={{ fontWeight:800, fontSize:14, color:cfg.color }}>{cfg.label}</span>
-          </div>
+          {sentiment && cfg && (
+            <div style={{ display:'inline-flex', alignItems:'center', gap:8, background:cfg.bg, border:'1.5px solid '+cfg.border, borderRadius:999, padding:'6px 14px', marginBottom:16 }}>
+              <FaceSVG type={sentiment} size={22} />
+              <span style={{ fontWeight:800, fontSize:14, color:cfg.color }}>{cfg.label}</span>
+            </div>
+          )}
         </div>
         <div style={{ flex:1, overflowY:'auto', padding:'0 24px' }}>
+          {!sentiment && (
+            <FaceRow label="Overall Experience" value={overall} onChange={setOverall} />
+          )}
           <FaceRow label="Food Experience" value={foodRating} onChange={setFoodRating} />
           <FaceRow label="How Was The Service?" value={serviceRating} onChange={setServiceRating} />
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontWeight:700, fontSize:14, color:'#444', marginBottom:8 }}>Your Name (optional)</div>
+          <div style={{ marginBottom:8 }}>
+            <div style={{ fontWeight:700, fontSize:13, color:'#444', marginBottom:4 }}>Your Name (optional)</div>
             <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name"
-              style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }} />
+              style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'8px 12px', fontSize:14, fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }} />
           </div>
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontWeight:700, fontSize:14, color:'#444', marginBottom:8 }}>Mobile (optional)</div>
+          <div style={{ marginBottom:8 }}>
+            <div style={{ fontWeight:700, fontSize:13, color:'#444', marginBottom:4 }}>Mobile (optional)</div>
             <input value={mobile} onChange={e=>setMobile(e.target.value)} placeholder="Mobile number" type="tel"
-              style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }} />
+              style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'8px 12px', fontSize:14, fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }} />
           </div>
-          <div style={{ marginBottom:16 }}>
-            <div style={{ fontWeight:700, fontSize:14, color:'#444', marginBottom:8 }}>Comments (optional)</div>
+          <div style={{ marginBottom:8 }}>
+            <div style={{ fontWeight:700, fontSize:13, color:'#444', marginBottom:4 }}>Comments (optional)</div>
             <textarea value={comment} onChange={e=>setComment(e.target.value)} placeholder="Tell us about your experience..."
-              style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', resize:'none', height:72, boxSizing:'border-box' }} />
+              style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', resize:'none', height:52, boxSizing:'border-box' }} />
           </div>
         </div>
-        <div style={{ padding:'12px 24px 32px', flexShrink:0, borderTop:'1px solid #F0F0F0', display:'flex', gap:10 }}>
+        <div style={{ padding:'10px 24px calc(14px + env(safe-area-inset-bottom))', flexShrink:0, borderTop:'1px solid #F0F0F0', display:'flex', gap:10 }}>
           <style>{skipFlashStyle}</style>
           {/* Skip — flashes between grey and amber to attract attention */}
           <button onClick={onClose} className="skip-flash"
@@ -186,8 +195,10 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
   )
 }
 
-export default function FeedbackModal({ orderId, tableData, eventData, onClose }) {
-  const [step, setStep] = useState('picker')
+export default function FeedbackModal({ orderId, tableData, eventData, onClose, mode }) {
+  // mode 'detailed' skips the face popup and opens the full page directly,
+  // which is what the header Feedback button now does.
+  const [step, setStep] = useState(mode === 'detailed' ? 'form' : 'picker')
   const [sentiment, setSentiment] = useState(null)
   function handleFaceSelect(s) { setSentiment(s); setStep('form') }
   if (step === 'picker') return <FacePicker onSelect={handleFaceSelect} onClose={onClose} />

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { getDeviceId, isClaimLive } from '../../lib/deviceId'
 import janusLogo from '../../assets/janus_logo.jpg'
 
 function eventStatus(dateStr) {
@@ -19,6 +20,7 @@ export default function SetupScreen({ onSetupComplete, currentTableNumber, curre
   const [activeEvents, setActiveEvents] = useState([])
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [takenTables, setTakenTables] = useState([])
+  const deviceId = getDeviceId()
   const [selectedTable, setSelectedTable] = useState(null)
   const [confirming, setConfirming] = useState(false)
   const [loadingEvents, setLoadingEvents] = useState(false)
@@ -100,29 +102,27 @@ export default function SetupScreen({ onSetupComplete, currentTableNumber, curre
     setStep('table')
   }
 
+  // A number is unavailable only when ANOTHER device holds a live claim
+  // on it for this event. Our own claim is always reselectable, and a
+  // claim that has gone quiet for 30 minutes is free for anyone.
   async function loadTakenTables(ev) {
     setTakenTables([])
     if (!ev?.id) return
-    // Find tables with active orders in this event
-    const { data: activeOrders } = await supabase.from('orders')
-      .select('table_id, tables(table_number)')
-      .in('status', ['pending','placed','in_progress'])
+    const { data: rows } = await supabase.from('tables')
+      .select('table_number, claimed_by_device, claimed_at, last_seen_at')
       .eq('event_id', ev.id)
-    const takenNums = (activeOrders||[])
-      .map(o => o.tables?.table_number)
-      .filter(Boolean)
-    // Exclude current table — supervisor should always be able to reselect it
-    const filteredTaken = currentEventId === ev.id
-      ? takenNums.filter(n => n !== currentTableNumber)
-      : takenNums
-    setTakenTables(filteredTaken)
+    const blocked = (rows || [])
+      .filter(r => isClaimLive(r) && r.claimed_by_device !== deviceId)
+      .map(r => r.table_number)
+    setTakenTables(blocked)
   }
 
-  async function reclaimTable(tNum) {
-    if (!selectedEvent) return
-    const confirmMsg = 'Table ' + tNum + ' has an active order.\n\nDo you want to claim this table anyway?\n\n(The existing order will remain active — only the table assignment changes)'
-    if (!window.confirm(confirmMsg)) return
-    setSelectedTable(tNum)
+  // Deliberately not a bypass. There is no situation where two tablets
+  // should share a table number, so this explains rather than offers.
+  function reclaimTable(tNum) {
+    alert('Table ' + tNum + ' is already in use by another tablet.\n\n' +
+      'Ask the supervisor to release it from Events, then select it again.\n\n' +
+      'It also frees itself automatically if that tablet stays offline for 30 minutes.')
   }
 
   async function confirmTable() {
@@ -147,6 +147,12 @@ export default function SetupScreen({ onSetupComplete, currentTableNumber, curre
         setConfirming(false)
         return
       }
+
+      // Record the claim so no other tablet can take this number
+      const nowIso = new Date().toISOString()
+      await supabase.from('tables').update({
+        claimed_by_device: deviceId, claimed_at: nowIso, last_seen_at: nowIso
+      }).eq('id', tableRecord.id)
 
       // Save everything to localStorage
       localStorage.setItem('ss_setup_complete', 'true')
@@ -333,7 +339,7 @@ export default function SetupScreen({ onSetupComplete, currentTableNumber, curre
                       if (isTaken) reclaimTable(tNum)
                       else setSelectedTable(tNum)
                     }}
-                    title={isTaken ? 'Active order — tap to reclaim' : isCurrent ? 'Your current table' : 'Available'}
+                    title={isTaken ? 'In use by another tablet' : isCurrent ? 'Your current table' : 'Available'}
                     style={{
                       padding: '10px 4px',
                       borderRadius: 10,
@@ -347,7 +353,7 @@ export default function SetupScreen({ onSetupComplete, currentTableNumber, curre
                     }}>
                     {tNum}
                     {isCurrent && !isSelected && <span style={{ fontSize: 7, opacity: 0.8 }}>CURRENT</span>}
-                    {isTaken && !isCurrent && <span style={{ fontSize: 7, opacity: 0.7 }}>⚠️</span>}
+                    {isTaken && !isCurrent && <span style={{ fontSize: 7, opacity: 0.75 }}>IN USE</span>}
                   </button>
                 )
               })}

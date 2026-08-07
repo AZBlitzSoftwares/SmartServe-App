@@ -10,6 +10,16 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
     if (typeof cartOpen === 'boolean') setOpen(cartOpen)
   }, [cartOpen])
   const [placing, setPlacing] = useState(false)
+  const [showWait, setShowWait] = useState(false)
+
+  // Order limit waiting screen - visible for 15 seconds, then the guest is
+  // back on the menu. The cart is deliberately left untouched so they do not
+  // have to pick their dishes again.
+  useEffect(() => {
+    if (!showWait) return
+    const t = setTimeout(() => setShowWait(false), 15000)
+    return () => clearTimeout(t)
+  }, [showWait])
   const [error, setError] = useState('')
   const [activeOrderCount, setActiveOrderCount] = useState(0)
   const total = cart.reduce((s, i) => s + i.quantity, 0)
@@ -80,38 +90,74 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
           self-contained and needs no global stylesheet change. */}
       <style>{`
         @keyframes ssOrderNowFlash {
-          0%, 100% { box-shadow: 0 10px 28px rgba(232,137,12,0.55); opacity: 1; }
-          50%      { box-shadow: 0 10px 34px rgba(232,137,12,0.95); opacity: 0.82; }
+          0%, 100% { background: #E8890C; box-shadow: 0 3px 12px rgba(232,137,12,0.40); transform: scale(1); }
+          50%      { background: #FFB03A; box-shadow: 0 5px 26px rgba(232,137,12,0.90); transform: scale(1.045); }
         }
         .ss-order-now { animation: ssOrderNowFlash 1s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce) { .ss-order-now { animation: none; } }
       `}</style>
 
-      <div style={{ position:'fixed', bottom:20, left:'50%', transform:'translateX(-50%)',
-        width:'calc(100% - 32px)', maxWidth:480, display:'flex', gap:10, zIndex:50 }}>
+      {/* OPAQUE FOOTER BAR - only rendered when the cart has items,
+          because GuestApp gates this whole component on cartCount > 0.
+          Solid surface so no dish ever shows through behind the buttons. */}
+      <div style={{ position:'fixed', bottom:0, left:0, right:0, zIndex:55,
+        background:'#fff', borderTop:'1px solid #ECECEC',
+        boxShadow:'0 -6px 22px rgba(0,0,0,0.10)',
+        padding:'12px 16px calc(12px + env(safe-area-inset-bottom))',
+        display:'flex', alignItems:'center', gap:12, boxSizing:'border-box' }}>
 
-        {/* LEFT - View Cart */}
+        {/* LEFT - View Cart, secondary */}
         <button onClick={() => { setOpen(true); onCartOpenChange?.(true) }}
-          style={{ flex:'0 0 44%', background:'#1A0A0A', border:'none', borderRadius:16,
-            padding:'16px 18px', display:'flex', alignItems:'center', justifyContent:'center',
-            gap:10, cursor:'pointer', boxShadow:'0 12px 30px rgba(0,0,0,0.4)' }}>
-          <div style={{ background:'rgba(255,255,255,0.22)', borderRadius:999, minWidth:28,
-            height:28, padding:'0 8px', display:'flex', alignItems:'center', justifyContent:'center',
-            fontWeight:800, color:'#fff', fontSize:14 }}>{total}</div>
-          <span style={{ color:'#fff', fontWeight:800, fontSize:16, whiteSpace:'nowrap' }}>View Cart</span>
+          style={{ flexShrink:0, background:'#FFF8EE', border:'2px solid #E8890C',
+            borderRadius:14, padding:'12px 16px', display:'flex', alignItems:'center',
+            gap:9, cursor:'pointer' }}>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#C06A00"
+            strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
+            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+          </svg>
+          <span style={{ color:'#C06A00', fontWeight:800, fontSize:15, whiteSpace:'nowrap' }}>View Cart</span>
+          <span style={{ background:'#E8890C', color:'#fff', borderRadius:999, minWidth:23,
+            height:23, padding:'0 7px', display:'flex', alignItems:'center',
+            justifyContent:'center', fontWeight:800, fontSize:13 }}>{total}</span>
         </button>
 
-        {/* RIGHT - Order Now, places immediately */}
+        {/* RIGHT - Order Now, primary, flashing, takes the rest of the width */}
         <button className={placing ? '' : 'ss-order-now'}
-          onClick={() => { if (orderLimitHit) { setOpen(true); onCartOpenChange?.(true) } else { placeOrder() } }}
+          onClick={() => { if (orderLimitHit) { setShowWait(true) } else { placeOrder() } }}
           disabled={placing}
-          style={{ flex:1, background: placing ? '#B0741C' : '#E8890C', border:'none',
-            borderRadius:16, padding:'16px 18px', color:'#fff', fontWeight:900, fontSize:17,
-            cursor: placing ? 'wait' : 'pointer', whiteSpace:'nowrap',
-            display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+          style={{ flexShrink:0, marginLeft:'auto', background: placing ? '#B0741C' : '#E8890C',
+            border:'none', borderRadius:14, padding:'13px 26px', color:'#fff',
+            fontWeight:900, fontSize:16, whiteSpace:'nowrap',
+            cursor: placing ? 'wait' : 'pointer' }}>
           {placing ? 'Placing...' : 'Order Now \u2192'}
         </button>
       </div>
+
+      {/* ORDER LIMIT - 15 second waiting screen. Rose card on a dimmed
+          backdrop, matching the palette the old in-drawer panel used. */}
+      {showWait && (
+        <div style={{ position:'fixed', inset:0, zIndex:120, background:'rgba(26,10,10,0.72)',
+          display:'flex', alignItems:'center', justifyContent:'center', padding:22 }}>
+          <div style={{ background:'#FFF1F2', border:'3px solid #FDA4AF', borderRadius:24,
+            padding:'32px 26px 28px', maxWidth:400, width:'100%', textAlign:'center',
+            boxShadow:'0 20px 60px rgba(0,0,0,0.45)' }}>
+            <div style={{ fontSize:52, marginBottom:12, lineHeight:1 }}>⏳</div>
+            <div style={{ fontWeight:900, fontSize:30, color:'#BE123C', marginBottom:12,
+              letterSpacing:'1px' }}>PLEASE WAIT</div>
+            <div style={{ fontSize:16, color:'#9F1239', lineHeight:1.6, fontWeight:500,
+              marginBottom:24 }}>
+              Your current order is still being served.<br />You can order again as soon as it arrives.
+            </div>
+            <button onClick={() => setShowWait(false)}
+              style={{ background:'#1A0A0A', color:'#E8890C', border:'none', borderRadius:14,
+                padding:'14px 30px', fontSize:15, fontWeight:900, cursor:'pointer',
+                display:'inline-flex', alignItems:'center', gap:8 }}>
+              🍽️ Back to Menu
+            </button>
+          </div>
+        </div>
+      )}
 
       {open && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:60 }} onClick={() => { setOpen(false); onCartOpenChange?.(false) }}>

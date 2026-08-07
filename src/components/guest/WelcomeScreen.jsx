@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import janusLogo from '../../assets/janus_logo.jpg'
-import igQrCode from '../../assets/ig_qr.jpg'
 
 
 // ─── Event Status Helper ───────────────────────────────────────────────────
@@ -109,135 +108,145 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
   }
 
   return (
-    <div style={{ minHeight:'100vh', position:'relative', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', padding:'40px 24px 24px', overflow:'hidden' }}>
-      {eventData?.video_url
-        ? <video ref={videoRef} src={eventData.video_url} autoPlay loop muted playsInline style={{ position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',zIndex:0 }} />
-        : <div style={{ position:'absolute',inset:0,background:'linear-gradient(160deg,#1a0a0a 0%,#2d1010 50%,#1a0a0a 100%)',zIndex:0 }} />
-      }
-      <div style={{ position:'absolute',inset:0,background:'rgba(0,0,0,0.62)',zIndex:1 }} />
+    <div style={{ height:'100dvh', position:'relative', display:'flex', flexDirection:'column',
+      alignItems:'center', textAlign:'center', padding:0, overflow:'hidden',
+      background:'linear-gradient(160deg,#1a0a0a 0%,#2d1010 50%,#1a0a0a 100%)' }}>
+      {/* Top 70% - the video, undimmed. It was previously a full-bleed
+          background under a 62% black overlay, which made it almost
+          invisible and wasted the asset entirely. */}
+      {eventData?.video_url && (
+        <div style={{ width:'100%', flex:1, minHeight:0, position:'relative', overflow:'hidden' }}>
+          <video ref={videoRef} src={eventData.video_url} autoPlay loop muted playsInline
+            style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+          {/* Fades the video into the panel so the two read as one
+              surface instead of two blocks butted together. */}
+          <div style={{ position:'absolute', left:0, right:0, bottom:0, height:90,
+            background:'linear-gradient(to bottom, rgba(26,10,10,0) 0%, rgba(26,10,10,0.75) 62%, #1a0a0a 100%)',
+            pointerEvents:'none' }} />
+        </div>
+      )}
 
-      <div style={{ position:'relative',zIndex:2,width:'100%',maxWidth:500 }}>
+      <style>{`
+        @keyframes ssStartFlash {
+          0%, 100% { background:#E8890C; box-shadow:0 6px 22px rgba(232,137,12,0.45); }
+          50%      { background:#FFB03A; box-shadow:0 8px 32px rgba(232,137,12,0.85); }
+        }
+        .ss-start { animation: ssStartFlash 1.1s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .ss-start { animation:none; } }
+        .ss-welcome-panel {
+          display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center;
+          gap:10px; width:100%; box-sizing:border-box;
+          padding:16px 12px calc(16px + env(safe-area-inset-bottom));
+          background:linear-gradient(180deg,#1a0a0a 0%,#2d1010 60%,#1a0a0a 100%);
+          container-type:inline-size;
+        }
+        .ss-col { display:flex; flex-direction:column; align-items:center; text-align:center; min-width:0; }
+        .ss-name {
+          font-weight:900; color:#fff; line-height:1.18; margin-top:9px;
+          font-size:clamp(13px, 2.6cqw, 21px);
+          display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+          overflow:hidden; word-break:break-word;
+        }
+        .ss-role { font-size:clamp(9px, 1.5cqw, 11px); font-weight:700; color:rgba(255,255,255,0.42);
+          letter-spacing:0.4px; text-transform:uppercase; margin-top:3px; }
+        .ss-logo { width:clamp(36px, 8cqw, 56px); height:clamp(36px, 8cqw, 56px);
+          border-radius:12px; object-fit:contain; }
+        @media (max-width: 560px) {
+          .ss-welcome-panel { grid-template-columns:1fr; gap:12px; }
+          .ss-col-side { flex-direction:row; gap:10px; justify-content:center; }
+          .ss-col-side .ss-name { margin-top:0; text-align:left; }
+          .ss-col-side .ss-role { display:none; }
+        }
+      `}</style>
 
-        {/* DUAL LOGO ROW — Catering + Janu's side by side, equal size */}
-        {eventData?.catering_company ? (
-          <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'center', gap:20, marginBottom:20 }}>
+      <div className="ss-welcome-panel">
 
-            {/* Catering logo */}
-            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:8 }}>
+        <div className="ss-col ss-col-side">
+          {eventData?.catering_company ? (
+            <>
               {eventData.catering_logo_url ? (
-                <img src={eventData.catering_logo_url} alt={eventData.catering_company}
-                  style={{ width:120, height:120, objectFit:'contain', borderRadius:26, background:'rgba(255,255,255,0.12)', padding:10, boxShadow:'0 12px 40px rgba(0,0,0,0.55)', border:'2px solid rgba(255,255,255,0.25)' }}
+                <img className="ss-logo" src={eventData.catering_logo_url}
+                  alt={eventData.catering_company}
+                  style={{ background:'rgba(255,255,255,0.12)', padding:5,
+                    border:'2px solid rgba(255,255,255,0.22)' }}
                   onError={e=>e.target.style.opacity='0'} />
               ) : (
-                <div style={{ width:120, height:120, borderRadius:26, background:'rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:48 }}>🏷️</div>
+                <div className="ss-logo" style={{ background:'rgba(255,255,255,0.1)',
+                  display:'flex', alignItems:'center', justifyContent:'center', fontSize:22 }}>🏷️</div>
               )}
-              <div style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,0.55)', letterSpacing:'0.5px', textTransform:'uppercase' }}>Catering Partner</div>
-            </div>
-
-            {/* × divider */}
-            <div style={{ fontSize:28, color:'rgba(255,255,255,0.2)', marginBottom:36, flexShrink:0 }}>×</div>
-
-            {/* Janu's logo — same size as catering */}
-            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:8 }}>
-              <div style={{ width:120, height:120, borderRadius:26, background:'linear-gradient(135deg,#E8890C,#c97010)', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 12px 40px rgba(232,137,12,0.5)', border:'2px solid rgba(255,255,255,0.2)', overflow:'hidden' }}>
-                <img src={janusLogo} alt="Janu's Smart Serve" style={{ width:108, height:108, objectFit:'contain', borderRadius:20 }} />
-              </div>
-              <div style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,0.55)', letterSpacing:'0.5px', textTransform:'uppercase' }}>Technology Partner</div>
-            </div>
-          </div>
-        ) : (
-          /* No catering — just Janu's logo centred */
-          <div style={{ marginBottom:16 }}>
-            <div style={{ width:120, height:120, borderRadius:28, background:'linear-gradient(135deg,#E8890C,#c97010)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto', boxShadow:'0 12px 40px rgba(232,137,12,0.4)', border:'2px solid rgba(255,255,255,0.2)' }}>
-              <img src={janusLogo} alt="Janu's Smart Serve" style={{ width:106, height:106, objectFit:'contain', borderRadius:22 }} />
-            </div>
-          </div>
-        )}
-
-        {/* Catering Name */}
-        {eventData?.catering_company ? (
-          <div style={{ fontSize:46, fontWeight:900, color:'#fff', marginBottom:4, letterSpacing:'0.5px', lineHeight:1.1, textShadow:'0 3px 16px rgba(0,0,0,0.7)' }}>
-            {eventData.catering_company}
-          </div>
-        ) : (
-          <div style={{ fontSize:44, fontWeight:900, color:'#fff', marginBottom:8 }}>
-            Janu's <span style={{ color:'#E8890C' }}>Smart Serve</span>
-          </div>
-        )}
-
-        {/* Powered by — text only, no tiny logo (logos are above) */}
-        {eventData?.catering_company && (
-          <div style={{ fontSize:20, fontWeight:700, color:'rgba(255,255,255,0.75)', marginBottom:12, letterSpacing:'0.2px' }}>
-            Powered by <span style={{ color:'#E8890C', fontWeight:900 }}>Janu's Smart Serve</span>
-          </div>
-        )}
-
-        {/* Event name */}
-        {eventData?.name && (
-          <div style={{ fontSize:22, fontWeight:800, color:'#FFE0A0', marginBottom:5, textShadow:'0 2px 8px rgba(0,0,0,0.6)' }}>{eventData.name}</div>
-        )}
-        {eventData?.venue && (
-          <div style={{ fontSize:16, fontWeight:600, color:'rgba(255,255,255,0.82)', marginBottom:4 }}>📍 {eventData.venue}</div>
-        )}
-        {!eventData && <div style={{ fontSize:14,color:'rgba(255,255,255,0.5)',marginBottom:4 }}>No event selected</div>}
-
-        {/* Table badge — long press 3s to change setup */}
-        <div
-          onMouseDown={startLongPress} onMouseUp={endLongPress} onMouseLeave={endLongPress}
-          onTouchStart={startLongPress} onTouchEnd={endLongPress}
-          style={{ display:'inline-flex',alignItems:'center',gap:8,background:'rgba(255,255,255,0.15)',border:'1.5px solid rgba(255,255,255,0.3)',borderRadius:999,padding:'10px 28px',margin:'18px auto 20px',fontSize:17,fontWeight:800,color:'#fff',cursor:'pointer',position:'relative',overflow:'hidden',userSelect:'none' }}>
-          {longPressProgress > 0 && (
-            <div style={{ position:'absolute',left:0,top:0,height:'100%',background:'rgba(232,137,12,0.4)',width:longPressProgress+'%',transition:'width 0.1s linear',borderRadius:999 }} />
+              <div className="ss-name">{eventData.catering_company}</div>
+              <div className="ss-role">Catering partner</div>
+            </>
+          ) : (
+            <>
+              <img className="ss-logo" src={janusLogo} alt="Janu's Smart Serve"
+                style={{ background:'linear-gradient(135deg,#E8890C,#c97010)', padding:4,
+                  border:'2px solid rgba(255,255,255,0.2)' }} />
+              <div className="ss-name">Janu's Smart Serve</div>
+            </>
           )}
-          <span style={{ width:10,height:10,borderRadius:'50%',background:'#4ADE80',display:'inline-block',boxShadow:'0 0 8px #4ADE80',position:'relative',zIndex:1 }}></span>
-          <span style={{ position:'relative',zIndex:1 }}>TABLE {tableNumber}</span>
-          {longPressProgress > 0 && <span style={{ position:'relative',zIndex:1,fontSize:10,opacity:0.7 }}>Hold to change...</span>}
         </div>
 
-        <p style={{ fontSize:14,color:'rgba(255,255,255,0.65)',marginBottom:24,maxWidth:300,lineHeight:1.7,margin:'0 auto 24px' }}>
-          Browse our menu and place your order directly from this tablet
-        </p>
-
-        {eventData ? (
-          <button onClick={onStart} style={{ background:'#E8890C',color:'#fff',border:'none',borderRadius:16,padding:'20px 56px',fontSize:20,fontWeight:800,boxShadow:'0 10px 30px rgba(232,137,12,0.5)',display:'block',margin:'0 auto',cursor:'pointer' }}>
-            Start Ordering →
-          </button>
-        ) : (
-          <button onClick={openEventPicker} style={{ background:'#E8890C',color:'#fff',border:'none',borderRadius:16,padding:'18px 48px',fontSize:18,fontWeight:800,display:'block',margin:'0 auto',cursor:'pointer' }}>
-            Select Event
-          </button>
-        )}
-
-        
-
-        {/* Instagram QR footer — large scannable QR + handle */}
-        <div style={{ marginTop:28, background:'rgba(255,255,255,0.07)', borderRadius:20, padding:'16px 20px', border:'1px solid rgba(255,255,255,0.12)', display:'flex', alignItems:'center', gap:16, width:'100%', boxSizing:'border-box' }}>
-          {/* Large white-background QR for easy scanning */}
-          <div style={{ background:'#fff', borderRadius:12, padding:6, flexShrink:0 }}>
-            <img src={igQrCode} alt="Follow on Instagram"
-              style={{ width:90, height:90, display:'block', borderRadius:8, objectFit:'cover' }} />
+        <div className="ss-col">
+          <div
+            onMouseDown={startLongPress} onMouseUp={endLongPress} onMouseLeave={endLongPress}
+            onTouchStart={startLongPress} onTouchEnd={endLongPress}
+            style={{ display:'inline-flex', alignItems:'center', gap:7,
+              background:'rgba(255,255,255,0.15)', border:'1.5px solid rgba(255,255,255,0.3)',
+              borderRadius:999, padding:'6px 18px', fontSize:'clamp(11px, 1.4vw + 4px, 15px)',
+              fontWeight:800, color:'#fff', cursor:'pointer', position:'relative',
+              overflow:'hidden', userSelect:'none', whiteSpace:'nowrap' }}>
+            {longPressProgress > 0 && (
+              <div style={{ position:'absolute', left:0, top:0, height:'100%',
+                background:'rgba(232,137,12,0.4)', width:longPressProgress+'%',
+                transition:'width 0.1s linear', borderRadius:999 }} />
+            )}
+            <span style={{ width:8, height:8, borderRadius:'50%', background:'#4ADE80',
+              display:'inline-block', boxShadow:'0 0 8px #4ADE80', position:'relative', zIndex:1 }}></span>
+            <span style={{ position:'relative', zIndex:1 }}>TABLE {tableNumber}</span>
           </div>
-          <div style={{ textAlign:'left' }}>
-            <div style={{ fontSize:11, fontWeight:600, color:'rgba(255,255,255,0.5)', letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:5 }}>Follow us on Instagram</div>
-            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <defs>
-                  <linearGradient id="igG2" x1="0%" y1="100%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#F58529"/>
-                    <stop offset="50%" stopColor="#DD2A7B"/>
-                    <stop offset="100%" stopColor="#515BD4"/>
-                  </linearGradient>
-                </defs>
-                <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#igG2)"/>
-                <circle cx="12" cy="12" r="4.5" stroke="white" strokeWidth="1.8" fill="none"/>
-                <circle cx="17.5" cy="6.5" r="1" fill="white"/>
-              </svg>
-              <span style={{ fontSize:18, fontWeight:900, color:'#fff' }}>@janusmartserve</span>
-            </div>
-            <div style={{ fontSize:12, color:'rgba(255,255,255,0.45)', lineHeight:1.4 }}>Scan QR to follow<br/>& stay updated</div>
-          </div>
+
+          {eventData?.name && (
+            <div style={{ fontSize:'clamp(13px, 1.7vw + 5px, 19px)', fontWeight:800,
+              color:'#FFE0A0', marginTop:9, lineHeight:1.2 }}>{eventData.name}</div>
+          )}
+          {eventData?.venue && (
+            <div style={{ fontSize:'clamp(11px, 1.1vw + 4px, 14px)', fontWeight:600,
+              color:'rgba(255,255,255,0.7)', marginTop:1 }}>📍 {eventData.venue}</div>
+          )}
+          {!eventData && (
+            <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginTop:6 }}>No event selected</div>
+          )}
+
+          {eventData ? (
+            <button onClick={onStart} className="ss-start"
+              style={{ marginTop:14, color:'#fff', border:'none', borderRadius:14,
+                padding:'clamp(12px, 1.6vw + 6px, 20px) clamp(22px, 3vw + 10px, 46px)',
+                fontSize:'clamp(14px, 1.6vw + 6px, 21px)', fontWeight:900,
+                cursor:'pointer', whiteSpace:'nowrap' }}>
+              Start Ordering →
+            </button>
+          ) : (
+            <button onClick={openEventPicker}
+              style={{ marginTop:12, background:'#E8890C', color:'#fff', border:'none',
+                borderRadius:14, padding:'14px 32px', fontSize:16, fontWeight:900,
+                cursor:'pointer', whiteSpace:'nowrap' }}>
+              Select Event
+            </button>
+          )}
         </div>
 
+        <div className="ss-col ss-col-side">
+          {eventData?.catering_company ? (
+            <>
+              <img className="ss-logo" src={janusLogo} alt="Janu's Smart Serve"
+                style={{ background:'linear-gradient(135deg,#E8890C,#c97010)', padding:4,
+                  border:'2px solid rgba(255,255,255,0.2)' }} />
+              <div className="ss-name">Janu's Smart Serve</div>
+              <div className="ss-role">Technology partner</div>
+            </>
+          ) : null}
+        </div>
       </div>
 
       {showTablePicker && (

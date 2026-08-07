@@ -17,6 +17,294 @@ const STATUS_COLOR = { planned:'#2563EB', active:'#16A34A', completed:'#6B7280' 
 const INP = { width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:14, marginBottom:0, fontFamily:'Manrope', outline:'none', boxSizing:'border-box', background:'#fff' }
 const LBL = { fontSize:12, fontWeight:700, color:'#666', display:'block', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.04em' }
 
+/* Help items for one event.
+
+   event_id NULL rows are the shared defaults every event falls back
+   to. An event only gets its own rows once someone customises it,
+   which keeps new events working with no setup and stops one
+   wedding's list leaking into another. */
+
+/* Which tablets have claimed which tables, for one event.
+
+   The list matters more than the Release button: it answers a
+   question Janu's team currently cannot answer at all - is every
+   table actually covered? Fifteen tablets placed but thirteen
+   claimed means two are off, dead, or on the wrong event, and
+   right now that only surfaces when those tables never order. */
+function TableClaims({ eventId, tableCount }) {
+  const [rows, setRows] = useState([])
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => { if (open) load() }, [open, eventId])
+
+  async function load() {
+    const { data } = await supabase.from('tables')
+      .select('id, table_number, claimed_by_device, claimed_at, last_seen_at')
+      .eq('event_id', eventId).order('table_number')
+    setRows(data || [])
+  }
+
+  function live(r) {
+    if (!r.claimed_by_device) return false
+    const seen = r.last_seen_at || r.claimed_at
+    if (!seen) return false
+    return (Date.now() - new Date(seen).getTime()) < 30 * 60 * 1000
+  }
+
+  async function release(id) {
+    setBusy(true)
+    await supabase.from('tables')
+      .update({ claimed_by_device: null, claimed_at: null, last_seen_at: null })
+      .eq('id', id)
+    setBusy(false); load()
+  }
+
+  const claimed = rows.filter(live).length
+  const total = tableCount || rows.length
+
+  return (
+    <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
+      <button onClick={() => setOpen(!open)}
+        style={{ width:'100%', background:'none', border:'none', padding:0, cursor:'pointer',
+          display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+        <span style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', textTransform:'uppercase' }}>
+          📱 Tables &amp; Devices
+        </span>
+        <span style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ fontSize:11, fontWeight:700, borderRadius:999, padding:'3px 10px',
+            background: claimed > 0 ? '#DCFCE7' : '#F3F4F6',
+            color: claimed > 0 ? '#15803D' : '#6B7280' }}>
+            {claimed} of {total} claimed
+          </span>
+          <span style={{ fontSize:13, color:'#888', transform: open ? 'rotate(180deg)' : 'none',
+            transition:'transform 0.15s', display:'inline-block' }}>▼</span>
+        </span>
+      </button>
+
+      {open && (
+        <div style={{ marginTop:10 }}>
+          {rows.length === 0 && (
+            <div style={{ fontSize:12, color:'#888', padding:'8px 0' }}>
+              No tablet has connected to this event yet.
+            </div>
+          )}
+          {rows.map(r => {
+            const on = live(r)
+            const seen = r.last_seen_at || r.claimed_at
+            return (
+              <div key={r.id} style={{ display:'flex', alignItems:'center', gap:10, background:'#fff',
+                border:'1px solid var(--line)', borderRadius:10, padding:'8px 10px', marginBottom:6 }}>
+                <span style={{ flexShrink:0, width:34, fontWeight:900, fontSize:14 }}>{r.table_number}</span>
+                <span style={{ flex:1, minWidth:0, fontSize:12,
+                  color: on ? '#15803D' : '#888', fontWeight:700 }}>
+                  {on ? 'In use' : r.claimed_by_device ? 'Claim expired' : 'Free'}
+                  {seen && (
+                    <span style={{ fontWeight:500, color:'#999' }}>
+                      {' · last seen ' + new Date(seen).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
+                    </span>
+                  )}
+                </span>
+                {r.claimed_by_device && (
+                  <button onClick={() => release(r.id)} disabled={busy}
+                    style={{ flexShrink:0, background:'#FEF2F2', border:'1px solid #FECACA',
+                      color:'#B91C1C', borderRadius:8, padding:'5px 12px', fontSize:11,
+                      fontWeight:700, cursor:'pointer' }}>
+                    Release
+                  </button>
+                )}
+              </div>
+            )
+          })}
+          <button onClick={load} disabled={busy}
+            style={{ marginTop:4, background:'none', border:'none', color:'#888', fontSize:11,
+              fontWeight:600, cursor:'pointer', textDecoration:'underline', padding:0 }}>
+            Refresh
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function HelpItemsEditor({ eventId }) {
+  const [items, setItems] = useState([])
+  const [isCustom, setIsCustom] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newQty, setNewQty] = useState(true)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => { load() }, [eventId])
+
+  async function load() {
+    setLoading(true)
+    const { data: mine } = await supabase.from('help_items')
+      .select('*').eq('event_id', eventId).order('sort_order')
+    if (mine && mine.length) {
+      setItems(mine); setIsCustom(true); setLoading(false); return
+    }
+    const { data: defaults } = await supabase.from('help_items')
+      .select('*').is('event_id', null).order('sort_order')
+    setItems(defaults || []); setIsCustom(false); setLoading(false)
+  }
+
+  async function customise() {
+    setBusy(true)
+    const rows = items.map((it, i) => ({
+      event_id: eventId, name: it.name,
+      has_quantity: it.has_quantity, sort_order: i + 1, is_active: true
+    }))
+    if (rows.length) await supabase.from('help_items').insert(rows)
+    setBusy(false); load()
+  }
+
+  async function useDefaults() {
+    if (!confirm('Remove this event\'s own help list and go back to the shared default list?')) return
+    setBusy(true)
+    await supabase.from('help_items').delete().eq('event_id', eventId)
+    setBusy(false); load()
+  }
+
+  async function patch(id, field, val) {
+    setBusy(true)
+    await supabase.from('help_items').update({ [field]: val }).eq('id', id)
+    setBusy(false); load()
+  }
+
+  async function remove(id) {
+    setBusy(true)
+    await supabase.from('help_items').delete().eq('id', id)
+    setBusy(false); load()
+  }
+
+  async function move(idx, dir) {
+    const j = idx + dir
+    if (j < 0 || j >= items.length) return
+    setBusy(true)
+    const a = items[idx], b = items[j]
+    await supabase.from('help_items').update({ sort_order: b.sort_order }).eq('id', a.id)
+    await supabase.from('help_items').update({ sort_order: a.sort_order }).eq('id', b.id)
+    setBusy(false); load()
+  }
+
+  async function add() {
+    const name = newName.trim()
+    if (!name) return
+    setBusy(true)
+    const max = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0)
+    await supabase.from('help_items').insert({
+      event_id: eventId, name, has_quantity: newQty,
+      sort_order: max + 1, is_active: true
+    })
+    setNewName(''); setNewQty(true); setBusy(false); load()
+  }
+
+  if (loading) return (
+    <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12, fontSize:13, color:'#888' }}>
+      Loading help items...
+    </div>
+  )
+
+  return (
+    <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
+      {/* Collapsed by default - this list is long and is rarely changed,
+          so it should not push the rest of the event settings down. */}
+      <button onClick={() => setOpen(!open)}
+        style={{ width:'100%', background:'none', border:'none', padding:0, cursor:'pointer',
+          display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+        <span style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', textTransform:'uppercase' }}>
+          🔔 Help Items
+        </span>
+        <span style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ fontSize:11, fontWeight:700, borderRadius:999, padding:'3px 10px',
+            background: isCustom ? '#DCFCE7' : '#F3F4F6',
+            color: isCustom ? '#15803D' : '#6B7280' }}>
+            {items.length} item{items.length === 1 ? '' : 's'} · {isCustom ? 'custom' : 'default list'}
+          </span>
+          <span style={{ fontSize:13, color:'#888', transform: open ? 'rotate(180deg)' : 'none',
+            transition:'transform 0.15s', display:'inline-block' }}>▼</span>
+        </span>
+      </button>
+
+      {!open ? null : (
+      <div style={{ marginTop:12 }}>
+
+      {!isCustom && (
+        <div style={{ background:'#FFF7ED', border:'1px solid #FED7AA', borderRadius:10,
+          padding:'10px 12px', marginBottom:10, fontSize:12, color:'#9A3412', lineHeight:1.5 }}>
+          This event uses the shared default list. Customise it to give this event its own items —
+          other events stay unchanged.
+          <button onClick={customise} disabled={busy}
+            style={{ display:'block', marginTop:8, background:'var(--ink)', color:'#fff', border:'none',
+              borderRadius:8, padding:'8px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+            {busy ? 'Working...' : 'Customise for this event'}
+          </button>
+        </div>
+      )}
+
+      {items.map((it, idx) => (
+        <div key={it.id} style={{ display:'flex', alignItems:'center', gap:6, background:'#fff',
+          border:'1px solid var(--line)', borderRadius:10, padding:'7px 9px', marginBottom:6 }}>
+          <input defaultValue={it.name} key={'hi' + it.id} disabled={!isCustom || busy}
+            onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.name) patch(it.id, 'name', v) }}
+            style={{ flex:1, minWidth:0, border:'none', outline:'none', fontSize:13, fontWeight:700,
+              fontFamily:'Manrope', background:'transparent', color: isCustom ? '#1A1A1A' : '#888' }} />
+
+          <button onClick={() => patch(it.id, 'has_quantity', !it.has_quantity)} disabled={!isCustom || busy}
+            title="Quantity or tap to add"
+            style={{ flexShrink:0, background: it.has_quantity ? '#DCFCE7' : '#F3F4F6',
+              border:'1px solid ' + (it.has_quantity ? '#86EFAC' : '#E5E7EB'),
+              color: it.has_quantity ? '#15803D' : '#6B7280', borderRadius:999, padding:'4px 10px',
+              fontSize:11, fontWeight:700, cursor: isCustom ? 'pointer' : 'not-allowed' }}>
+            {it.has_quantity ? '± Qty' : 'Tap only'}
+          </button>
+
+          <button onClick={() => move(idx, -1)} disabled={!isCustom || busy || idx === 0}
+            style={{ flexShrink:0, background:'none', border:'none', fontSize:14,
+              cursor: isCustom && idx > 0 ? 'pointer' : 'not-allowed', color:'#888', padding:'0 3px' }}>▲</button>
+          <button onClick={() => move(idx, 1)} disabled={!isCustom || busy || idx === items.length - 1}
+            style={{ flexShrink:0, background:'none', border:'none', fontSize:14,
+              cursor: isCustom && idx < items.length - 1 ? 'pointer' : 'not-allowed', color:'#888', padding:'0 3px' }}>▼</button>
+          <button onClick={() => remove(it.id)} disabled={!isCustom || busy}
+            style={{ flexShrink:0, background:'none', border:'none', color: isCustom ? '#DC2626' : '#CCC',
+              fontSize:12, fontWeight:700, cursor: isCustom ? 'pointer' : 'not-allowed', padding:'0 3px' }}>✕</button>
+        </div>
+      ))}
+
+      {isCustom && (
+        <>
+          <div style={{ display:'flex', gap:6, marginTop:8 }}>
+            <input value={newName} onChange={e => setNewName(e.target.value)}
+              placeholder="New item, e.g. Water Bottle"
+              onKeyDown={e => { if (e.key === 'Enter') add() }}
+              style={{ ...INP, flex:1, fontSize:13, padding:'8px 12px' }} />
+            <button onClick={() => setNewQty(!newQty)}
+              style={{ flexShrink:0, background: newQty ? '#DCFCE7' : '#F3F4F6',
+                border:'1px solid ' + (newQty ? '#86EFAC' : '#E5E7EB'),
+                color: newQty ? '#15803D' : '#6B7280', borderRadius:8, padding:'0 12px',
+                fontSize:11, fontWeight:700, cursor:'pointer' }}>
+              {newQty ? '± Qty' : 'Tap only'}
+            </button>
+            <button onClick={add} disabled={busy || !newName.trim()}
+              style={{ flexShrink:0, background:'var(--ink)', color:'#fff', border:'none',
+                borderRadius:8, padding:'0 16px', fontSize:13, fontWeight:700,
+                cursor: newName.trim() ? 'pointer' : 'not-allowed' }}>Add</button>
+          </div>
+          <button onClick={useDefaults} disabled={busy}
+            style={{ marginTop:8, background:'none', border:'none', color:'#888', fontSize:11,
+              fontWeight:600, cursor:'pointer', textDecoration:'underline', padding:0 }}>
+            Go back to the shared default list
+          </button>
+        </>
+      )}
+      </div>
+      )}
+    </div>
+  )
+}
+
 
 function EventDateNameEditor({ ev, onSave }) {
   const [name, setName]       = useState(ev.name || '')
@@ -72,6 +360,22 @@ export default function EventManager({ onEventChange }) {
   const [uploading, setUploading] = useState(null)
   const [uploadingLogo, setUploadingLogo] = useState(null)
   const [editingField, setEditingField] = useState({})
+  // Help items chosen while creating. There is no event id yet, so these
+  // are held here and written straight after the insert. helpTouched stays
+  // false unless something is actually changed, so an untouched event is
+  // left on the shared defaults rather than silently getting its own copy.
+  const [newHelp, setNewHelp] = useState([])
+  const [helpTouched, setHelpTouched] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+
+  useEffect(() => {
+    supabase.from('help_items').select('*').is('event_id', null).eq('is_active', true)
+      .order('sort_order')
+      .then(({ data }) => setNewHelp((data || []).map(d => ({
+        name: d.name, has_quantity: d.has_quantity, include: true
+      }))))
+  }, [])
+
   const [viewMode, setViewMode] = useState('list') // 'list' | 'detail'
   const [selectedEvent, setSelectedEvent] = useState(null)
 
@@ -108,6 +412,8 @@ export default function EventManager({ onEventChange }) {
 
   function resetCreate() {
     setNewEvent({ name:'', date:'', venue:'', number_of_tables:'', catering_company:'', catering_logo_url:'', welcome_note:'', banner_image_url:'', max_orders_per_table:1, video_url:'', call_waiter_enabled:true })
+    setHelpTouched(false); setHelpOpen(false)
+    setNewHelp(prev => prev.map(h => ({ ...h, include:true })))
     setCreateStep(1); setNewLogoFile(null); setNewLogoPreview(''); setNewVideoFile(null); setNewVideoMode('url')
     setShowCreate(false)
   }
@@ -164,6 +470,15 @@ export default function EventManager({ onEventChange }) {
         call_waiter_enabled: newEvent.call_waiter_enabled,
         is_closed: false, ai_enabled: false
       }).select().single()
+
+      // Help items, only when the default list was actually changed
+      if (ev && helpTouched) {
+        const rows = newHelp.filter(h => h.include).map((h, i) => ({
+          event_id: ev.id, name: h.name, has_quantity: h.has_quantity,
+          sort_order: i + 1, is_active: true
+        }))
+        if (rows.length) await supabase.from('help_items').insert(rows)
+      }
 
       // Upload video if file selected
       if (newVideoFile && ev) {
@@ -359,6 +674,56 @@ export default function EventManager({ onEventChange }) {
                     style={{ width:52, height:28, borderRadius:999, border:'none', cursor:'pointer', position:'relative', background:newEvent.call_waiter_enabled?'#16A34A':'#D1D5DB', transition:'background 0.2s', flexShrink:0 }}>
                     <span style={{ position:'absolute', top:3, left:newEvent.call_waiter_enabled?26:3, width:22, height:22, borderRadius:'50%', background:'#fff', boxShadow:'0 1px 4px rgba(0,0,0,0.2)', transition:'left 0.2s', display:'block' }}></span>
                   </button>
+                </div>
+
+                {/* Help items - collapsed, defaults preselected */}
+                <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
+                  <button type="button" onClick={()=>setHelpOpen(!helpOpen)}
+                    style={{ width:'100%', background:'none', border:'none', padding:0, cursor:'pointer',
+                      display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+                    <span style={{ textAlign:'left' }}>
+                      <span style={{ display:'block', fontSize:14, fontWeight:700 }}>🔔 Help Items</span>
+                      <span style={{ display:'block', fontSize:12, color:'var(--ink2)', marginTop:2 }}>
+                        {helpTouched
+                          ? newHelp.filter(h=>h.include).length + ' items selected for this event'
+                          : 'Using the default list (' + newHelp.length + ' items)'}
+                      </span>
+                    </span>
+                    <span style={{ fontSize:13, color:'#888', flexShrink:0,
+                      transform: helpOpen ? 'rotate(180deg)' : 'none', transition:'transform 0.15s',
+                      display:'inline-block' }}>▼</span>
+                  </button>
+
+                  {helpOpen && (
+                    <div style={{ marginTop:10 }}>
+                      {newHelp.map((h, i) => (
+                        <div key={i} style={{ display:'flex', alignItems:'center', gap:8, background:'#fff',
+                          border:'1px solid var(--line)', borderRadius:10, padding:'7px 10px', marginBottom:6 }}>
+                          <button type="button"
+                            onClick={()=>{ setHelpTouched(true); setNewHelp(p=>p.map((x,j)=>j===i?{...x,include:!x.include}:x)) }}
+                            style={{ flexShrink:0, width:22, height:22, borderRadius:6, cursor:'pointer',
+                              border:'1.5px solid ' + (h.include ? '#16A34A' : '#D1D5DB'),
+                              background: h.include ? '#16A34A' : '#fff', color:'#fff',
+                              fontSize:13, fontWeight:900, lineHeight:1, padding:0 }}>
+                            {h.include ? '✓' : ''}
+                          </button>
+                          <span style={{ flex:1, minWidth:0, fontSize:13, fontWeight:700,
+                            color: h.include ? '#1A1A1A' : '#AAA' }}>{h.name}</span>
+                          <button type="button"
+                            onClick={()=>{ setHelpTouched(true); setNewHelp(p=>p.map((x,j)=>j===i?{...x,has_quantity:!x.has_quantity}:x)) }}
+                            style={{ flexShrink:0, background: h.has_quantity ? '#DCFCE7' : '#F3F4F6',
+                              border:'1px solid ' + (h.has_quantity ? '#86EFAC' : '#E5E7EB'),
+                              color: h.has_quantity ? '#15803D' : '#6B7280', borderRadius:999,
+                              padding:'4px 10px', fontSize:11, fontWeight:700, cursor:'pointer' }}>
+                            {h.has_quantity ? '± Qty' : 'Tap only'}
+                          </button>
+                        </div>
+                      ))}
+                      <div style={{ fontSize:11, color:'#888', marginTop:6, lineHeight:1.5 }}>
+                        More items can be added after the event is created.
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display:'flex', gap:10 }}>
@@ -690,6 +1055,28 @@ export default function EventManager({ onEventChange }) {
                     onBlur={async e=>{ if(e.target.value.trim()&&e.target.value!==ev.catering_logo_url){ await updateEventField(ev.id,'catering_logo_url',e.target.value.trim()||null) } }}
                     placeholder="or paste URL" style={{ flex:2, border:'1.5px solid var(--line)', borderRadius:8, padding:'8px 10px', fontSize:12, fontFamily:'Manrope', outline:'none' }} />
                 </div>
+              </div>
+
+              {/* Which tablet holds which table */}
+              <TableClaims eventId={ev.id} tableCount={ev.number_of_tables} />
+
+              {/* Help items — what guests can ask for from the Help panel */}
+              <HelpItemsEditor eventId={ev.id} />
+
+              {/* Genie video sound, per event */}
+              <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12,
+                display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+                <div>
+                  <div style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', textTransform:'uppercase' }}>🔊 Genie Video Sound</div>
+                  <div style={{ fontSize:12, color:'#888', marginTop:3 }}>Turn off for quiet venues or corporate events</div>
+                </div>
+                <button onClick={async()=>{ await updateEventField(ev.id,'video_sound_enabled', ev.video_sound_enabled===false); loadAll() }}
+                  style={{ flexShrink:0, background: ev.video_sound_enabled===false ? '#F3F4F6' : '#DCFCE7',
+                    border:'1px solid ' + (ev.video_sound_enabled===false ? '#E5E7EB' : '#86EFAC'),
+                    color: ev.video_sound_enabled===false ? '#6B7280' : '#15803D',
+                    borderRadius:999, padding:'8px 18px', fontSize:13, fontWeight:800, cursor:'pointer' }}>
+                  {ev.video_sound_enabled===false ? 'OFF' : 'ON'}
+                </button>
               </div>
 
               {/* Welcome Note + Banner Image edit */}
