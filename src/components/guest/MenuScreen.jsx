@@ -180,6 +180,12 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   // Category order comes straight from sort_order, which the CSV importer sets
   // from the order categories first appear in the import file. This gives full
   // control from the sheet and supports custom names like "Lunch - Starters".
+  // The Veg / Non-Veg filter is only useful when the menu actually has both.
+  // On an all-veg menu the Non-Veg button would return nothing, which looks
+  // like a fault to a guest - so we hide the whole row and save the space.
+  const hasVeg    = items.some(i => i.is_veg !== false)
+  const hasNonVeg = items.some(i => i.is_veg === false)
+
   function sortCategories(cats) {
     return [...cats].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
   }
@@ -300,30 +306,41 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       {/* HEADER — Animated carousel brand | Table */}
       <HeaderCarousel eventData={eventData} tableNumber={tableNumber} isOnline={isOnline} />
 
-      {/* ACTION BAR */}
-      <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff', borderBottom:'1px solid #eee', overflowX:'auto', flexShrink:0, scrollbarWidth:'none' }}>
-        
-        <button onClick={onShowHistory} style={{ flexShrink:0, background:'#fff', color:'#333', border:'1.5px solid #ddd', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:600, cursor:'pointer' }}>📋 History</button>
-        {eventData?.call_waiter_enabled!==false && <button onClick={onShowSOS} style={{ flexShrink:0, background:'#FEF3C7', color:'#92400E', border:'1.5px solid #FCD34D', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>🛎️ Call Waiter</button>}
-        <button onClick={onShowFeedback} style={{ flexShrink:0, background:'#FFF7ED', color:'#C2410C', border:'1.5px solid #FED7AA', borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>⭐ Feedback</button>
-      </div>
+      {/* ACTION BAR + SEARCH on one row */}
+      <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff',
+        borderBottom:'1px solid #eee', flexShrink:0, alignItems:'center' }}>
 
-      {/* SEARCH */}
-      <div style={{ padding:'8px 14px', background:'#fff', borderBottom:'1px solid #eee', flexShrink:0 }}>
-        <div style={{ background:'#F5F5F5', borderRadius:12, padding:'8px 14px', display:'flex', alignItems:'center', gap:8 }}>
-          <span style={{ fontSize:16 }}>🔍</span>
+        <button onClick={onShowHistory} style={{ flexShrink:0, background:'#fff', color:'#333',
+          border:'1.5px solid #ddd', borderRadius:999, padding:'8px 14px', fontSize:12,
+          fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>📋 History</button>
+
+        {eventData?.call_waiter_enabled!==false && (
+          <button onClick={onShowSOS} style={{ flexShrink:0, background:'#FEF3C7', color:'#92400E',
+            border:'1.5px solid #FCD34D', borderRadius:999, padding:'8px 14px', fontSize:12,
+            fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>🔔 Help</button>
+        )}
+
+        <div style={{ flex:1, minWidth:0, background:'#F5F5F5', borderRadius:999,
+          padding:'7px 14px', display:'flex', alignItems:'center', gap:6 }}>
+          <span style={{ fontSize:14 }}>🔍</span>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search dishes..."
-            style={{ border:'none', outline:'none', flex:1, fontSize:14, fontFamily:'Manrope', background:'transparent' }} />
-          {search.length>0 && <button onClick={()=>setSearch('')} style={{ background:'none', border:'none', fontSize:16, color:'#999', cursor:'pointer' }}>✕</button>}
+            style={{ border:'none', outline:'none', flex:1, minWidth:0, fontSize:13,
+              fontFamily:'Manrope', background:'transparent' }} />
+          {search.length>0 && (
+            <button onClick={()=>setSearch('')} style={{ background:'none', border:'none',
+              fontSize:15, color:'#999', cursor:'pointer', padding:0 }}>✕</button>
+          )}
         </div>
       </div>
 
-      {/* VEG FILTER */}
-      <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff', borderBottom:'1px solid #eee', flexShrink:0, overflowX:'auto', scrollbarWidth:'none' }}>
-        {[['all','🍽️ All'],['veg','🟢 Veg Only'],['nonveg','🔴 Non-Veg']].map(([val,label]) => (
-          <button key={val} onClick={()=>setVegMode(val)} style={{ flexShrink:0, padding:'5px 14px', borderRadius:999, fontSize:12, fontWeight:700, border:'1.5px solid', cursor:'pointer', background:vegMode===val?(val==='veg'?'#16A34A':val==='nonveg'?'#DC2626':'#1A0A0A'):'#fff', color:vegMode===val?'#fff':'#555', borderColor:vegMode===val?'transparent':'#ddd' }}>{label}</button>
-        ))}
-      </div>
+      {/* VEG FILTER — only shown when the menu contains both veg and non-veg */}
+      {hasVeg && hasNonVeg && (
+        <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff', borderBottom:'1px solid #eee', flexShrink:0, overflowX:'auto', scrollbarWidth:'none' }}>
+          {[['all','🍽️ All'],['veg','🟢 Veg Only'],['nonveg','🔴 Non-Veg']].map(([val,label]) => (
+            <button key={val} onClick={()=>setVegMode(val)} style={{ flexShrink:0, padding:'5px 14px', borderRadius:999, fontSize:12, fontWeight:700, border:'1.5px solid', cursor:'pointer', background:vegMode===val?(val==='veg'?'#16A34A':val==='nonveg'?'#DC2626':'#1A0A0A'):'#fff', color:vegMode===val?'#fff':'#555', borderColor:vegMode===val?'transparent':'#ddd' }}>{label}</button>
+          ))}
+        </div>
+      )}
 
       {/* CATEGORY CHIPS — amber when active, amber outline when inactive */}
       {search.length===0 && (
