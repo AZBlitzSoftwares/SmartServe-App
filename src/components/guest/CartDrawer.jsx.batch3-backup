@@ -76,41 +76,12 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
 
   return (
     <>
-      {/* Flash animation for Order Now. Injected here so the bar is
-          self-contained and needs no global stylesheet change. */}
-      <style>{`
-        @keyframes ssOrderNowFlash {
-          0%, 100% { box-shadow: 0 10px 28px rgba(232,137,12,0.55); opacity: 1; }
-          50%      { box-shadow: 0 10px 34px rgba(232,137,12,0.95); opacity: 0.82; }
-        }
-        .ss-order-now { animation: ssOrderNowFlash 1s ease-in-out infinite; }
-        @media (prefers-reduced-motion: reduce) { .ss-order-now { animation: none; } }
-      `}</style>
-
-      <div style={{ position:'fixed', bottom:20, left:'50%', transform:'translateX(-50%)',
-        width:'calc(100% - 32px)', maxWidth:480, display:'flex', gap:10, zIndex:50 }}>
-
-        {/* LEFT - View Cart */}
-        <button onClick={() => { setOpen(true); onCartOpenChange?.(true) }}
-          style={{ flex:'0 0 44%', background:'#1A0A0A', border:'none', borderRadius:16,
-            padding:'16px 18px', display:'flex', alignItems:'center', justifyContent:'center',
-            gap:10, cursor:'pointer', boxShadow:'0 12px 30px rgba(0,0,0,0.4)' }}>
-          <div style={{ background:'rgba(255,255,255,0.22)', borderRadius:999, minWidth:28,
-            height:28, padding:'0 8px', display:'flex', alignItems:'center', justifyContent:'center',
-            fontWeight:800, color:'#fff', fontSize:14 }}>{total}</div>
-          <span style={{ color:'#fff', fontWeight:800, fontSize:16, whiteSpace:'nowrap' }}>View Cart</span>
-        </button>
-
-        {/* RIGHT - Order Now, places immediately */}
-        <button className={placing ? '' : 'ss-order-now'}
-          onClick={() => { if (orderLimitHit) { setOpen(true); onCartOpenChange?.(true) } else { placeOrder() } }}
-          disabled={placing}
-          style={{ flex:1, background: placing ? '#B0741C' : '#E8890C', border:'none',
-            borderRadius:16, padding:'16px 18px', color:'#fff', fontWeight:900, fontSize:17,
-            cursor: placing ? 'wait' : 'pointer', whiteSpace:'nowrap',
-            display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
-          {placing ? 'Placing...' : 'Order Now \u2192'}
-        </button>
+      <div onClick={() => { setOpen(true); onCartOpenChange?.(true) }} style={{ position:'fixed', bottom:20, left:'50%', transform:'translateX(-50%)', width:'calc(100% - 32px)', maxWidth:480, background:'#E8890C', borderRadius:16, padding:'16px 22px', display:'flex', alignItems:'center', justifyContent:'space-between', cursor:'pointer', zIndex:50, boxShadow:'0 14px 36px rgba(232,137,12,0.55)' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+          <div style={{ background:'rgba(255,255,255,0.25)', borderRadius:999, width:30, height:30, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, color:'#fff', fontSize:14 }}>{total}</div>
+          <span style={{ color:'#fff', fontWeight:800, fontSize:16 }}>View Cart</span>
+        </div>
+        <span style={{ color:'#fff', fontWeight:800, fontSize:18 }}>→</span>
       </div>
 
       {open && (

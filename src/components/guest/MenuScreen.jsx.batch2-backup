@@ -145,10 +145,7 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
               <button onClick={()=>setOpen(false)} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-              {/* Only list categories that actually have dishes right now.
-                  Matches the rule the menu page already uses, so Browse Menu
-                  never offers a section that turns out to be empty. */}
-              {categories.filter(cat => items.some(i=>i.category_id===cat.id)).map(cat => {
+              {categories.map(cat => {
                 const count = items.filter(i=>i.category_id===cat.id).length
                 return (
                   <button key={cat.id} onClick={()=>{ onSelect(cat.id); setOpen(false) }}
@@ -174,8 +171,10 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   const [items, setItems] = useState([])
   const [search, setSearch] = useState('')
   const [vegMode, setVegMode] = useState('all')
+  const [activeChip, setActiveChip] = useState('all')
   const [loading, setLoading] = useState(true)
   const sectionRefs = useRef({})
+  const chipBarRef = useRef()
   const scrollRef = useRef()
 
   // Category order comes straight from sort_order, which the CSV importer sets
@@ -218,10 +217,38 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
 
   // Scroll to category section
   function scrollToCategory(catId) {
+    setActiveChip(catId)
     const el = sectionRefs.current[catId]
     if (el) el.scrollIntoView({ behavior:'smooth', block:'start' })
   }
 
+  // Detect which category is in view while scrolling
+  function handleScroll(e) {
+    if (search.length > 0) return
+    const container = e.target
+    const scrollTop = container.scrollTop
+    const containerHeight = container.clientHeight
+
+    // Find which category section is most visible
+    let current = categories[0]?.id || 'all'
+    let bestVisibility = -1
+
+    categories.forEach(cat => {
+      const el = sectionRefs.current[cat.id]
+      if (!el) return
+      const elTop = el.offsetTop - scrollTop
+      const elBottom = elTop + el.offsetHeight
+      // How much of this section is in the top half of the screen
+      const visibleTop = Math.max(0, elTop)
+      const visibleBottom = Math.min(containerHeight * 0.6, elBottom)
+      const visibility = visibleBottom - visibleTop
+      if (visibility > bestVisibility) {
+        bestVisibility = visibility
+        current = cat.id
+      }
+    })
+    setActiveChip(current)
+  }
 
   const filtered = items.filter(i => {
     const matchSearch = search.length === 0 || i.name.toLowerCase().includes(search.toLowerCase()) || (i.description||'').toLowerCase().includes(search.toLowerCase())
@@ -315,8 +342,39 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         </div>
       )}
 
+      {/* CATEGORY CHIPS — amber when active, amber outline when inactive */}
+      {search.length===0 && (
+        <div ref={chipBarRef} style={{ display:'flex', gap:8, padding:'10px 14px', background:'#fff', borderBottom:'2px solid #F0F0F0', overflowX:'auto', flexShrink:0, scrollbarWidth:'none' }}>
+          <button onClick={()=>{ setActiveChip('all'); scrollRef.current?.scrollTo({top:0,behavior:'smooth'}) }}
+            style={{ flexShrink:0, padding:'8px 20px', borderRadius:999, fontSize:13, fontWeight:800,
+              border: activeChip==='all' ? 'none' : '1.5px solid #E8890C',
+              cursor:'pointer',
+              background: activeChip==='all' ? '#E8890C' : '#FFF8EE',
+              color: activeChip==='all' ? '#fff' : '#C06A00',
+              boxShadow: activeChip==='all' ? '0 3px 10px rgba(232,137,12,0.4)' : 'none',
+              transition:'all 0.15s' }}>
+            All
+          </button>
+          {categories.map(cat => (
+            <button key={cat.id} onClick={()=>scrollToCategory(cat.id)}
+              style={{ flexShrink:0, padding:'8px 20px', borderRadius:999, fontSize:13, fontWeight:800,
+                border: activeChip===cat.id ? 'none' : '1.5px solid #E8890C',
+                cursor:'pointer', whiteSpace:'nowrap',
+                background: activeChip===cat.id ? '#E8890C' : '#FFF8EE',
+                color: activeChip===cat.id ? '#fff' : '#C06A00',
+                boxShadow: activeChip===cat.id ? '0 3px 10px rgba(232,137,12,0.4)' : 'none',
+                transition:'all 0.15s' }}>
+              {catLabel(cat.name)}
+              <span style={{ fontSize:11, marginLeft:5, opacity: activeChip===cat.id ? 0.85 : 0.65 }}>
+                ({items.filter(i=>i.category_id===cat.id).length})
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* SCROLLABLE MENU CONTENT */}
-      <div ref={scrollRef} style={{ flex:1, overflowY:'auto', paddingBottom: cartCount>0?170:100 }}>
+      <div ref={scrollRef} onScroll={handleScroll} style={{ flex:1, overflowY:'auto', paddingBottom: cartCount>0?170:100 }}>
         {loading ? (
           <div style={{ textAlign:'center', padding:60, color:'#888' }}>Loading menu...</div>
         ) : search.length>0 ? (
