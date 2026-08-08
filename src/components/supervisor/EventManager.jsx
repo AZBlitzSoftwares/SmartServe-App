@@ -49,7 +49,8 @@ function TableClaims({ eventId, tableCount }) {
     if (!r.claimed_by_device) return false
     const seen = r.last_seen_at || r.claimed_at
     if (!seen) return false
-    return (Date.now() - new Date(seen).getTime()) < 30 * 60 * 1000
+    // Same one hour window as the Tables tab, so the two never disagree
+    return (Date.now() - new Date(seen).getTime()) < 60 * 60 * 1000
   }
 
   async function release(id) {

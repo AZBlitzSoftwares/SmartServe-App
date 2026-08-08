@@ -568,7 +568,10 @@ ${(order.order_items||[]).map(i => `
                 </div>
                 <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6 }}>
                   <div style={{ background:(STATUS_COLORS[order.status]||'#999')+'20', color:STATUS_COLORS[order.status]||'#999', fontSize:12, fontWeight:700, padding:'4px 12px', borderRadius:999 }}>{STATUS_LABELS[order.status]}</div>
-                  {order.status==='in_progress'&&(<button onClick={()=>printKOT(order)} style={{ background:'var(--bg)', border:'1px solid var(--line)', borderRadius:8, padding:'4px 10px', fontSize:12, fontWeight:600, color:'var(--ink2)' }}>🖨 Print KOT</button>)}
+                  {/* Always available, like Print Help Slip on help requests. A jammed
+                      slip needs reprinting, and a supervisor may want to check what a
+                      table received earlier in the evening. */}
+                  {(<button onClick={()=>printKOT(order)} style={{ background:'var(--bg)', border:'1px solid var(--line)', borderRadius:8, padding:'4px 10px', fontSize:12, fontWeight:600, color:'var(--ink2)' }}>🖨 Print KOT</button>)}
                 </div>
               </div>
               <div style={{ borderTop:'1px solid var(--line)', paddingTop:10, marginBottom:12 }}>

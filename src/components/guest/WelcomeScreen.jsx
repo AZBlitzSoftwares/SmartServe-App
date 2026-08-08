@@ -149,7 +149,7 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
         }
         .ss-role { font-size:clamp(9px, 1.5cqw, 11px); font-weight:700; color:rgba(255,255,255,0.42);
           letter-spacing:0.4px; text-transform:uppercase; margin-top:3px; }
-        .ss-logo { width:clamp(36px, 8cqw, 56px); height:clamp(36px, 8cqw, 56px);
+        .ss-logo { width:clamp(41px, 9.2cqw, 65px); height:clamp(41px, 9.2cqw, 65px);
           border-radius:12px; object-fit:contain; }
         @media (max-width: 560px) {
           .ss-welcome-panel { grid-template-columns:1fr; gap:12px; }

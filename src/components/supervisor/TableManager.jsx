@@ -4,16 +4,20 @@ import { supabase } from '../../lib/supabase'
 /* Table management for the current event.
 
    Online is judged on the heartbeat rather than the claim itself.
-   Guest tablets touch last_seen_at every 2 minutes, so a 5 minute
-   window means one missed beat is forgiven but a tablet that has
-   actually stopped shows as offline quickly enough to act on.
+   Guest tablets touch last_seen_at every 2 minutes, but the window
+   is a full hour: guests order and then leave the tablet alone for
+   long stretches, and flagging those as offline would make the
+   warning meaningless.
 
-   A claim older than 30 minutes with no beat expires on its own
-   and any tablet can take the number - the Release button is for
-   when it is needed now rather than in half an hour. */
+   A claim older than an hour with no beat expires on its own and
+   any tablet can take the number. Release is available at any
+   moment, so nothing actually has to wait an hour. */
 
-const ONLINE_MS = 5 * 60 * 1000
-const STALE_MS  = 30 * 60 * 1000
+// A guest ordering and then not touching the tablet for half an hour is
+// completely normal, so a short window paints the screen red for tablets
+// that are working fine - and a warning that is usually wrong gets ignored.
+const ONLINE_MS = 60 * 60 * 1000
+const STALE_MS  = 60 * 60 * 1000
 
 function statusOf(row) {
   if (!row.claimed_by_device) return 'free'
@@ -98,7 +102,7 @@ export default function TableManager({ eventData }) {
       {offline > 0 && (
         <div style={{ background:'#FEF2F2', border:'1.5px solid #FECACA', borderRadius:12,
           padding:'11px 14px', marginBottom:14, fontSize:13, color:'#B91C1C', fontWeight:600, lineHeight:1.5 }}>
-          {offline} tablet{offline === 1 ? '' : 's'} stopped responding. Check the device is on and connected, or release the table so another tablet can take it.
+          {offline} tablet{offline === 1 ? '' : 's'} not responding for over an hour. Check the device is on and connected, or release the table so another tablet can take it.
         </div>
       )}
 

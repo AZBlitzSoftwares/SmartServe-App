@@ -109,14 +109,14 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
         {/* LEFT - View Cart, secondary */}
         <button onClick={() => { setOpen(true); onCartOpenChange?.(true) }}
           style={{ flexShrink:0, background:'#FFF8EE', border:'2px solid #E8890C',
-            borderRadius:14, padding:'12px 16px', display:'flex', alignItems:'center',
+            borderRadius:14, padding:'13px 17px', display:'flex', alignItems:'center',
             gap:9, cursor:'pointer' }}>
           <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#C06A00"
             strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
             <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
           </svg>
-          <span style={{ color:'#C06A00', fontWeight:800, fontSize:15, whiteSpace:'nowrap' }}>View Cart</span>
+          <span style={{ color:'#C06A00', fontWeight:800, fontSize:16, whiteSpace:'nowrap' }}>View Cart</span>
           <span style={{ background:'#E8890C', color:'#fff', borderRadius:999, minWidth:23,
             height:23, padding:'0 7px', display:'flex', alignItems:'center',
             justifyContent:'center', fontWeight:800, fontSize:13 }}>{total}</span>
@@ -127,8 +127,8 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
           onClick={() => { if (orderLimitHit) { setShowWait(true) } else { placeOrder() } }}
           disabled={placing}
           style={{ flexShrink:0, marginLeft:'auto', background: placing ? '#B0741C' : '#E8890C',
-            border:'none', borderRadius:14, padding:'13px 26px', color:'#fff',
-            fontWeight:900, fontSize:16, whiteSpace:'nowrap',
+            border:'none', borderRadius:14, padding:'14px 27px', color:'#fff',
+            fontWeight:900, fontSize:17, whiteSpace:'nowrap',
             cursor: placing ? 'wait' : 'pointer' }}>
           {placing ? 'Placing...' : 'Order Now \u2192'}
         </button>
@@ -147,7 +147,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
               letterSpacing:'1px' }}>PLEASE WAIT</div>
             <div style={{ fontSize:17, color:'#9F1239', lineHeight:1.6, fontWeight:600,
               marginBottom:24 }}>
-              Your order is on the way.
+              Your current order is being prepared
             </div>
             <button onClick={() => setShowWait(false)}
               style={{ background:'#1A0A0A', color:'#E8890C', border:'none', borderRadius:14,
@@ -194,7 +194,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
                 <div style={{ fontSize:36, marginBottom:10 }}>⏳</div>
                 <div style={{ fontWeight:900, fontSize:26, color:'#BE123C', marginBottom:8, letterSpacing:'0.5px' }}>PLEASE WAIT</div>
                 <div style={{ fontSize:16, color:'#9F1239', lineHeight:1.6, marginBottom:16, fontWeight:500 }}>
-                  Your order is on the way
+                  Your current order is being prepared
                 </div>
                 <button onClick={() => setOpen(false)}
                   style={{ background:'#1A0A0A', color:'#E8890C', border:'none', borderRadius:12, padding:'11px 20px', fontSize:14, fontWeight:800, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }}>

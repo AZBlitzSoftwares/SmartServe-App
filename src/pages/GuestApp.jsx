@@ -415,8 +415,11 @@ export default function GuestApp() {
 
   function handleFeedbackClose() {
     setShowFeedback(false); setFeedbackOrderId(null)
-    // Submit and Skip both land on Welcome
-    goTo('welcome')
+    // Back to the Menu, not Welcome. This modal is only ever opened from
+    // the menu header, by a guest who is still eating and wants to carry
+    // on browsing. The smiley on the genie screen still goes to Welcome,
+    // because that guest has just finished ordering.
+    goTo('menu')
   }
 
   async function syncOfflineOrders() {

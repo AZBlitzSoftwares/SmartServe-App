@@ -27,8 +27,11 @@ export function getDeviceId() {
   }
 }
 
-// A claim is stale once it has gone this long without a heartbeat
-export const CLAIM_STALE_MS = 30 * 60 * 1000
+// A claim is stale once it has gone this long without a heartbeat.
+// Kept in step with the OFFLINE threshold on the supervisor's Tables
+// screen - if a claim expired sooner than a table showed OFFLINE, a
+// second tablet could take a number that still read ONLINE there.
+export const CLAIM_STALE_MS = 60 * 60 * 1000
 
 export function isClaimLive(row) {
   if (!row?.claimed_by_device) return false
