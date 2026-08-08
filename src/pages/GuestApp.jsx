@@ -188,17 +188,37 @@ export default function GuestApp() {
     }
   }, [])
 
-  // Called only after ExitGate verifies a supervisor/admin PIN
+  // Called only after ExitGate verifies a supervisor/admin PIN.
+  //
+  // Unwinds the history guard by popping until it is demonstrably clean,
+  // rather than counting how far back to jump. The count is unreliable -
+  // the initial load, hashchanges and the guard top-up all move the stack
+  // independently, and being short by one leaves guard entries behind. Back
+  // then moves within those entries, popstate ignores it because the exit is
+  // unlocked, and to the guest nothing happens at all.
+  //
+  // Every guard entry carries a #gN hash, so that is the signal to stop.
   function performExit() {
     allowExitRef.current = true
     setShowExitGate(false)
+
+    // Works only for windows opened by script, but harmless to try
     try { window.close() } catch (e) {}
-    try {
-      const m = /^#g(\d+)$/.exec(window.location.hash)
-      const d = m ? parseInt(m[1], 10) : 0
-      window.history.go(-(d + 1))
-    } catch (e) {}
-    setTimeout(() => setExitReady(true), 700)
+
+    let steps = 0
+    function unwind() {
+      const isGuard = /^#g\d+$/.test(window.location.hash)
+      // Cap the loop: some engines clamp history.go at the start of the
+      // stack, which would otherwise spin here forever.
+      if (!isGuard || steps >= 40) {
+        setExitReady(true)
+        return
+      }
+      steps++
+      try { window.history.back() } catch (e) { setExitReady(true); return }
+      setTimeout(unwind, 60)
+    }
+    unwind()
   }
 
   function cancelExit() {
