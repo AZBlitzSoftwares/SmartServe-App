@@ -389,6 +389,14 @@ ${(order.order_items||[]).map(i => `
     return true
   })
 
+  // A help request from 22:39 must not sit above an order from 22:40 just
+  // because it is a different type. During a rush the supervisor reads top
+  // to bottom and needs true chronological order.
+  const timeline = [
+    ...filteredSOS.map(r => ({ kind:'sos', at:r.created_at, sos:r })),
+    ...filteredOrders.map(o => ({ kind:'order', at:o.created_at, order:o })),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at))
+
   const CANCEL_REASONS = [
     'Item not available',
     'Food preparation issue',
@@ -443,7 +451,17 @@ ${(order.order_items||[]).map(i => `
 
       {loading ? <div style={{ textAlign:'center', padding:60, color:'var(--ink2)' }}>Loading...</div> : (
         <>
-          {filteredSOS.map(sos => (
+          {timeline.length === 0 && (
+            <div style={{ textAlign:'center', padding:60 }}>
+              <div style={{ fontSize:48, marginBottom:12 }}>📭</div>
+              <div style={{ color:'var(--ink2)', fontWeight:600 }}>Nothing here yet</div>
+            </div>
+          )}
+
+          {/* One list for both, newest first. Which card renders depends on
+              the row type, but the ordering is purely chronological. */}
+          {timeline.map(row => { const sos = row.sos, order = row.order;
+            return row.kind === 'sos' ? (
             <div key={'sos-'+sos.id} style={{ background:'#fff', borderRadius:18, padding:18, marginBottom:14, boxShadow:'var(--shadow)', borderLeft:'5px solid #DC2626' }}>
               <div style={{ background:'#FEF2F2', borderRadius:10, padding:'8px 12px', marginBottom:12, display:'flex', alignItems:'center', gap:10 }}>
                 <span style={{ fontSize:20 }}>🛎️</span>
@@ -521,14 +539,7 @@ ${(order.order_items||[]).map(i => `
                 </div>
               )}
             </div>
-          ))}
-
-          {filteredOrders.length===0&&filteredSOS.length===0 ? (
-            <div style={{ textAlign:'center', padding:60 }}>
-              <div style={{ fontSize:48, marginBottom:12 }}>📭</div>
-              <div style={{ color:'var(--ink2)', fontWeight:600 }}>No orders yet</div>
-            </div>
-          ) : filteredOrders.map(order => (
+          ) : (
             <div key={order.id} style={{ background:'#fff', borderRadius:18, padding:18, marginBottom:14, boxShadow:'var(--shadow)', borderLeft:'4px solid '+(STATUS_COLORS[order.status]||'#999') }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
                 <div style={{ flex:1 }}>
@@ -585,7 +596,7 @@ ${(order.order_items||[]).map(i => `
                 {['pending','placed'].includes(order.status)&&(<button onClick={()=>cancelOrder(order.id)} style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#DC2626', borderRadius:12, padding:'12px 14px', fontSize:13, fontWeight:700 }}>Cancel</button>)}
               </div>
             </div>
-          ))}
+          ) })}
         </>
       )}
       {/* Cancel reason dialog */}
