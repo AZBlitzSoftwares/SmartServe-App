@@ -159,6 +159,10 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
         }
       `}</style>
 
+      {/* Shape follows the event: three columns with a caterer,
+          two without. Nothing to configure. */}
+      {/* Always three columns so Start Ordering stays dead centre.
+          Only the contents change when there is no caterer. */}
       <div className="ss-welcome-panel">
 
         <div className="ss-col ss-col-side">
@@ -179,10 +183,19 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
             </>
           ) : (
             <>
-              <img className="ss-logo" src={janusLogo} alt="Janu's Smart Serve"
-                style={{ background:'linear-gradient(135deg,#E8890C,#c97010)', padding:4,
-                  border:'2px solid rgba(255,255,255,0.2)' }} />
-              <div className="ss-name">Janu's Smart Serve</div>
+              {/* No caterer - the event fills this column instead, so all
+                  three thirds carry weight and the middle stays centred. */}
+              {eventData?.name && (
+                <div style={{ fontSize:'clamp(15px, 2.9cqw, 22px)', fontWeight:900,
+                  color:'#FFE0A0', lineHeight:1.2 }}>{eventData.name}</div>
+              )}
+              {eventData?.venue && (
+                <div style={{ fontSize:'clamp(11px, 1.9cqw, 14px)', fontWeight:600,
+                  color:'rgba(255,255,255,0.75)', marginTop:4 }}>📍 {eventData.venue}</div>
+              )}
+              {!eventData && (
+                <div style={{ fontSize:13, color:'rgba(255,255,255,0.5)' }}>No event selected</div>
+              )}
             </>
           )}
         </div>
@@ -206,16 +219,14 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
             <span style={{ position:'relative', zIndex:1 }}>TABLE {tableNumber}</span>
           </div>
 
-          {eventData?.name && (
+          {/* Only here when the caterer occupies the left column */}
+          {eventData?.catering_company && eventData?.name && (
             <div style={{ fontSize:'clamp(13px, 1.7vw + 5px, 19px)', fontWeight:800,
               color:'#FFE0A0', marginTop:9, lineHeight:1.2 }}>{eventData.name}</div>
           )}
-          {eventData?.venue && (
+          {eventData?.catering_company && eventData?.venue && (
             <div style={{ fontSize:'clamp(11px, 1.1vw + 4px, 14px)', fontWeight:600,
               color:'rgba(255,255,255,0.7)', marginTop:1 }}>📍 {eventData.venue}</div>
-          )}
-          {!eventData && (
-            <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginTop:6 }}>No event selected</div>
           )}
 
           {eventData ? (
@@ -236,16 +247,13 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
           )}
         </div>
 
+        {/* Always present, so the grid keeps three real columns */}
         <div className="ss-col ss-col-side">
-          {eventData?.catering_company ? (
-            <>
-              <img className="ss-logo" src={janusLogo} alt="Janu's Smart Serve"
-                style={{ background:'linear-gradient(135deg,#E8890C,#c97010)', padding:4,
-                  border:'2px solid rgba(255,255,255,0.2)' }} />
-              <div className="ss-name">Janu's Smart Serve</div>
-              <div className="ss-role">Technology partner</div>
-            </>
-          ) : null}
+            <img className="ss-logo" src={janusLogo} alt="Janu's Smart Serve"
+              style={{ background:'linear-gradient(135deg,#E8890C,#c97010)', padding:4,
+                border:'2px solid rgba(255,255,255,0.2)' }} />
+            <div className="ss-name">Janu's Smart Serve</div>
+          <div className="ss-role">Technology partner</div>
         </div>
       </div>
 
