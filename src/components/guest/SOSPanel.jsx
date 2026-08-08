@@ -66,7 +66,7 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
     if (activeRequest.status === 'resolved') return
     const t = setInterval(async () => {
       const { data } = await supabase.from('sos_requests')
-        .select('*').eq('id', activeRequest.id).single()
+        .select('*, waiters(name)').eq('id', activeRequest.id).single()
       if (data) setActiveRequest(data)
     }, 5000)
     return () => clearInterval(t)
@@ -154,7 +154,7 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
         <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 16px' }} />
 
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
-          <h3 style={{ fontSize:20, fontWeight:800, margin:0 }}>Need Something?</h3>
+          <h3 style={{ fontSize:20, fontWeight:800, margin:0 }}>What do you need?</h3>
           <button onClick={onClose} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:38, height:38, fontSize:18, fontWeight:800, color:'#fff', cursor:'pointer', flexShrink:0 }}>✕</button>
         </div>
 
@@ -163,13 +163,15 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
           <div style={{ background:'#F0FDF4', border:'2px solid #BBF7D0', borderRadius:14,
             padding:'16px 16px', margin:'12px 0 4px', textAlign:'center' }}>
             <div style={{ fontSize:34, marginBottom:6 }}>🛎️</div>
-            <div style={{ fontWeight:800, fontSize:16, color:'#16A34A', marginBottom:4 }}>
+            <div style={{ fontWeight:800, fontSize:17, color:'#16A34A', marginBottom:4 }}>
               {assigned ? 'Waiter On The Way' : 'Request Sent'}
             </div>
-            <div style={{ fontSize:13, color:'#15803D', lineHeight:1.5 }}>
+            <div style={{ fontSize:14, color:'#15803D', lineHeight:1.5, fontWeight:600 }}>
               {assigned
-                ? 'A waiter has been assigned and is coming to your table.'
-                : 'Your request has reached the supervisor. A waiter will be assigned shortly.'}
+                ? (activeRequest?.waiters?.name
+                    ? 'Waiter ' + activeRequest.waiters.name + ' is coming to your table.'
+                    : 'Your waiter is coming to your table.')
+                : 'A waiter will come to your table soon.'}
             </div>
             <button onClick={onClose}
               style={{ marginTop:14, width:'100%', background:'#1A0A0A', color:'#fff', border:'none',
@@ -182,7 +184,7 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
         {!sent && (
           <>
             <p style={{ fontSize:13, color:'#888', margin:'0 0 14px', lineHeight:1.5 }}>
-              Pick what you need and we will bring it over.
+              Pick what you need. We will bring it to your table.
             </p>
 
             {items.length === 0 && (

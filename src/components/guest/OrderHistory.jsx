@@ -42,7 +42,7 @@ export default function OrderHistory({ tableData, eventData, onClose, addToCart,
     try {
       const lines = (order.order_items || []).filter(oi => oi.menu_items?.id)
       if (!lines.length) {
-        setNotice({ type:'error', text:'This order has no dishes that can be reordered.' })
+        setNotice({ type:'error', text:'This order cannot be reordered.' })
         setBusyId(null); return
       }
       const ids = lines.map(oi => oi.menu_items.id)
@@ -64,12 +64,16 @@ export default function OrderHistory({ tableData, eventData, onClose, addToCart,
 
       if (added === 0) {
         setNotice({ type:'error',
-          text:'Unfortunately none of these dishes are available right now. Please try something else.' })
+          text: lines.length === 1
+            ? 'This dish is not available now. Please try another dish.'
+            : 'These dishes are not available now. Please try another dish.' })
         setBusyId(null); return
       }
       if (gone.length) {
         // Still open the cart - dropping a dish should not block the rest
-        setNotice({ type:'warn', text:'Not available right now: ' + gone.join(', ') })
+        // A list, not a sentence. Four dish names in a row is unreadable,
+        // and the guest needs to see WHICH dish is missing, not a count.
+        setNotice({ type:'warn', missing: gone })
         setTimeout(() => { setBusyId(null); onReordered?.() }, 2200)
         return
       }
@@ -77,7 +81,7 @@ export default function OrderHistory({ tableData, eventData, onClose, addToCart,
       onReordered?.()
     } catch (e) {
       console.error('Reorder error:', e)
-      setNotice({ type:'error', text:'Could not reorder just now. Please try again.' })
+      setNotice({ type:'error', text:'Something went wrong. Please try again.' })
       setBusyId(null)
     }
   }
@@ -96,7 +100,18 @@ export default function OrderHistory({ tableData, eventData, onClose, addToCart,
             background: notice.type==='error' ? '#FEF2F2' : '#FEF3C7',
             border: '1.5px solid ' + (notice.type==='error' ? '#FECACA' : '#FCD34D'),
             color: notice.type==='error' ? '#B91C1C' : '#92400E' }}>
-            {notice.text}
+            {notice.missing ? (
+              <>
+                <div style={{ marginBottom:6 }}>Not available now</div>
+                {notice.missing.slice(0, 4).map((n, i) => (
+                  <div key={i} style={{ fontWeight:800, marginLeft:2 }}>• {n}</div>
+                ))}
+                {notice.missing.length > 4 && (
+                  <div style={{ fontWeight:800, marginLeft:2 }}>+ {notice.missing.length - 4} more</div>
+                )}
+                <div style={{ marginTop:6, fontWeight:600 }}>Your other items are in the cart.</div>
+              </>
+            ) : notice.text}
           </div>
         )}
         {loading ? (

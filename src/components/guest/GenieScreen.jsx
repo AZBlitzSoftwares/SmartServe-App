@@ -74,7 +74,7 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
     <div style={{ position:'fixed', inset:0, zIndex:90, background:'#EDEDED',
       height:'100dvh', overflow:'hidden',
       display:'flex', flexDirection:'column', alignItems:'center',
-      justifyContent:'center', gap:'1.4vh', padding:'2vh 18px' }}>
+      justifyContent:'center', gap:'1.1vh', padding:'2vh 18px' }}>
 
       {/* Countdown, floated so it takes no layout height */}
       <div style={{ position:'absolute', top:14, right:14, background:'rgba(0,0,0,0.55)',
@@ -85,7 +85,7 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
       {/* Video capped by viewport height, never by its own size */}
       <video ref={videoRef} playsInline preload="auto"
         onEnded={e => { try { e.currentTarget.pause() } catch (err) {} }}
-        style={{ height:'40vh', maxHeight:400, width:'auto', maxWidth:'100%',
+        style={{ height:'37vh', maxHeight:380, width:'auto', maxWidth:'100%',
           objectFit:'contain', borderRadius:16, background:'#EDEDED',
           display:'block', flexShrink:0 }}>
         <source src="/videos/genie.mp4" type="video/mp4" />
@@ -106,19 +106,30 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
         How is your experience using the app?
       </div>
 
-      {/* Faces only - no labels, no fields */}
-      <div style={{ display:'flex', gap:'4vw', maxWidth:360, justifyContent:'center',
+      {/* Faces with their names. An unlabelled face is a guess - the
+          middle one especially - and this is the only feedback most
+          guests will ever give, so it should mean what they intended.
+          Labels come from SENTIMENT_CONFIG so this screen and the
+          detailed feedback page can never drift apart. */}
+      <div style={{ display:'flex', gap:'5vw', maxWidth:380, justifyContent:'center',
         flexShrink:0 }}>
-        {Object.keys(SENTIMENT_CONFIG).map(key => (
-          <button key={key} onClick={() => pickFace(key)} disabled={saving}
-            style={{ background:'none', border:'none', padding:4, cursor:'pointer',
-              opacity: chosen && chosen !== key ? 0.35 : 1,
-              transform: chosen === key ? 'scale(1.12)' : 'scale(1)',
-              transition:'all 0.18s', WebkitTapHighlightColor:'transparent',
-              lineHeight:0 }}>
-            <FaceSVG type={key} size={54} />
-          </button>
-        ))}
+        {Object.keys(SENTIMENT_CONFIG).map(key => {
+          const cfg = SENTIMENT_CONFIG[key]
+          return (
+            <button key={key} onClick={() => pickFace(key)} disabled={saving}
+              style={{ background:'none', border:'none', padding:'4px 2px', cursor:'pointer',
+                display:'flex', flexDirection:'column', alignItems:'center', gap:5,
+                opacity: chosen && chosen !== key ? 0.35 : 1,
+                transform: chosen === key ? 'scale(1.12)' : 'scale(1)',
+                transition:'all 0.18s', WebkitTapHighlightColor:'transparent' }}>
+              <FaceSVG type={key} size={50} />
+              <span style={{ fontSize:'clamp(11px, 1.5vh, 14px)', fontWeight:800,
+                color: cfg.color, whiteSpace:'nowrap', letterSpacing:'0.2px' }}>
+                {cfg.label}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
       <button onClick={() => { if (!doneRef.current) { doneRef.current = true; onOrderAgain() } }}

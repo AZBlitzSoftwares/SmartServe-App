@@ -145,9 +145,9 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             <div style={{ fontSize:52, marginBottom:12, lineHeight:1 }}>⏳</div>
             <div style={{ fontWeight:900, fontSize:30, color:'#BE123C', marginBottom:12,
               letterSpacing:'1px' }}>PLEASE WAIT</div>
-            <div style={{ fontSize:16, color:'#9F1239', lineHeight:1.6, fontWeight:500,
+            <div style={{ fontSize:17, color:'#9F1239', lineHeight:1.6, fontWeight:600,
               marginBottom:24 }}>
-              Your current order is still being served.<br />You can order again as soon as it arrives.
+              Your order is on the way.
             </div>
             <button onClick={() => setShowWait(false)}
               style={{ background:'#1A0A0A', color:'#E8890C', border:'none', borderRadius:14,
@@ -194,7 +194,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
                 <div style={{ fontSize:36, marginBottom:10 }}>⏳</div>
                 <div style={{ fontWeight:900, fontSize:26, color:'#BE123C', marginBottom:8, letterSpacing:'0.5px' }}>PLEASE WAIT</div>
                 <div style={{ fontSize:16, color:'#9F1239', lineHeight:1.6, marginBottom:16, fontWeight:500 }}>
-                  Your current order is in progress
+                  Your order is on the way
                 </div>
                 <button onClick={() => setOpen(false)}
                   style={{ background:'#1A0A0A', color:'#E8890C', border:'none', borderRadius:12, padding:'11px 20px', fontSize:14, fontWeight:800, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }}>

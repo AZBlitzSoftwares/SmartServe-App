@@ -38,9 +38,10 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     if (!eventData) return
     const { data } = await supabase.from('sos_requests')
       .select('*, tables(table_number), sos_request_items(item_name, quantity)').eq('event_id', eventData.id)
-      // No request_type filter. Every open request belongs on this screen,
-      // whatever type it is - help, call_waiter, or the older Phase 1 types.
-      .in('status', ['open','in_progress'])
+      // No filters at all. Every request of every type and status belongs
+      // here - the tabs below decide what is shown. Filtering at the query
+      // is what made resolved and cancelled requests invisible.
+
       .order('created_at', { ascending: false })
     setSosRequests(data || [])
   }
@@ -104,6 +105,14 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
         if (fresh) setTimeout(() => printKOT(fresh), 300)
       } catch (e) { /* never block assignment if printing fails */ }
     }
+  }
+
+  // Cancelling and resolving are different outcomes and must not share a
+  // button - closing a dropped request as 'resolved' makes the reports lie.
+  async function cancelSOSRequest(sosId) {
+    if (!window.confirm('Cancel this help request?')) return
+    await supabase.from('sos_requests').update({ status:'cancelled' }).eq('id', sosId)
+    loadSOS()
   }
 
   async function assignSOSWaiter(sosId, waiterId) {
@@ -370,7 +379,15 @@ ${(order.order_items||[]).map(i => `
     return matchFilter&&matchWaiter&&matchTable
   })
 
-  const filteredSOS = filter!=='delivered' ? sosRequests.filter(r=>!tableFilter||r.tables?.table_number===tableFilter) : []
+  // Help requests follow the same tab rules as orders, so a supervisor can
+  // look back at what was handled instead of only what is outstanding.
+  const filteredSOS = sosRequests.filter(r => {
+    if (tableFilter && r.tables?.table_number !== tableFilter) return false
+    if (filter === 'active')    return !['resolved','cancelled'].includes(r.status)
+    if (filter === 'delivered') return r.status === 'resolved'
+    if (filter === 'cancelled') return r.status === 'cancelled'
+    return true
+  })
 
   const CANCEL_REASONS = [
     'Item not available',
@@ -435,7 +452,7 @@ ${(order.order_items||[]).map(i => `
                   <div style={{ fontSize:12, color:'#888', marginTop:1 }}>{new Date(sos.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
                 </div>
                 <div style={{ background:'#FEF2F2', border:'1.5px solid #FECACA', borderRadius:999, padding:'3px 10px', fontSize:11, fontWeight:800, color:'#DC2626' }}>
-                  {sos.status==='open'?'NEW':'In Progress'}
+                  {sos.status==='open'?'NEW':sos.status==='resolved'?'Completed':sos.status==='cancelled'?'Cancelled':'In Progress'}
                 </div>
               </div>
               <button onClick={()=>setTableFilter(tableFilter===sos.tables?.table_number?null:sos.tables?.table_number)}
@@ -477,9 +494,32 @@ ${(order.order_items||[]).map(i => `
                   🖨 Print Help Slip
                 </button>
               )}
-              <button onClick={()=>resolveSOSRequest(sos.id)} style={{ width:'100%', background:'#16A34A', color:'#fff', border:'none', borderRadius:12, padding:'12px', fontSize:14, fontWeight:800, cursor:'pointer' }}>
-                ✓ Mark Resolved
-              </button>
+              {/* Resolve appears only once a waiter is assigned. Before that
+                  there is nothing to mark as done, and it was far too easy to
+                  close a request nobody had acted on. */}
+              {!['resolved','cancelled'].includes(sos.status) && (
+                <div style={{ display:'flex', gap:8 }}>
+                  <button onClick={()=>cancelSOSRequest(sos.id)}
+                    style={{ flexShrink:0, background:'#FEF2F2', border:'1px solid #FECACA',
+                      color:'#B91C1C', borderRadius:12, padding:'12px 18px', fontSize:13,
+                      fontWeight:800, cursor:'pointer' }}>
+                    ✕ Cancel
+                  </button>
+                  {sos.status==='open' ? (
+                    <div style={{ flex:1, background:'#F3F4F6', borderRadius:12, padding:'12px',
+                      fontSize:13, fontWeight:700, color:'#6B7280', textAlign:'center' }}>
+                      Assign a waiter first
+                    </div>
+                  ) : (
+                    <button onClick={()=>resolveSOSRequest(sos.id)}
+                      style={{ flex:1, background:'#16A34A', color:'#fff', border:'none',
+                        borderRadius:12, padding:'12px', fontSize:14, fontWeight:800,
+                        cursor:'pointer' }}>
+                      ✓ Mark Resolved
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
 
