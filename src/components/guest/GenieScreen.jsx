@@ -71,8 +71,8 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
   }
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:90, background:'#EDEDED',
-      height:'100dvh', overflow:'hidden',
+    <div className="ss-fullh" style={{ position:'fixed', inset:0, zIndex:90, background:'#EDEDED',
+      overflow:'hidden',
       display:'flex', flexDirection:'column', alignItems:'center',
       justifyContent:'flex-start', gap:'0.9vh', padding:'1.4vh 12px' }}>
 
@@ -99,7 +99,7 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
           bottom than the top: the generator watermark in the bottom right
           goes, the genie's head near the top stays. */}
       <div style={{ flex:'1 1 auto', minHeight:0, aspectRatio:'3 / 4',
-        maxWidth:'100%', overflow:'hidden', borderRadius:16,
+        maxWidth:'min(100%, 70vh)', overflow:'hidden', borderRadius:16,
         background:'#EDEDED', margin:'0 auto' }}>
         <video ref={videoRef} playsInline preload="auto"
           onEnded={e => { try { e.currentTarget.pause() } catch (err) {} }}
@@ -154,6 +154,7 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
           action we want the guest to notice on a screen that otherwise
           looks finished. */}
       <style>{`
+        .ss-fullh { height:100vh; height:100dvh; }
         /* An amber ring pulsing outward, not a colour swing. The button is
            near-black, so any dark-to-dark shift is invisible however
            correctly it animates. */

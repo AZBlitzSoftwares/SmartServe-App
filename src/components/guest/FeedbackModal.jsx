@@ -137,7 +137,7 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
 
   return (
     <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, background:'rgba(0,0,0,0.65)', zIndex:100, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
-      <div style={{ background:'#fff', borderRadius:'24px 24px 0 0', width:'100%', maxHeight:'96dvh', display:'flex', flexDirection:'column', boxSizing:'border-box' }}>
+      <div style={{ background:'#fff', borderRadius:'24px 24px 0 0', width:'100%', maxHeight:'96vh', display:'flex', flexDirection:'column', boxSizing:'border-box' }}>
         <div style={{ padding:'12px 24px 0', flexShrink:0 }}>
           <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 10px' }} />
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>

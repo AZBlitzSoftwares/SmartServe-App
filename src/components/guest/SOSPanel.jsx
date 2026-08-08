@@ -137,7 +137,7 @@ export default function SOSPanel({ tableData, eventData, onClose }) {
   const sheet = {
     width:'100%', background:'#fff', borderRadius:'24px 24px 0 0',
     padding:'22px 20px calc(28px + env(safe-area-inset-bottom))',
-    maxHeight:'88dvh', overflowY:'auto', boxSizing:'border-box'
+    maxHeight:'88vh', overflowY:'auto', boxSizing:'border-box'
   }
 
   if (loading) return (

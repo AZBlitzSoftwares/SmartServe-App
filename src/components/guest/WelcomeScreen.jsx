@@ -108,7 +108,7 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
   }
 
   return (
-    <div style={{ height:'100dvh', position:'relative', display:'flex', flexDirection:'column',
+    <div className="ss-fullh" style={{ position:'relative', display:'flex', flexDirection:'column',
       alignItems:'center', textAlign:'center', padding:0, overflow:'hidden',
       background:'linear-gradient(160deg,#1a0a0a 0%,#2d1010 50%,#1a0a0a 100%)' }}>
       {/* Top 70% - the video, undimmed. It was previously a full-bleed
@@ -127,6 +127,10 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
       )}
 
       <style>{`
+        /* vh first, dvh second. A WebView that understands dvh uses it; one
+           that does not keeps vh rather than losing the height completely.
+           Inside the APK there is no address bar, so they are identical. */
+        .ss-fullh { height:100vh; height:100dvh; }
         @keyframes ssStartFlash {
           0%, 100% { background:#E8890C; box-shadow:0 6px 22px rgba(232,137,12,0.45); }
           50%      { background:#FFB03A; box-shadow:0 8px 32px rgba(232,137,12,0.85); }
@@ -138,18 +142,21 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
           gap:10px; width:100%; box-sizing:border-box;
           padding:16px 12px calc(16px + env(safe-area-inset-bottom));
           background:linear-gradient(180deg,#1a0a0a 0%,#2d1010 60%,#1a0a0a 100%);
-          container-type:inline-size;
         }
         .ss-col { display:flex; flex-direction:column; align-items:center; text-align:center; min-width:0; }
         .ss-name {
           font-weight:900; color:#fff; line-height:1.18; margin-top:9px;
-          font-size:clamp(13px, 2.6cqw, 21px);
+          font-size:clamp(13px, 2.6vw, 21px);
           display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
           overflow:hidden; word-break:break-word;
         }
-        .ss-role { font-size:clamp(9px, 1.5cqw, 11px); font-weight:700; color:rgba(255,255,255,0.42);
+        .ss-role { font-size:clamp(9px, 1.5vw, 11px); font-weight:700; color:rgba(255,255,255,0.42);
           letter-spacing:0.4px; text-transform:uppercase; margin-top:3px; }
-        .ss-logo { width:clamp(41px, 9.2cqw, 65px); height:clamp(41px, 9.2cqw, 65px);
+        /* Pixel fallbacks first. If a unit below fails to parse, the browser
+           keeps these instead of dropping the size entirely and rendering the
+           image at its natural resolution. */
+        .ss-logo { width:56px; height:56px; max-width:65px; max-height:65px;
+          width:clamp(41px, 9.2vw, 65px); height:clamp(41px, 9.2vw, 65px);
           border-radius:12px; object-fit:contain; }
         @media (max-width: 560px) {
           .ss-welcome-panel { grid-template-columns:1fr; gap:12px; }
@@ -186,11 +193,11 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
               {/* No caterer - the event fills this column instead, so all
                   three thirds carry weight and the middle stays centred. */}
               {eventData?.name && (
-                <div style={{ fontSize:'clamp(15px, 2.9cqw, 22px)', fontWeight:900,
+                <div style={{ fontSize:'clamp(15px, 2.9vw, 22px)', fontWeight:900,
                   color:'#FFE0A0', lineHeight:1.2 }}>{eventData.name}</div>
               )}
               {eventData?.venue && (
-                <div style={{ fontSize:'clamp(11px, 1.9cqw, 14px)', fontWeight:600,
+                <div style={{ fontSize:'clamp(11px, 1.9vw, 14px)', fontWeight:600,
                   color:'rgba(255,255,255,0.75)', marginTop:4 }}>📍 {eventData.venue}</div>
               )}
               {!eventData && (
