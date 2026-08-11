@@ -17,6 +17,10 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const [expandedRow, setExpandedRow] = useState(null)
   // Handlers run before the reload lands, so they read the count from here
   const timelineRef = useRef(0)
+  const [nowTs, setNowTs] = useState(Date.now())
+  useEffect(() => { const t = setInterval(() => setNowTs(Date.now()), 1000); return () => clearInterval(t) }, [])
+  // Remembered, so a supervisor away from the printer stays silenced
+  const [autoPrint, setAutoPrint] = useState(() => localStorage.getItem('ss_autoprint') !== 'off')
   const [showAllWaiters, setShowAllWaiters] = useState(null)
   const [showCancelDialog, setShowCancelDialog] = useState(null) // order id being cancelled
   const [cancelReason, setCancelReason] = useState('')
@@ -109,7 +113,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
         const { data: fresh } = await supabase.from('orders')
           .select('*, tables(table_number), waiters(name), order_items(quantity, menu_items(name, is_veg))')
           .eq('id', orderId).single()
-        if (fresh) setTimeout(() => printKOT(fresh), 300)
+        if (fresh && autoPrint) setTimeout(() => printKOT(fresh), 300)
       } catch (e) { /* never block assignment if printing fails */ }
     }
   }
@@ -134,7 +138,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
         const { data: fresh } = await supabase.from('sos_requests')
           .select('*, tables(table_number), waiters(name), sos_request_items(item_name, quantity)')
           .eq('id', sosId).single()
-        if (fresh) setTimeout(() => printHelpKOT(fresh), 300)
+        if (fresh && autoPrint) setTimeout(() => printHelpKOT(fresh), 300)
       } catch (e) { /* never block assignment if printing fails */ }
     }
   }
@@ -406,22 +410,29 @@ ${(order.order_items||[]).map(i => `
     list.forEach(x => {
       if (!x.waiter_id || waiterOrderCount[x.waiter_id] === undefined) return
       waiterOrderCount[x.waiter_id]++
-      const t = x.assigned_at ? new Date(x.assigned_at).getTime() : 0
+      // Latest of assigned or finished. A waiter who delivered two minutes
+      // ago must rank behind one assigned an hour ago and still out.
+      const times = [x.assigned_at, x.delivered_at, x.resolved_at]
+        .filter(Boolean).map(v => new Date(v).getTime())
+      const t = times.length ? Math.max(...times) : 0
       if (t > waiterLastAt[x.waiter_id]) waiterLastAt[x.waiter_id] = t
     })
   }
   tally(orders)
   tally(sosRequests)
 
-  // Fewest jobs first; on a tie, whoever has been idle longest. Without the
-  // tie-break, equal counts fall back to array order, which is meaningless.
+  // Purely last activity, oldest first. Job count is deliberately NOT used:
+  // with every waiter free and every order delivered the counts go equal, the
+  // tie-break takes over, and the order collapses back toward 1,2,3,4,5.
+  //
+  // Sorting on time alone means whoever came back most recently goes last and
+  // whoever has been idle longest goes first, which holds whether waiters are
+  // busy or all free. That is the first come first go rule.
+  //
+  // A waiter who has never worked has 0, so they lead until they do.
   const availableWaiters = waiters
     .filter(w => !busyWaiterIds.includes(w.id))
-    .sort((a, b) => {
-      const d = (waiterOrderCount[a.id] || 0) - (waiterOrderCount[b.id] || 0)
-      if (d !== 0) return d
-      return (waiterLastAt[a.id] || 0) - (waiterLastAt[b.id] || 0)
-    })
+    .sort((a, b) => (waiterLastAt[a.id] || 0) - (waiterLastAt[b.id] || 0))
 
   const filteredOrders = orders.filter(o => {
     const matchFilter = filter==='active'?!['delivered','cancelled'].includes(o.status):filter==='delivered'?o.status==='delivered':filter==='cancelled'?o.status==='cancelled':true
@@ -470,6 +481,14 @@ ${(order.order_items||[]).map(i => `
           </span>
         </h2>
         <div style={{ display:'flex', gap:8 }}>
+          <button onClick={() => { const v = !autoPrint; setAutoPrint(v); localStorage.setItem('ss_autoprint', v ? 'on' : 'off') }}
+            title="Print the KOT automatically when a waiter is assigned"
+            style={{ background: autoPrint ? '#DCFCE7' : '#F3F4F6',
+              border:'1px solid ' + (autoPrint ? '#86EFAC' : '#E5E7EB'),
+              color: autoPrint ? '#15803D' : '#6B7280', borderRadius:10,
+              padding:'7px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+            🖨 Auto-print {autoPrint ? 'ON' : 'OFF'}
+          </button>
           <button onClick={enableSound} style={{ background:'#FEF3C7', border:'1px solid #FCD34D', color:'#92400E', borderRadius:10, padding:'7px 12px', fontSize:12, fontWeight:700 }}>🔔 Sound</button>
           <button onClick={()=>{ loadOrders(false); loadSOS() }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'7px 14px', fontSize:13, fontWeight:700 }}>Refresh</button>
         </div>
@@ -559,6 +578,23 @@ ${(order.order_items||[]).map(i => `
             const timeStr = new Date(rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
             const chips = showAllWaiters === id ? availableWaiters : availableWaiters.slice(0, 3)
 
+            // Two inline, because a row in a two column grid has no space for
+            // three plus More. The rest live behind the chevron.
+            const inlineChips = availableWaiters.slice(0, 2)
+
+            // From when the order was received, not from assignment - the guest
+            // has been waiting since they ordered, and that is the number that
+            // matters. Frozen once delivered or resolved.
+            const endTs = rec.delivered_at || rec.resolved_at
+            const elapsedSec = Math.max(0, Math.floor(((endTs ? new Date(endTs).getTime() : nowTs)
+              - new Date(rec.created_at).getTime()) / 1000))
+            const elapsedMin = Math.floor(elapsedSec / 60)
+            const clock = elapsedMin + ':' + String(elapsedSec % 60).padStart(2, '0')
+            const running = !endTs && !['delivered','cancelled','resolved'].includes(rec.status)
+            const timerTone = elapsedMin <= 5 ? { bg:'#DCFCE7', fg:'#15803D' }
+                            : elapsedMin <= 10 ? { bg:'#FEF3C7', fg:'#B45309' }
+                            : { bg:'#FEE2E2', fg:'#B91C1C' }
+
             return (
               <div key={id} style={{ borderLeft:'4px solid '+tone.bar,
                 borderBottom:'1px solid var(--line)' }}>
@@ -587,14 +623,58 @@ ${(order.order_items||[]).map(i => `
                   </span>
                   <span style={{ flex:1, minWidth:0, fontSize:13, color:'var(--ink2)',
                     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{summary}</span>
-                  <span style={{ fontSize:12, fontWeight:700, color:'var(--ink2)', minWidth:26,
-                    textAlign:'right' }}>{waiterName || '—'}</span>
+                  <span style={{ flexShrink:0, background:timerTone.bg, color:timerTone.fg,
+                    borderRadius:999, padding:'2px 9px', fontSize:11, fontWeight:800,
+                    fontVariantNumeric:'tabular-nums', minWidth:46, textAlign:'center' }}>
+                    {clock}{running ? '' : ' \u2713'}
+                  </span>
+                  {/* Inline actions. Unassigned shows chips, assigned shows the
+                      waiter and Deliver - so which rows still need a waiter is
+                      obvious without opening anything. */}
+                  <span onClick={e => e.stopPropagation()}
+                    style={{ display:'flex', alignItems:'center', gap:5, flexShrink:0 }}>
+                    {status === 'new' ? (
+                      <>
+                        {inlineChips.map((w, wi) => (
+                          <button key={w.id}
+                            onClick={() => isSos ? assignSOSWaiter(rec.id, w.id) : assignWaiter(rec.id, w.id)}
+                            title={'Assign ' + w.name}
+                            style={{ background: wi === 0 ? '#16A34A' : '#1A0A0A', color:'#fff',
+                              border:'none', borderRadius:8, padding:'5px 10px', fontSize:12,
+                              fontWeight:800, cursor:'pointer' }}>{w.waiter_number || w.name}</button>
+                        ))}
+                        <button onClick={() => setExpandedRow(open ? null : id)}
+                          title="More waiters"
+                          style={{ background:'var(--bg)', border:'1px solid var(--line)',
+                            borderRadius:8, padding:'5px 8px', fontSize:12, fontWeight:700,
+                            color:'var(--ink2)', cursor:'pointer' }}>⋯</button>
+                      </>
+                    ) : status === 'progress' ? (
+                      <>
+                        <span style={{ fontSize:12, fontWeight:800, color:'var(--ink2)' }}>{waiterName || '—'}</span>
+                        <button onClick={() => isSos ? resolveSOSRequest(rec.id) : markDelivered(rec)}
+                          style={{ background:'#16A34A', color:'#fff', border:'none', borderRadius:8,
+                            padding:'5px 12px', fontSize:12, fontWeight:800, cursor:'pointer' }}>
+                          ✓ {isSos ? 'Done' : 'Deliver'}
+                        </button>
+                      </>
+                    ) : (
+                      <span style={{ fontSize:12, fontWeight:700, color:'var(--ink2)' }}>{waiterName || '—'}</span>
+                    )}
+                  </span>
                   <span style={{ fontSize:11, color:'#999', transform:'rotate('+(open?180:0)+'deg)',
                     transition:'transform 0.15s', flexShrink:0 }}>▼</span>
                 </div>
 
                 {open && (
                   <div style={{ padding:'0 12px 12px', background:'#FAFAFA' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, margin:'2px 0 8px' }}>
+                      <span style={{ background:timerTone.bg, color:timerTone.fg, borderRadius:999,
+                        padding:'3px 11px', fontSize:12, fontWeight:800 }}>
+                        ⏱ {clock}{running ? '' : ' final'}
+                      </span>
+                      <span style={{ fontSize:11, color:'var(--ink2)' }}>since order received</span>
+                    </div>
                     <div style={{ marginBottom:10 }}>
                       {lines_.map((li, i) => (
                         <div key={i} style={{ display:'flex', justifyContent:'space-between',
@@ -618,7 +698,7 @@ ${(order.order_items||[]).map(i => `
                               style={{ background: idx===0 && showAllWaiters!==id ? '#16A34A' : '#1A0A0A',
                                 color:'#fff', border:'none', borderRadius:10, padding:'9px 16px',
                                 fontSize:13, fontWeight:800, cursor:'pointer' }}>
-                              {w.name}
+                              {w.waiter_number || w.name}
                             </button>
                           ))}
                           {availableWaiters.length > 3 && (

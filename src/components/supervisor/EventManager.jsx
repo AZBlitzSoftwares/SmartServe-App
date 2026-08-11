@@ -128,6 +128,194 @@ function TableClaims({ eventId, tableCount }) {
   )
 }
 
+
+/* Waiters for one event - the single place they are managed.
+
+   Cards rather than form rows, shaped like the table cards: number and
+   status on top, detail below. A grid of input boxes read as a spreadsheet
+   next to those cards, which made the two halves of Staff & Tables look
+   like different applications.
+
+   Supervisors can edit. They are the person at the venue when someone does
+   not turn up or a number is wrong, and routing that through an admin who
+   may not be present is the friction Release was added to remove. Nothing
+   here can lose data: removal sets is_active false, so delivered orders
+   keep the name against them in the reports.
+
+   The mobile is a tel: link so a number can be dialled from the screen. On
+   a Mac that opens the Phone app when an iPhone is paired; on Windows it
+   opens whatever handles calls, typically Phone Link. */
+export function WaiterList({ eventId, embedded = false }) {
+  const [rows, setRows] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [add, setAdd] = useState({ number:'', name:'', mobile:'' })
+  // Who is free right now - the question a supervisor actually has here
+  const [busyMap, setBusyMap] = useState({})
+
+  useEffect(() => { loadWaiters() }, [eventId])
+  useEffect(() => {
+    const t = setInterval(loadWaiters, 20000)
+    return () => clearInterval(t)
+  }, [eventId])
+
+  async function loadWaiters() {
+    if (!eventId) return
+    const { data } = await supabase.from('waiters')
+      .select('*').eq('event_id', eventId).eq('is_active', true).order('waiter_number')
+    setRows(data || [])
+
+    // Orders and help requests both make a waiter busy
+    const [{ data: o }, { data: sr }] = await Promise.all([
+      supabase.from('orders').select('waiter_id, tables(table_number)')
+        .eq('event_id', eventId).eq('status', 'in_progress'),
+      supabase.from('sos_requests').select('waiter_id, tables(table_number)')
+        .eq('event_id', eventId).eq('status', 'in_progress'),
+    ])
+    const m = {}
+    ;[...(o || []), ...(sr || [])].forEach(x => {
+      if (x.waiter_id) m[x.waiter_id] = x.tables?.table_number ?? '?'
+    })
+    setBusyMap(m)
+  }
+
+  // The bracketed number is stripped so editing shows just the person's name
+  const bare = w => {
+    const n = (w.name || '').replace(/\s*\([^)]*\)\s*$/, '').trim()
+    return n === (w.waiter_number || '') ? '' : n
+  }
+  const display = (num, nm) => nm ? nm + ' (' + num + ')' : num
+
+  async function patch(w, field, value) {
+    const v = (value || '').trim()
+    const num = field === 'number' ? v : (w.waiter_number || '')
+    const nm  = field === 'name'   ? v : bare(w)
+    const upd = field === 'mobile'
+      ? { mobile: v || null }
+      : { waiter_number: num, name: display(num, nm) }
+    setBusy(true)
+    await supabase.from('waiters').update(upd).eq('id', w.id)
+    setBusy(false); loadWaiters()
+  }
+
+  async function removeOne(w) {
+    if (!window.confirm('Remove waiter ' + (w.waiter_number || w.name) + '?')) return
+    setBusy(true)
+    // Soft delete, so delivered orders keep the name in the reports
+    await supabase.from('waiters').update({ is_active:false }).eq('id', w.id)
+    setBusy(false); loadWaiters()
+  }
+
+  async function create() {
+    const num = add.number.trim()
+    if (!num) return
+    setBusy(true)
+    await supabase.from('waiters').insert({
+      event_id: eventId, waiter_number: num, name: display(num, add.name.trim()),
+      mobile: add.mobile.trim() || null, is_active: true
+    })
+    setAdd({ number:'', name:'', mobile:'' })
+    setBusy(false); loadWaiters()
+  }
+
+  const fld = { width:'100%', border:'1px solid var(--line)', borderRadius:7,
+    padding:'5px 8px', fontSize:12, fontFamily:'Manrope', outline:'none',
+    background:'#fff', boxSizing:'border-box' }
+  const onJob = rows.filter(w => busyMap[w.id]).length
+
+  return (
+    <>
+      <style>{`
+        /* Three across on a laptop, dropping to two then one rather than
+           squeezing three into a phone width. */
+        .ss-wgrid { display:grid; gap:6px; grid-template-columns:repeat(3, minmax(0,1fr)); }
+        @media (max-width: 900px) { .ss-wgrid { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+        @media (max-width: 560px) { .ss-wgrid { grid-template-columns:1fr; } }
+      `}</style>
+
+      {/* Same three-card shape as the Tables view, so the two read as one screen */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:6, marginBottom:8 }}>
+        {[['Free', rows.length - onJob, '#16A34A'],
+          ['On delivery', onJob, '#DC2626'],
+          ['Total', rows.length, '#6B7280']].map(([label, n, c]) => (
+          <div key={label} style={{ background:'#fff', borderRadius:10, padding:'5px 8px',
+            textAlign:'center', boxShadow:'var(--shadow)' }}>
+            <div style={{ fontSize:17, fontWeight:900, color:c }}>{n}</div>
+            <div style={{ fontSize:9, fontWeight:700, color:'var(--ink2)',
+              textTransform:'uppercase', letterSpacing:'0.4px' }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {rows.length === 0 && (
+        <div style={{ textAlign:'center', padding:'28px 0', color:'var(--ink2)', fontSize:13 }}>
+          No waiters yet. Add the first one below.
+        </div>
+      )}
+
+      <div className="ss-wgrid">
+        {rows.map(w => {
+          const at = busyMap[w.id]
+          const tone = at ? { bg:'#FEF2F2', fg:'#B91C1C', bar:'#DC2626' }
+                          : { bg:'#F0FDF4', fg:'#15803D', bar:'#16A34A' }
+          return (
+            <div key={w.id} style={{ background:'#fff', borderRadius:10, padding:'6px 8px',
+              boxShadow:'var(--shadow)', borderLeft:'3px solid ' + tone.bar }}>
+              {/* Two lines rather than four. Number and status share the top with
+                  the remove control; name and mobile sit side by side below. */}
+              <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
+                <input defaultValue={w.waiter_number || ''} disabled={busy}
+                  onBlur={e => { const v = e.target.value.trim()
+                    if (v && v !== w.waiter_number) patch(w, 'number', v) }}
+                  style={{ ...fld, width:40, fontSize:14, fontWeight:900, padding:'2px 5px' }} />
+                <span style={{ background:tone.bg, border:'1px solid ' + tone.bar, color:tone.fg,
+                  borderRadius:999, padding:'1px 7px', fontSize:9, fontWeight:800,
+                  letterSpacing:'0.3px', whiteSpace:'nowrap' }}>{at ? 'ON T' + at : 'FREE'}</span>
+                <button onClick={() => removeOne(w)} disabled={busy}
+                  title="Remove waiter"
+                  style={{ marginLeft:'auto', background:'none', border:'none', color:'#DC2626',
+                    fontSize:14, cursor:'pointer', padding:0, lineHeight:1 }}>&times;</button>
+              </div>
+
+              <div style={{ display:'flex', gap:5 }}>
+                <input defaultValue={bare(w)} disabled={busy} placeholder="Name"
+                  onBlur={e => { if (e.target.value.trim() !== bare(w)) patch(w, 'name', e.target.value) }}
+                  style={{ ...fld, flex:1, minWidth:0, fontSize:11, padding:'3px 6px' }} />
+                {w.mobile ? (
+                  <a href={'tel:' + w.mobile} title={'Call ' + w.mobile}
+                    style={{ flexShrink:0, background:'#DCFCE7', border:'1px solid #86EFAC',
+                      color:'#15803D', borderRadius:6, padding:'3px 9px', fontSize:10,
+                      fontWeight:800, textDecoration:'none', whiteSpace:'nowrap',
+                      display:'flex', alignItems:'center' }}>Call</a>
+                ) : (
+                  <input defaultValue="" placeholder="Mobile" type="tel" disabled={busy}
+                    onBlur={e => { if (e.target.value.trim()) patch(w, 'mobile', e.target.value) }}
+                    style={{ ...fld, width:78, fontSize:11, padding:'3px 6px' }} />
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{ display:'flex', gap:6, marginTop:12, paddingTop:12,
+        borderTop:'1px solid var(--line)', alignItems:'center', flexWrap:'wrap' }}>
+        <input value={add.number} onChange={e => setAdd(p => ({ ...p, number:e.target.value }))}
+          placeholder="01" style={{ ...fld, width:64, fontWeight:900 }} />
+        <input value={add.name} onChange={e => setAdd(p => ({ ...p, name:e.target.value }))}
+          placeholder="Name (optional)" style={{ ...fld, flex:1, minWidth:120 }}
+          onKeyDown={e => { if (e.key === 'Enter') create() }} />
+        <input value={add.mobile} onChange={e => setAdd(p => ({ ...p, mobile:e.target.value }))}
+          placeholder="Mobile" type="tel" style={{ ...fld, width:130 }}
+          onKeyDown={e => { if (e.key === 'Enter') create() }} />
+        <button onClick={create} disabled={busy || !add.number.trim()}
+          style={{ background: add.number.trim() ? 'var(--ink)' : '#E5E7EB', color:'#fff',
+            border:'none', borderRadius:8, padding:'8px 18px', fontSize:13, fontWeight:800,
+            cursor: add.number.trim() ? 'pointer' : 'not-allowed' }}>Add</button>
+      </div>
+    </>
+  )
+}
+
 function HelpItemsEditor({ eventId }) {
   const [items, setItems] = useState([])
   const [isCustom, setIsCustom] = useState(false)
@@ -402,7 +590,7 @@ export default function EventManager({ onEventChange }) {
   const [newVideoFile, setNewVideoFile] = useState(null)
 
   const [newSup, setNewSup] = useState({ name:'', pin:'', mobile:'' })
-  const [newWaiter, setNewWaiter] = useState({ name:'', mobile:'' })
+  const [newWaiter, setNewWaiter] = useState({ number:'', name:'', mobile:'' })
   const videoFileRefs = useRef({})
   const logoFileRefs = useRef({})
   const newLogoRef = useRef()
@@ -616,9 +804,15 @@ export default function EventManager({ onEventChange }) {
   }
 
   async function addWaiter() {
-    if (!newWaiter.name.trim()||!selEvent) { alert('Name and event required'); return }
+    // Number is the required one. Name is how staff refer to each other, but
+    // the number is what goes on the KOT slip and gets called across a hall.
+    if (!newWaiter.number.trim()||!selEvent) { alert('Waiter number and event are required'); return }
     setSaving(true)
-    const { error } = await supabase.from('waiters').insert({ event_id:selEvent, name:newWaiter.name.trim(), mobile:newWaiter.mobile.trim()||null, is_active:true })
+    const num = newWaiter.number.trim(), nm = newWaiter.name.trim()
+    // name keeps the display string every existing screen already reads
+    const { error } = await supabase.from('waiters').insert({
+      event_id:selEvent, waiter_number:num, name: nm ? nm + ' (' + num + ')' : num,
+      mobile:newWaiter.mobile.trim()||null, is_active:true })
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     setNewWaiter({ name:'',mobile:'' }); setShowAddWaiter(false); setSaving(false); loadAll()
   }
@@ -946,7 +1140,8 @@ export default function EventManager({ onEventChange }) {
             {events.map(ev=><option key={ev.id} value={ev.id}>{ev.name}</option>)}
           </select>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
-            <input value={newWaiter.name} onChange={e=>setNewWaiter(p=>({...p,name:e.target.value}))} placeholder="Name or number (e.g. 01)" style={INP} />
+            <input value={newWaiter.number} onChange={e=>setNewWaiter(p=>({...p,number:e.target.value}))} placeholder="Waiter number * (e.g. 01)" style={INP} />
+            <input value={newWaiter.name} onChange={e=>setNewWaiter(p=>({...p,name:e.target.value}))} placeholder="Waiter name (optional)" style={INP} />
             <input value={newWaiter.mobile} onChange={e=>setNewWaiter(p=>({...p,mobile:e.target.value}))} placeholder="Mobile (optional)" type="tel" style={INP} />
           </div>
           <div style={{ display:'flex', gap:10 }}>
@@ -1240,22 +1435,9 @@ export default function EventManager({ onEventChange }) {
                 ))}
               </div>
 
-              {/* Waiters */}
-              <div>
-                <div style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', marginBottom:8, textTransform:'uppercase' }}>🧑‍🍳 Waiters ({ws.length})</div>
-                {ws.length===0 ? <div style={{ fontSize:13, color:'var(--ink2)', fontStyle:'italic' }}>None assigned</div>
-                : <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                    {ws.map(w => (
-                      <div key={w.id} style={{ background:'var(--bg)', border:'1px solid var(--line)', borderRadius:10, padding:'6px 12px', display:'flex', alignItems:'center', gap:8 }}>
-                        <span style={{ fontWeight:700, fontSize:13 }}>{w.name}</span>
-                        {w.mobile && <span style={{ fontSize:12, color:'#888' }}>📞 {w.mobile}</span>}
-                        <button onClick={()=>removeWaiter(w.id)} disabled={removing===w.id}
-                          style={{ background:'none', border:'none', color:'#DC2626', fontSize:14, cursor:'pointer', padding:0, lineHeight:1 }}>×</button>
-                      </div>
-                    ))}
-                  </div>
-                }
-              </div>
+              {/* The chip list that sat here is gone. Waiters are managed on the
+                  Staff tab, which can add and edit as well as remove - two lists
+                  that can disagree is worse than one. */}
             </div>
           </div>
         )

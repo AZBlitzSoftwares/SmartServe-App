@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { WaiterList } from './EventManager'
 
 /* Table management for the current event.
 
@@ -33,6 +34,8 @@ const STATUS = {
 }
 
 export default function TableManager({ eventData }) {
+  // Waiters first: the list that changes during an event
+  const [view, setView] = useState('waiters')
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(null)
@@ -71,6 +74,16 @@ export default function TableManager({ eventData }) {
   }
 
   const total   = eventData?.number_of_tables || rows.length
+
+  // Built from the event's table count, not from what exists in the table.
+  // A table no tablet has ever claimed has no row at all, so it was simply
+  // invisible - and that is the one a supervisor needs to spot before service.
+  const byNumber = {}
+  rows.forEach(r => { byNumber[r.table_number] = r })
+  const allTables = Array.from({ length: total }, (_, i) => {
+    const n = i + 1
+    return byNumber[n] || { id:'empty-' + n, table_number:n, claimed_by_device:null }
+  })
   const online  = rows.filter(r => statusOf(r) === 'online').length
   const offline = rows.filter(r => statusOf(r) === 'offline').length
   const missing = Math.max(0, total - online - offline)
@@ -82,17 +95,33 @@ export default function TableManager({ eventData }) {
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-        <h2 style={{ fontSize:20, fontWeight:800 }}>Table Management</h2>
+        <h2 style={{ fontSize:20, fontWeight:800 }}>Staff &amp; Tables</h2>
         <button onClick={load} style={{ background:'var(--ink)', color:'#fff', border:'none',
           borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700, cursor:'pointer' }}>Refresh</button>
       </div>
 
+      <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+        {[['waiters','Waiters'],['tables','Tables']].map(([v,label]) => (
+          <button key={v} onClick={() => setView(v)}
+            style={{ flex:1, padding:'9px 4px', borderRadius:10, fontSize:13, fontWeight:700,
+              cursor:'pointer', border:'1.5px solid',
+              background: view===v ? 'var(--ink)' : '#fff',
+              color: view===v ? '#fff' : 'var(--ink)',
+              borderColor: view===v ? 'var(--ink)' : 'var(--line)' }}>{label}</button>
+        ))}
+      </div>
+
+      {view === 'waiters' && eventData?.id && <WaiterList eventId={eventData.id} />}
+
+      {view === 'tables' && (
+      <>
+
       {/* At-a-glance cover check before guests sit down */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10, marginBottom:16 }}>
         {[['Online', online, '#16A34A'], ['Offline', offline, '#DC2626'], ['Not assigned', missing, '#6B7280']].map(([label, n, c]) => (
-          <div key={label} style={{ background:'#fff', borderRadius:14, padding:'14px 12px',
+          <div key={label} style={{ background:'#fff', borderRadius:10, padding:'5px 8px',
             textAlign:'center', boxShadow:'var(--shadow)' }}>
-            <div style={{ fontSize:26, fontWeight:900, color:c }}>{n}</div>
+            <div style={{ fontSize:17, fontWeight:900, color:c }}>{n}</div>
             <div style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', textTransform:'uppercase',
               letterSpacing:'0.4px', marginTop:2 }}>{label}</div>
           </div>
@@ -113,39 +142,50 @@ export default function TableManager({ eventData }) {
         </div>
       )}
 
-      {rows.map(r => {
+      {/* Cards in three columns, matching the Waiters view. Full-width rows
+          meant four tables filled the screen. */}
+      <style>{`
+        .ss-tgrid { display:grid; gap:6px; grid-template-columns:repeat(3, minmax(0,1fr)); }
+        @media (max-width: 900px) { .ss-tgrid { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+        @media (max-width: 560px) { .ss-tgrid { grid-template-columns:1fr; } }
+      `}</style>
+      <div className="ss-tgrid">
+      {allTables.map(r => {
         const st = statusOf(r)
         const cfg = STATUS[st]
         const seen = r.last_seen_at || r.claimed_at
         return (
-          <div key={r.id} style={{ background:'#fff', borderRadius:14, padding:'13px 15px',
-            marginBottom:9, boxShadow:'var(--shadow)', borderLeft:'4px solid ' + cfg.color,
-            display:'flex', alignItems:'center', gap:12 }}>
-
-            <div style={{ flexShrink:0, minWidth:44, fontSize:20, fontWeight:900 }}>{r.table_number}</div>
-
-            <div style={{ flex:1, minWidth:0 }}>
-              <span style={{ display:'inline-block', background:cfg.bg, border:'1px solid ' + cfg.border,
-                color:cfg.color, borderRadius:999, padding:'3px 11px', fontSize:11, fontWeight:800,
-                letterSpacing:'0.3px' }}>{cfg.label}</span>
-              {seen && st !== 'free' && (
-                <div style={{ fontSize:12, color:'var(--ink2)', marginTop:4 }}>
-                  Last seen {new Date(seen).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
-                </div>
+          <div key={r.id} style={{ background:'#fff', borderRadius:10, padding:'6px 9px',
+            boxShadow:'var(--shadow)', borderLeft:'3px solid ' + cfg.color }}>
+            {/* Two lines. Number and status on top, time and Release beneath. */}
+            <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:3 }}>
+              <span style={{ fontSize:15, fontWeight:900, minWidth:20 }}>{r.table_number}</span>
+              <span style={{ background:cfg.bg, border:'1px solid ' + cfg.border, color:cfg.color,
+                borderRadius:999, padding:'1px 7px', fontSize:9, fontWeight:800,
+                letterSpacing:'0.3px', whiteSpace:'nowrap' }}>{cfg.label}</span>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+              gap:6, minHeight:20 }}>
+              <span style={{ fontSize:10, color:'var(--ink2)' }}>
+                {seen && st !== 'free'
+                  ? new Date(seen).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
+                  : '\u2014'}
+              </span>
+              {r.claimed_by_device && (
+                <button onClick={() => release(r)} disabled={busy === r.id}
+                  style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#B91C1C',
+                    borderRadius:6, padding:'2px 9px', fontSize:10, fontWeight:800,
+                    cursor: busy === r.id ? 'wait' : 'pointer' }}>
+                  {busy === r.id ? '...' : 'Release'}
+                </button>
               )}
             </div>
-
-            {r.claimed_by_device && (
-              <button onClick={() => release(r)} disabled={busy === r.id}
-                style={{ flexShrink:0, background:'#FEF2F2', border:'1px solid #FECACA', color:'#B91C1C',
-                  borderRadius:10, padding:'8px 16px', fontSize:12, fontWeight:800,
-                  cursor: busy === r.id ? 'wait' : 'pointer' }}>
-                {busy === r.id ? '...' : 'Release'}
-              </button>
-            )}
           </div>
         )
       })}
+      </div>
+      </>
+      )}
     </div>
   )
 }

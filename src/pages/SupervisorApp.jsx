@@ -131,7 +131,7 @@ export default function SupervisorApp() {
     { id:'feedback', label:'Feedback', emoji:'⭐', badge:0 },
     // Supervisors get table release here rather than through Events,
     // which would also expose every other event and staff deletion.
-    { id:'tables',  label:'Tables',   emoji:'📱', badge:0 },
+    { id:'tables',  label:'Staff',    emoji:'👥', badge:0 },
     ...(isAdmin ? [{ id:'events', label:'Events', emoji:'📅', badge:0 }] : []),
   ]
 
