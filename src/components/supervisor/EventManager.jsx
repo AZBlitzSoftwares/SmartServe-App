@@ -309,17 +309,20 @@ function HelpItemsEditor({ eventId }) {
 
 function EventDateNameEditor({ ev, onSave }) {
   const [name, setName]       = useState(ev.name || '')
+  const [venue, setVenue]     = useState(ev.venue || '')
   const [date, setDate]       = useState(ev.date || '')
   const [saving, setSaving]   = useState(false)
   const [saved, setSaved]     = useState(false)
 
   // Reset when event changes
-  useState(() => { setName(ev.name||''); setDate(ev.date||'') })
+  useState(() => { setName(ev.name||''); setDate(ev.date||''); setVenue(ev.venue||'') })
 
   async function save() {
     if (!name.trim() || !date) { alert('Name and date are required'); return }
     setSaving(true)
     if (name.trim() !== ev.name) await onSave('name', name.trim())
+    // null rather than '' so an emptied venue stops rendering the pin row
+    if ((venue.trim() || null) !== (ev.venue || null)) await onSave('venue', venue.trim() || null)
     if (date !== ev.date)         await onSave('date', date)
     setSaving(false)
     setSaved(true)
@@ -337,6 +340,12 @@ function EventDateNameEditor({ ev, onSave }) {
         <label style={{ fontSize:12, fontWeight:700, color:'#666', display:'block', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.04em' }}>Event Date</label>
         <input type="date" value={date} onChange={e=>setDate(e.target.value)}
           style={{ width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:13, fontFamily:'Manrope', outline:'none', boxSizing:'border-box', background:'#fff', cursor:'pointer' }} />
+      </div>
+      <div>
+        <label style={{ fontSize:12, fontWeight:700, color:'#666', display:'block', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.04em' }}>Venue</label>
+        <input value={venue} onChange={e=>setVenue(e.target.value)}
+          placeholder="e.g. Grand Ballroom, Taj Hotel, Pune"
+          style={{ width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:13, fontFamily:'Manrope', outline:'none', boxSizing:'border-box', background:'#fff' }} />
       </div>
       <button onClick={save} disabled={saving}
         style={{ padding:'10px 18px', background: saved?'#16A34A':'var(--ink)', color: saved?'#fff':'#E8890C',

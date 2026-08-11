@@ -131,6 +131,12 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
            that does not keeps vh rather than losing the height completely.
            Inside the APK there is no address bar, so they are identical. */
         .ss-fullh { height:100vh; height:100dvh; }
+        /* No video: the panel centres in the full height instead of sitting
+           at the top of an empty screen, and the logos step up to carry it. */
+        .ss-novideo { flex:1; justify-content:center; align-content:center; }
+        .ss-novideo .ss-logo { width:76px; height:76px; max-width:96px; max-height:96px;
+          width:clamp(60px, 13vw, 96px); height:clamp(60px, 13vw, 96px); }
+        .ss-novideo .ss-name { font-size:clamp(17px, 3.4vw, 28px); }
         @keyframes ssStartFlash {
           0%, 100% { background:#E8890C; box-shadow:0 6px 22px rgba(232,137,12,0.45); }
           50%      { background:#FFB03A; box-shadow:0 8px 32px rgba(232,137,12,0.85); }
@@ -170,7 +176,7 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
           two without. Nothing to configure. */}
       {/* Always three columns so Start Ordering stays dead centre.
           Only the contents change when there is no caterer. */}
-      <div className="ss-welcome-panel">
+      <div className={"ss-welcome-panel" + (eventData?.video_url ? "" : " ss-novideo")}>
 
         <div className="ss-col ss-col-side">
           {eventData?.catering_company ? (
