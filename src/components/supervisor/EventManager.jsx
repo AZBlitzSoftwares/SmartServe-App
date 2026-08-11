@@ -377,6 +377,7 @@ export default function EventManager({ onEventChange }) {
       }))))
   }, [])
 
+  const [duplicating, setDuplicating] = useState(null)
   const [viewMode, setViewMode] = useState('list') // 'list' | 'detail'
   const [selectedEvent, setSelectedEvent] = useState(null)
 
@@ -399,6 +400,67 @@ export default function EventManager({ onEventChange }) {
   const newVideoRef = useRef()
 
   useEffect(() => { loadAll() }, [])
+
+
+  // Copies the event, its categories and dishes, its help items, its waiters
+  // and its supervisors.
+  //
+  // Orders, feedback and table claims are deliberately NOT copied. They belong
+  // to the event that actually happened - carrying them over would corrupt the
+  // new event's reports from the moment it is created.
+  async function duplicateEvent(ev) {
+    if (!window.confirm('Duplicate "' + ev.name + '"?\n\nCopies the menu, help items, waiters and supervisors.\nOrders and feedback are not copied.')) return
+    setDuplicating(ev.id)
+    try {
+      const today = new Date().toISOString().slice(0, 10)
+      const { id, created_at, ...rest } = ev
+      const { data: nev, error } = await supabase.from('events').insert({
+        ...rest, name: ev.name + ' (Copy)', date: today
+      }).select().single()
+      if (error || !nev) { alert('Could not duplicate: ' + (error?.message || 'unknown error')); setDuplicating(null); return }
+
+      // Categories, keeping a map from old id to new so dishes land correctly
+      const { data: cats } = await supabase.from('menu_categories')
+        .select('*').eq('event_id', ev.id).order('sort_order')
+      const idMap = {}
+      if (cats?.length) {
+        for (const c of cats) {
+          const { id: oldId, created_at: _c, ...crest } = c
+          const { data: nc } = await supabase.from('menu_categories')
+            .insert({ ...crest, event_id: nev.id }).select().single()
+          if (nc) idMap[oldId] = nc.id
+        }
+        const oldCatIds = cats.map(c => c.id)
+        const { data: items } = await supabase.from('menu_items')
+          .select('*').in('category_id', oldCatIds)
+        if (items?.length) {
+          const rows = items
+            .filter(i => idMap[i.category_id])
+            .map(({ id: _i, created_at: _ic, ...irest }) => ({ ...irest, category_id: idMap[irest.category_id] }))
+          // Chunked, because a large menu in one insert can exceed the limit
+          for (let i = 0; i < rows.length; i += 200) {
+            await supabase.from('menu_items').insert(rows.slice(i, i + 200))
+          }
+        }
+      }
+
+      for (const table of ['help_items', 'waiters', 'supervisors']) {
+        const { data: src } = await supabase.from(table).select('*').eq('event_id', ev.id)
+        if (src?.length) {
+          await supabase.from(table).insert(
+            src.map(({ id: _x, created_at: _y, ...r }) => ({ ...r, event_id: nev.id }))
+          )
+        }
+      }
+
+      alert('Duplicated. The copy is dated today - rename and re-date it before use.')
+      loadAll()
+    } catch (e) {
+      console.error('Duplicate error:', e)
+      alert('Could not duplicate. Please try again.')
+    }
+    setDuplicating(null)
+  }
 
   async function loadAll() {
     setLoading(true)
@@ -948,6 +1010,16 @@ export default function EventManager({ onEventChange }) {
                   <span style={{ background:'#F5F3FF', color:'#7C3AED', fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:999 }}>👔 {sups.length}</span>
                   <span style={{ background:'#FEF3C7', color:'#92400E', fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:999 }}>🧑‍🍳 {ws.length}</span>
                 </div>
+
+                {/* Duplicate. stopPropagation so it does not open the event. */}
+                <button onClick={e => { e.stopPropagation(); duplicateEvent(ev) }}
+                  disabled={duplicating === ev.id}
+                  title="Duplicate this event"
+                  style={{ flexShrink:0, background:'var(--bg)', border:'1px solid var(--line)',
+                    borderRadius:8, padding:'6px 12px', fontSize:12, fontWeight:700,
+                    color:'var(--ink2)', cursor: duplicating === ev.id ? 'wait' : 'pointer' }}>
+                  {duplicating === ev.id ? 'Copying...' : '⧉ Duplicate'}
+                </button>
 
                 {/* Arrow */}
                 <span style={{ color:'#CCC', fontSize:18, flexShrink:0 }}>›</span>

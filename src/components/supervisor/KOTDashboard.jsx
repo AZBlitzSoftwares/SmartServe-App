@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
+const BUILD_VERSION = 'v2.1 \u00B7 2026-08-10'
+
 const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
 
@@ -11,6 +13,11 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const [filter, setFilter] = useState('active')
   const [loading, setLoading] = useState(true)
   const [assigning, setAssigning] = useState(null)
+  // Only one row open at a time, so the list cannot grow unmanageable
+  const [expandedRow, setExpandedRow] = useState(null)
+  // Handlers run before the reload lands, so they read the count from here
+  const timelineRef = useRef(0)
+  const [showAllWaiters, setShowAllWaiters] = useState(null)
   const [showCancelDialog, setShowCancelDialog] = useState(null) // order id being cancelled
   const [cancelReason, setCancelReason] = useState('')
   const [cancelCustomReason, setCancelCustomReason] = useState('')
@@ -112,7 +119,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   async function cancelSOSRequest(sosId) {
     if (!window.confirm('Cancel this help request?')) return
     await supabase.from('sos_requests').update({ status:'cancelled' }).eq('id', sosId)
-    loadSOS()
+    loadSOS(); clearFiltersIfEmpty(timelineRef.current - 1)
   }
 
   async function assignSOSWaiter(sosId, waiterId) {
@@ -150,14 +157,27 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     }, true)
   }
 
+  // Filtering by waiter to find their table and then delivering it used to
+  // leave the filter on, so the same table looked like it was still there.
+  // Clear only when nothing is left to act on. Clearing after every action
+  // suits a waiter filter, which usually holds one item, but fights a table
+  // filter holding five - you would have to re-apply it after each one.
+  function clearFiltersIfEmpty(remaining) {
+    if (!waiterFilter && !tableFilter) return
+    if (remaining > 0) return
+    setWaiterFilter(null); setTableFilter(null); setFilter('active')
+  }
+
   async function markDelivered(order) {
     await supabase.from('orders').update({ status:'delivered', delivered_at:new Date().toISOString() }).eq('id', order.id)
     loadOrders(false)
+    // timeline still holds the record just actioned, hence the minus one
+    clearFiltersIfEmpty(timelineRef.current - 1)
   }
 
   async function resolveSOSRequest(sosId) {
     await supabase.from('sos_requests').update({ status:'resolved', resolved_at:new Date().toISOString() }).eq('id', sosId)
-    loadSOS()
+    loadSOS(); clearFiltersIfEmpty(timelineRef.current - 1)
   }
 
   async function cancelOrder(id) {
@@ -178,6 +198,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     setCancelReason('')
     setCancelCustomReason('')
     loadOrders(false)
+    clearFiltersIfEmpty(timelineRef.current - 1)
   }
 
   // isHelp only swaps the "Order:" label for "Help:". The slip layout,
@@ -194,6 +215,14 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
 
     // Epson TM-m30III — 58mm printable area, 4mm margins each side
     const w = window.open('','_blank','width=400,height=600')
+    // A blocked popup returns null, and the next line would throw with no
+    // sign to the supervisor - the waiter gets assigned and nothing prints.
+    if (!w) {
+      alert('The print window was blocked by the browser.\n\n' +
+        'Allow pop-ups for this site, then use Print KOT on the order card.\n\n' +
+        'Look for the blocked pop-up icon at the right of the address bar.')
+      return
+    }
     w.document.write(`<!DOCTYPE html>
 <html>
 <head>
@@ -367,10 +396,32 @@ ${(order.order_items||[]).map(i => `
     ...orders.filter(o=>o.status==='in_progress'&&o.waiter_id).map(o=>o.waiter_id),
     ...sosRequests.filter(s=>s.status==='in_progress'&&s.waiter_id).map(s=>s.waiter_id)
   ].filter(Boolean)
+  // Jobs done, not orders done. A waiter returning from a help run had been
+  // reading as zero jobs and jumping back to the front of the queue.
   const waiterOrderCount = {}
-  waiters.forEach(w => { waiterOrderCount[w.id] = 0 })
-  orders.forEach(o => { if (o.waiter_id && waiterOrderCount[o.waiter_id]!==undefined) waiterOrderCount[o.waiter_id]++ })
-  const availableWaiters = waiters.filter(w=>!busyWaiterIds.includes(w.id)).sort((a,b)=>(waiterOrderCount[a.id]||0)-(waiterOrderCount[b.id]||0))
+  const waiterLastAt = {}
+  waiters.forEach(w => { waiterOrderCount[w.id] = 0; waiterLastAt[w.id] = 0 })
+
+  function tally(list) {
+    list.forEach(x => {
+      if (!x.waiter_id || waiterOrderCount[x.waiter_id] === undefined) return
+      waiterOrderCount[x.waiter_id]++
+      const t = x.assigned_at ? new Date(x.assigned_at).getTime() : 0
+      if (t > waiterLastAt[x.waiter_id]) waiterLastAt[x.waiter_id] = t
+    })
+  }
+  tally(orders)
+  tally(sosRequests)
+
+  // Fewest jobs first; on a tie, whoever has been idle longest. Without the
+  // tie-break, equal counts fall back to array order, which is meaningless.
+  const availableWaiters = waiters
+    .filter(w => !busyWaiterIds.includes(w.id))
+    .sort((a, b) => {
+      const d = (waiterOrderCount[a.id] || 0) - (waiterOrderCount[b.id] || 0)
+      if (d !== 0) return d
+      return (waiterLastAt[a.id] || 0) - (waiterLastAt[b.id] || 0)
+    })
 
   const filteredOrders = orders.filter(o => {
     const matchFilter = filter==='active'?!['delivered','cancelled'].includes(o.status):filter==='delivered'?o.status==='delivered':filter==='cancelled'?o.status==='cancelled':true
@@ -396,6 +447,7 @@ ${(order.order_items||[]).map(i => `
     ...filteredSOS.map(r => ({ kind:'sos', at:r.created_at, sos:r })),
     ...filteredOrders.map(o => ({ kind:'order', at:o.created_at, order:o })),
   ].sort((a, b) => new Date(b.at) - new Date(a.at))
+  timelineRef.current = timeline.length
 
   const CANCEL_REASONS = [
     'Item not available',
@@ -409,7 +461,14 @@ ${(order.order_items||[]).map(i => `
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
-        <h2 style={{ fontSize:20, fontWeight:800 }}>Live Orders</h2>
+        <h2 style={{ fontSize:20, fontWeight:800, display:'flex', alignItems:'baseline', gap:8 }}>
+          Live Orders
+          {/* Answers "which build are you on?" in one glance, instead of
+              guessing when someone cannot see a change. */}
+          <span style={{ fontSize:11, fontWeight:600, color:'var(--ink2)', opacity:0.65 }}>
+            {BUILD_VERSION}
+          </span>
+        </h2>
         <div style={{ display:'flex', gap:8 }}>
           <button onClick={enableSound} style={{ background:'#FEF3C7', border:'1px solid #FCD34D', color:'#92400E', borderRadius:10, padding:'7px 12px', fontSize:12, fontWeight:700 }}>🔔 Sound</button>
           <button onClick={()=>{ loadOrders(false); loadSOS() }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'7px 14px', fontSize:13, fontWeight:700 }}>Refresh</button>
@@ -425,7 +484,7 @@ ${(order.order_items||[]).map(i => `
               const assignedOrder = orders.find(o=>o.waiter_id===w.id&&o.status==='in_progress')
               return (
                 <div key={w.id} onClick={()=>setWaiterFilter(waiterFilter===w.id?null:w.id)}
-                  style={{ background:waiterFilter===w.id?'#1A0A0A':busy?'#FEF2F2':'#F0FDF4', border:'2px solid', borderColor:waiterFilter===w.id?'#E8890C':busy?'#FECACA':'#BBF7D0', borderRadius:10, padding:'6px 12px', fontSize:12, cursor:'pointer' }}>
+                  style={{ background:waiterFilter===w.id?'#1A0A0A':busy?'#FEF2F2':'#F0FDF4', border:'2px solid', borderColor:waiterFilter===w.id?'#E8890C':busy?'#FECACA':'#BBF7D0', borderRadius:9, padding:'4px 10px', fontSize:12, cursor:'pointer' }}>
                   <span style={{ fontWeight:800, color:waiterFilter===w.id?'#E8890C':busy?'#DC2626':'#16A34A' }}>{w.name}</span>
                   {busy&&assignedOrder&&<span style={{ color:'#888', marginLeft:6 }}>→ T{assignedOrder.tables?.table_number}</span>}
                   <span style={{ marginLeft:6, fontSize:11 }}>{busy?'🔴':'🟢'}</span>
@@ -458,148 +517,172 @@ ${(order.order_items||[]).map(i => `
             </div>
           )}
 
-          {/* One list for both, newest first. Which card renders depends on
-              the row type, but the ordering is purely chronological. */}
-          {timeline.map(row => { const sos = row.sos, order = row.order;
-            return row.kind === 'sos' ? (
-            <div key={'sos-'+sos.id} style={{ background:'#fff', borderRadius:18, padding:18, marginBottom:14, boxShadow:'var(--shadow)', borderLeft:'5px solid #DC2626' }}>
-              <div style={{ background:'#FEF2F2', borderRadius:10, padding:'8px 12px', marginBottom:12, display:'flex', alignItems:'center', gap:10 }}>
-                <span style={{ fontSize:20 }}>🛎️</span>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontWeight:900, fontSize:14, color:'#DC2626' }}>CALL WAITER REQUEST</div>
-                  <div style={{ fontSize:12, color:'#888', marginTop:1 }}>{new Date(sos.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
+          {/* Compact rows. Colour carries the state because that is what gets
+              scanned on a busy screen; the text is for confirming, not finding. */}
+          {/* Split in half rather than flowing across rows, so the first half
+              reads down the left column and the second down the right. Row-major
+              would put the newest top-left and the next top-right, which destroys
+              the chronological read. */}
+          <style>{`
+            .ss-kot-cols { display:grid; grid-template-columns:1fr; gap:10px; align-items:start; }
+            @media (min-width: 1100px) { .ss-kot-cols { grid-template-columns:1fr 1fr; } }
+          `}</style>
+          <div className="ss-kot-cols">
+          {[timeline.slice(0, Math.ceil(timeline.length/2)),
+            timeline.slice(Math.ceil(timeline.length/2))].map((col, ci) => (
+          <div key={ci} style={{ background:'#fff', borderRadius:14, overflow:'hidden',
+            boxShadow:'var(--shadow)', display: col.length ? 'block' : 'none' }}>
+          {col.map(row => {
+            const isSos  = row.kind === 'sos'
+            const rec    = isSos ? row.sos : row.order
+            const id     = (isSos ? 'sos-' : 'ord-') + rec.id
+            const open   = expandedRow === id
+            const status = isSos
+              ? (rec.status === 'open' ? 'new' : rec.status === 'resolved' ? 'done'
+                 : rec.status === 'cancelled' ? 'void' : 'progress')
+              : (!rec.waiter_id && !['delivered','cancelled'].includes(rec.status) ? 'new'
+                 : rec.status === 'delivered' ? 'done'
+                 : rec.status === 'cancelled' ? 'void' : 'progress')
+
+            const tone = status === 'new'  ? { bg:'#FEF2F2', fg:'#B91C1C', bar:'#DC2626' }
+                       : status === 'done' ? { bg:'#F0FDF4', fg:'#15803D', bar:'#16A34A' }
+                       : status === 'void' ? { bg:'#F3F4F6', fg:'#6B7280', bar:'#9CA3AF' }
+                       : { bg:'#FFF7ED', fg:'#C2410C', bar:'#E8890C' }
+
+            const lines_ = isSos ? (rec.sos_request_items || []) : (rec.order_items || [])
+            const summary = isSos
+              ? lines_.map(li => li.item_name).join(', ')
+              : lines_.map(li => li.menu_items?.name).filter(Boolean).join(', ')
+            const count = isSos ? lines_.length
+              : lines_.reduce((n, li) => n + (li.quantity || 1), 0)
+            const waiterName = rec.waiters?.name || (waiters.find(w => w.id === rec.waiter_id)?.name) || ''
+            const timeStr = new Date(rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
+            const chips = showAllWaiters === id ? availableWaiters : availableWaiters.slice(0, 3)
+
+            return (
+              <div key={id} style={{ borderLeft:'4px solid '+tone.bar,
+                borderBottom:'1px solid var(--line)' }}>
+
+                <div onClick={() => { setExpandedRow(open ? null : id); setShowAllWaiters(null) }}
+                  style={{ display:'flex', alignItems:'center', gap:9, padding:'6px 12px',
+                    cursor:'pointer', minHeight:36, boxSizing:'border-box' }}>
+                  {/* Filters to this table, the same as tapping a waiter chip.
+                      stopPropagation so filtering does not also expand the row. */}
+                  {(() => {
+                    const tn = rec.tables?.table_number ?? rec.table_number ?? null
+                    const on = tn != null && tableFilter === tn
+                    return (
+                      <span onClick={e => { e.stopPropagation(); if (tn != null) setTableFilter(on ? null : tn) }}
+                        title={tn != null ? 'Show only table ' + tn : ''}
+                        style={{ fontSize:14, fontWeight:800, minWidth:34, cursor:'pointer',
+                          borderRadius:6, padding:'2px 5px', flexShrink:0,
+                          background: on ? '#1A0A0A' : 'transparent',
+                          color: on ? '#E8890C' : 'inherit' }}>T{tn ?? '?'}</span>
+                    )
+                  })()}
+                  <span style={{ fontSize:12, color:'var(--ink2)', minWidth:42 }}>{timeStr}</span>
+                  <span style={{ fontSize:11, fontWeight:800, padding:'3px 9px', borderRadius:999,
+                    background:tone.bg, color:tone.fg, minWidth:58, textAlign:'center', flexShrink:0 }}>
+                    {isSos ? 'HELP' : count + (count === 1 ? ' item' : ' items')}
+                  </span>
+                  <span style={{ flex:1, minWidth:0, fontSize:13, color:'var(--ink2)',
+                    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{summary}</span>
+                  <span style={{ fontSize:12, fontWeight:700, color:'var(--ink2)', minWidth:26,
+                    textAlign:'right' }}>{waiterName || '—'}</span>
+                  <span style={{ fontSize:11, color:'#999', transform:'rotate('+(open?180:0)+'deg)',
+                    transition:'transform 0.15s', flexShrink:0 }}>▼</span>
                 </div>
-                <div style={{ background:'#FEF2F2', border:'1.5px solid #FECACA', borderRadius:999, padding:'3px 10px', fontSize:11, fontWeight:800, color:'#DC2626' }}>
-                  {sos.status==='open'?'NEW':sos.status==='resolved'?'Completed':sos.status==='cancelled'?'Cancelled':'In Progress'}
-                </div>
-              </div>
-              <button onClick={()=>setTableFilter(tableFilter===sos.tables?.table_number?null:sos.tables?.table_number)}
-                style={{ fontSize:24, fontWeight:900, background:tableFilter===sos.tables?.table_number?'#1A0A0A':'transparent', color:tableFilter===sos.tables?.table_number?'#E8890C':'#1A1A1A', border:'none', padding:tableFilter===sos.tables?.table_number?'2px 10px':'0', borderRadius:8, cursor:'pointer', marginBottom:12, display:'block' }}>
-                Table {sos.tables?.table_number}
-              </button>
-              {/* What the table actually asked for, so the waiter carries it in one trip */}
-              {sos.sos_request_items?.length > 0 && (
-                <div style={{ background:'#FFF7ED', border:'1px solid #FED7AA', borderRadius:12,
-                  padding:'10px 12px', marginBottom:12 }}>
-                  {sos.sos_request_items.map((li, i) => (
-                    <div key={i} style={{ display:'flex', justifyContent:'space-between',
-                      fontSize:14, fontWeight:700, color:'#9A3412', padding:'3px 0' }}>
-                      <span>{li.item_name}</span>
-                      <span>x{li.quantity}</span>
+
+                {open && (
+                  <div style={{ padding:'0 12px 12px', background:'#FAFAFA' }}>
+                    <div style={{ marginBottom:10 }}>
+                      {lines_.map((li, i) => (
+                        <div key={i} style={{ display:'flex', justifyContent:'space-between',
+                          fontSize:13, padding:'3px 0', borderBottom:'1px solid #F0F0F0' }}>
+                          <span style={{ fontWeight:600 }}>{isSos ? li.item_name : li.menu_items?.name}</span>
+                          <span style={{ color:'#888' }}>x{li.quantity}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
-              {sos.status==='open' && (
-                <div style={{ marginBottom:10 }}>
-                  <div style={{ fontSize:12, fontWeight:700, color:'var(--ink2)', marginBottom:6 }}>Assign Waiter</div>
-                  <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                    {availableWaiters.map((w, idx) => (
-                      <button key={w.id} onClick={()=>assignSOSWaiter(sos.id, w.id)} disabled={assigning==='sos-'+sos.id}
-                        style={{ background:idx===0?'#16A34A':'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer', position:'relative' }}>
-                        {idx===0&&<span style={{ position:'absolute', top:-8, left:'50%', transform:'translateX(-50%)', background:'#E8890C', color:'#fff', fontSize:9, fontWeight:800, padding:'1px 6px', borderRadius:999, whiteSpace:'nowrap' }}>Suggested</span>}
-                        {assigning==='sos-'+sos.id?'...':w.name}
+
+                    {status === 'new' ? (
+                      <div style={{ marginBottom:10 }}>
+                        <div style={{ fontSize:12, color:'var(--ink2)', marginBottom:6, fontWeight:600 }}>
+                          Assign waiter{availableWaiters.length ? ' \u00B7 ' + availableWaiters[0].name + ' suggested' : ''}
+                        </div>
+                        <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
+                          {chips.map((w, idx) => (
+                            <button key={w.id}
+                              onClick={() => isSos ? assignSOSWaiter(rec.id, w.id) : assignWaiter(rec.id, w.id)}
+                              disabled={assigning === (isSos ? 'sos-' : '') + rec.id}
+                              style={{ background: idx===0 && showAllWaiters!==id ? '#16A34A' : '#1A0A0A',
+                                color:'#fff', border:'none', borderRadius:10, padding:'9px 16px',
+                                fontSize:13, fontWeight:800, cursor:'pointer' }}>
+                              {w.name}
+                            </button>
+                          ))}
+                          {availableWaiters.length > 3 && (
+                            <button onClick={e => { e.stopPropagation(); setShowAllWaiters(showAllWaiters===id ? null : id) }}
+                              style={{ background:'var(--bg)', border:'1px solid var(--line)',
+                                borderRadius:10, padding:'9px 14px', fontSize:13, fontWeight:700,
+                                color:'var(--ink2)', cursor:'pointer' }}>
+                              {showAllWaiters===id ? 'Less' : 'More'}
+                            </button>
+                          )}
+                          {!isSos && (
+                            <button onClick={() => assignWaiter(rec.id, null)}
+                              style={{ background:'var(--bg)', border:'1px solid var(--line)',
+                                borderRadius:10, padding:'9px 14px', fontSize:13, fontWeight:700,
+                                color:'var(--ink2)', cursor:'pointer' }}>No Waiter</button>
+                          )}
+                        </div>
+                      </div>
+                    ) : waiterName ? (
+                      <div style={{ fontSize:12, color:'var(--ink2)', marginBottom:10, fontWeight:600 }}>
+                        Waiter {waiterName} assigned
+                      </div>
+                    ) : null}
+
+                    <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                      <button onClick={() => isSos ? printHelpKOT(rec) : printKOT(rec)}
+                        style={{ background:'var(--bg)', border:'1px solid var(--line)', borderRadius:10,
+                          padding:'9px 16px', fontSize:13, fontWeight:700, color:'var(--ink2)',
+                          cursor:'pointer' }}>
+                        🖨 {isSos ? 'Print Help Slip' : 'Print KOT'}
                       </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {sos.status!=='open' && (
-                <button onClick={()=>printHelpKOT(sos)}
-                  style={{ width:'100%', background:'var(--bg)', border:'1px solid var(--line)',
-                    borderRadius:12, padding:'10px', fontSize:13, fontWeight:700,
-                    color:'var(--ink2)', cursor:'pointer', marginBottom:8 }}>
-                  🖨 Print Help Slip
-                </button>
-              )}
-              {/* Resolve appears only once a waiter is assigned. Before that
-                  there is nothing to mark as done, and it was far too easy to
-                  close a request nobody had acted on. */}
-              {!['resolved','cancelled'].includes(sos.status) && (
-                <div style={{ display:'flex', gap:8 }}>
-                  <button onClick={()=>cancelSOSRequest(sos.id)}
-                    style={{ flexShrink:0, background:'#FEF2F2', border:'1px solid #FECACA',
-                      color:'#B91C1C', borderRadius:12, padding:'12px 18px', fontSize:13,
-                      fontWeight:800, cursor:'pointer' }}>
-                    ✕ Cancel
-                  </button>
-                  {sos.status==='open' ? (
-                    <div style={{ flex:1, background:'#F3F4F6', borderRadius:12, padding:'12px',
-                      fontSize:13, fontWeight:700, color:'#6B7280', textAlign:'center' }}>
-                      Assign a waiter first
+
+                      {!['delivered','cancelled','resolved'].includes(rec.status) && (
+                        <>
+                          {isSos ? (
+                            rec.status !== 'open' && (
+                              <button onClick={() => resolveSOSRequest(rec.id)}
+                                style={{ flex:1, minWidth:140, background:'#16A34A', color:'#fff',
+                                  border:'none', borderRadius:10, padding:'9px 16px', fontSize:13,
+                                  fontWeight:800, cursor:'pointer' }}>✓ Mark Resolved</button>
+                            )
+                          ) : (
+                            rec.waiter_id && (
+                              <button onClick={() => markDelivered(rec)}
+                                style={{ flex:1, minWidth:140, background:'#16A34A', color:'#fff',
+                                  border:'none', borderRadius:10, padding:'9px 16px', fontSize:13,
+                                  fontWeight:800, cursor:'pointer' }}>✓ Mark Delivered</button>
+                            )
+                          )}
+                          <button onClick={() => isSos ? cancelSOSRequest(rec.id) : setShowCancelDialog(rec.id)}
+                            style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#B91C1C',
+                              borderRadius:10, padding:'9px 16px', fontSize:13, fontWeight:800,
+                              cursor:'pointer' }}>✕ Cancel</button>
+                        </>
+                      )}
                     </div>
-                  ) : (
-                    <button onClick={()=>resolveSOSRequest(sos.id)}
-                      style={{ flex:1, background:'#16A34A', color:'#fff', border:'none',
-                        borderRadius:12, padding:'12px', fontSize:14, fontWeight:800,
-                        cursor:'pointer' }}>
-                      ✓ Mark Resolved
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div key={order.id} style={{ background:'#fff', borderRadius:18, padding:18, marginBottom:14, boxShadow:'var(--shadow)', borderLeft:'4px solid '+(STATUS_COLORS[order.status]||'#999') }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-                    <button onClick={()=>setTableFilter(tableFilter===order.tables?.table_number?null:order.tables?.table_number)}
-                      style={{ fontSize:22, fontWeight:900, background:tableFilter===order.tables?.table_number?'#1A0A0A':'transparent', color:tableFilter===order.tables?.table_number?'#E8890C':'#1A1A1A', border:'none', padding:tableFilter===order.tables?.table_number?'2px 10px':'0', borderRadius:8, cursor:'pointer', lineHeight:1 }}>
-                      Table {order.tables?.table_number}
-                    </button>
-                    {order.status==='in_progress'&&order.assigned_at&&(()=>{
-                      const t=formatTimer(order.assigned_at); if(!t) return null
-                      const bg=t.mins>=15?'#FEF2F2':t.mins>=10?'#FEF3C7':'#F0FDF4'
-                      const col=t.mins>=15?'#DC2626':t.mins>=10?'#D97706':'#16A34A'
-                      const bord=t.mins>=15?'#FECACA':t.mins>=10?'#FCD34D':'#BBF7D0'
-                      return (<div style={{ display:'inline-flex', alignItems:'center', gap:6, background:bg, border:'2px solid '+bord, borderRadius:10, padding:'5px 14px' }}>
-                        <span style={{ fontSize:16 }}>⏱</span>
-                        <span style={{ fontSize:24, fontWeight:900, color:col, fontVariantNumeric:'tabular-nums' }}>{t.str}</span>
-                        {t.mins>=15&&<span style={{ fontSize:11, background:'#DC2626', color:'#fff', padding:'1px 7px', borderRadius:999, fontWeight:700 }}>⚠️ Slow</span>}
-                      </div>)
-                    })()}
                   </div>
-                  <div style={{ fontSize:12, color:'var(--ink2)', marginTop:4 }}>{new Date(order.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} · #{order.id.slice(-6).toUpperCase()}</div>
-                  {order.waiters?.name&&(<button onClick={()=>setWaiterFilter(waiterFilter===order.waiter_id?null:order.waiter_id)}
-                    style={{ fontSize:14, fontWeight:800, color:waiterFilter===order.waiter_id?'#fff':'#2563EB', background:waiterFilter===order.waiter_id?'#2563EB':'#EFF6FF', border:'none', borderRadius:8, padding:'3px 12px', marginTop:4, cursor:'pointer' }}>
-                    👤 {order.waiters.name} {waiterFilter===order.waiter_id?'✕':''}
-                  </button>)}
-                </div>
-                <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6 }}>
-                  <div style={{ background:(STATUS_COLORS[order.status]||'#999')+'20', color:STATUS_COLORS[order.status]||'#999', fontSize:12, fontWeight:700, padding:'4px 12px', borderRadius:999 }}>{STATUS_LABELS[order.status]}</div>
-                  {/* Always available, like Print Help Slip on help requests. A jammed
-                      slip needs reprinting, and a supervisor may want to check what a
-                      table received earlier in the evening. */}
-                  {(<button onClick={()=>printKOT(order)} style={{ background:'var(--bg)', border:'1px solid var(--line)', borderRadius:8, padding:'4px 10px', fontSize:12, fontWeight:600, color:'var(--ink2)' }}>🖨 Print KOT</button>)}
-                </div>
+                )}
               </div>
-              <div style={{ borderTop:'1px solid var(--line)', paddingTop:10, marginBottom:12 }}>
-                {order.order_items?.map((oi,i)=>(<div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'4px 0', fontSize:14 }}>
-                  <span style={{ fontWeight:600 }}>{oi.menu_items?.name}{oi.menu_items?.is_live_counter&&<span style={{ fontSize:11, color:'#D97706' }}> Live</span>}</span>
-                  <span style={{ fontWeight:800, color:'var(--ink2)' }}>x{oi.quantity}</span>
-                </div>))}
-              </div>
-              {['pending','placed'].includes(order.status)&&(
-                <div>
-                  <div style={{ fontSize:12, fontWeight:700, color:'var(--ink2)', marginBottom:6 }}>Assign Waiter {availableWaiters.length===0&&waiters.length>0?<span style={{ color:'#DC2626' }}>— All busy</span>:''}</div>
-                  <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:10 }}>
-                    {availableWaiters.map((w,idx)=>(<button key={w.id} onClick={()=>assignWaiter(order.id,w.id)} disabled={assigning===order.id}
-                      style={{ background:idx===0?'#16A34A':'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer', position:'relative' }}>
-                      {idx===0&&<span style={{ position:'absolute', top:-8, left:'50%', transform:'translateX(-50%)', background:'#E8890C', color:'#fff', fontSize:9, fontWeight:800, padding:'1px 6px', borderRadius:999, whiteSpace:'nowrap' }}>Suggested</span>}
-                      {assigning===order.id?'...':w.name}
-                    </button>))}
-                    <button onClick={()=>assignWaiter(order.id,null)} disabled={assigning===order.id}
-                      style={{ background:'#F0F0F0', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:600, cursor:'pointer' }}>No Waiter</button>
-                  </div>
-                </div>
-              )}
-              <div style={{ display:'flex', gap:8 }}>
-                {order.status==='in_progress'&&(<button onClick={()=>markDelivered(order)} style={{ flex:1, background:'#16A34A', color:'#fff', border:'none', borderRadius:12, padding:'12px 8px', fontSize:14, fontWeight:800 }}>✓ Mark Delivered</button>)}
-                {['pending','placed'].includes(order.status)&&(<button onClick={()=>cancelOrder(order.id)} style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#DC2626', borderRadius:12, padding:'12px 14px', fontSize:13, fontWeight:700 }}>Cancel</button>)}
-              </div>
-            </div>
-          ) })}
+            )
+          })}
+          </div>
+          ))}
+          </div>
         </>
       )}
       {/* Cancel reason dialog */}
