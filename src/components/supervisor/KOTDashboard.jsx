@@ -569,9 +569,6 @@ ${(order.order_items||[]).map(i => `
                        : { bg:'#FFF7ED', fg:'#C2410C', bar:'#E8890C' }
 
             const lines_ = isSos ? (rec.sos_request_items || []) : (rec.order_items || [])
-            const summary = isSos
-              ? lines_.map(li => li.item_name).join(', ')
-              : lines_.map(li => li.menu_items?.name).filter(Boolean).join(', ')
             const count = isSos ? lines_.length
               : lines_.reduce((n, li) => n + (li.quantity || 1), 0)
             const waiterName = rec.waiters?.name || (waiters.find(w => w.id === rec.waiter_id)?.name) || ''
@@ -621,8 +618,12 @@ ${(order.order_items||[]).map(i => `
                     background:tone.bg, color:tone.fg, minWidth:58, textAlign:'center', flexShrink:0 }}>
                     {isSos ? 'HELP' : count + (count === 1 ? ' item' : ' items')}
                   </span>
-                  <span style={{ flex:1, minWidth:0, fontSize:13, color:'var(--ink2)',
-                    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{summary}</span>
+                  {/* Dish names are deliberately NOT on the collapsed row. What
+                      gets scanned here is table, time, count, timer and who is on
+                      it. The names are listed in full with quantities once the row
+                      is open. This space is left free so the timer and the action
+                      buttons are not crushed against a wall of text. */}
+                  <span style={{ flex:1, minWidth:0 }} />
                   <span style={{ flexShrink:0, background:timerTone.bg, color:timerTone.fg,
                     borderRadius:999, padding:'2px 9px', fontSize:11, fontWeight:800,
                     fontVariantNumeric:'tabular-nums', minWidth:46, textAlign:'center' }}>

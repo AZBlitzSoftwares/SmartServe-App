@@ -277,19 +277,28 @@ export function WaiterList({ eventId, embedded = false }) {
               </div>
 
               <div style={{ display:'flex', gap:5 }}>
+                {/* 60 / 40. A number is 12 characters plus the handset sign, so
+                    40% covers it with room to spare; everything left over goes to
+                    the name, which is the field that varies in length. Both sides
+                    use flex-basis 0 so the ratio holds at any card width, and the
+                    empty state uses the same split so the row does not jump when a
+                    number is saved. */}
                 <input defaultValue={bare(w)} disabled={busy} placeholder="Name"
                   onBlur={e => { if (e.target.value.trim() !== bare(w)) patch(w, 'name', e.target.value) }}
-                  style={{ ...fld, flex:1, minWidth:0, fontSize:11, padding:'3px 6px' }} />
+                  style={{ ...fld, flex:'6 1 0', minWidth:0, fontSize:11, padding:'3px 6px' }} />
                 {w.mobile ? (
                   <a href={'tel:' + w.mobile} title={'Call ' + w.mobile}
-                    style={{ flexShrink:0, background:'#DCFCE7', border:'1px solid #86EFAC',
-                      color:'#15803D', borderRadius:6, padding:'3px 9px', fontSize:10,
-                      fontWeight:800, textDecoration:'none', whiteSpace:'nowrap',
-                      display:'flex', alignItems:'center' }}>Call</a>
+                    style={{ flex:'4 1 0', minWidth:0, background:'#DCFCE7',
+                      border:'1px solid #86EFAC', color:'#15803D', borderRadius:6,
+                      padding:'3px 6px', fontSize:10, fontWeight:800, textDecoration:'none',
+                      whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+                      textAlign:'center', display:'block', lineHeight:'16px' }}>
+                    ☎ {w.mobile}
+                  </a>
                 ) : (
                   <input defaultValue="" placeholder="Mobile" type="tel" disabled={busy}
                     onBlur={e => { if (e.target.value.trim()) patch(w, 'mobile', e.target.value) }}
-                    style={{ ...fld, width:78, fontSize:11, padding:'3px 6px' }} />
+                    style={{ ...fld, flex:'4 1 0', minWidth:0, fontSize:11, padding:'3px 6px' }} />
                 )}
               </div>
             </div>
