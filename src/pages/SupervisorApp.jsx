@@ -109,15 +109,29 @@ export default function SupervisorApp() {
     // Only auto-select event on first load — never override manual selection
     if (!isFirstLoad || eventManuallySet.current) return
 
-    if (currentUser?.role === 'supervisor' && currentUser?.assignedEvent) {
-      setEventData(currentUser.assignedEvent)
-      eventManuallySet.current = true
-    } else {
-      // Admin: auto-select today's active event on first load only
-      const todayActive = evs.find(e => eventStatus(e.date) === 'active')
-      if (todayActive) { setEventData(todayActive); eventManuallySet.current = true }
-      else if (evs.length) { setEventData(evs[0]); eventManuallySet.current = true }
+    // A supervisor is pinned to their own event and never falls through to
+    // the admin branch. That fall-through was the bug: assignedEvent was
+    // never set, so every supervisor silently landed on the newest event
+    // on the system instead of their own.
+    if (currentUser?.role === 'supervisor') {
+      const assigned = currentUser.assignedEvent
+        || evs.find(e => e.id === currentUser.event_id)
+        || null
+      if (assigned) {
+        setEventData(assigned)
+        eventManuallySet.current = true
+      } else {
+        // Better a clear dead end than someone else's event, where every
+        // order they touch belongs to the wrong function.
+        alert('Your assigned event could not be found.\n\nAsk the admin to check your account before the event starts.')
+      }
+      return
     }
+
+    // Admin: today's active event on first load, otherwise the newest
+    const todayActive = evs.find(e => eventStatus(e.date) === 'active')
+    if (todayActive) { setEventData(todayActive); eventManuallySet.current = true }
+    else if (evs.length) { setEventData(evs[0]); eventManuallySet.current = true }
   }
 
   if (!authed) return <SupervisorLogin onLogin={(user) => { setCurrentUser(user); setAuthed(true) }} />
@@ -131,12 +145,12 @@ export default function SupervisorApp() {
     { id:'feedback', label:'Feedback', emoji:'⭐', badge:0 },
     // Supervisors get table release here rather than through Events,
     // which would also expose every other event and staff deletion.
-    { id:'tables',  label:'Staff',    emoji:'👥', badge:0 },
+    { id:'tables',  label:'Control',  emoji:'🎛️', badge:0 },
     ...(isAdmin ? [{ id:'events', label:'Events', emoji:'📅', badge:0 }] : []),
   ]
 
   return (
-    <div style={{ minHeight:'100vh', background:'var(--bg)', paddingBottom:80 }}>
+    <div style={{ minHeight:'100vh', background:'var(--bg)', paddingBottom:24 }}>
 
       {/* ── FLOATING ORDER ALERT ── */}
       {newOrderAlert && (
@@ -273,26 +287,42 @@ export default function SupervisorApp() {
         </div>
       )}
 
+      {/* ── TOP TABS ── */}
+      {/* Plain flow. This was sticky and was being ignored - some ancestor has
+          overflow set, which switches sticky off with no error - and a bar
+          that only sometimes pins is worse than one that never does. The
+          orders screen holds its own controls in place by measuring instead. */}
+      <div style={{ background:'var(--ink)', display:'flex', overflowX:'auto',
+        boxShadow:'0 2px 10px rgba(0,0,0,0.18)' }}>
+        {TABS.map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            style={{ flex:'1 1 0', minWidth:78, padding:'9px 6px 8px', background:'none',
+              border:'none', cursor:'pointer', position:'relative',
+              display:'flex', alignItems:'center', justifyContent:'center', gap:6,
+              borderBottom: activeTab===tab.id ? '3px solid #E8890C' : '3px solid transparent' }}>
+            <span style={{ fontSize:15 }}>{tab.emoji}</span>
+            <span style={{ fontSize:12, whiteSpace:'nowrap',
+              fontWeight: activeTab===tab.id ? 800 : 500,
+              color: activeTab===tab.id ? '#fff' : 'rgba(255,255,255,0.55)' }}>{tab.label}</span>
+            {tab.badge>0 && (
+              <span style={{ background:'#DC2626', color:'#fff', fontSize:10, fontWeight:800,
+                borderRadius:999, minWidth:17, height:17, display:'inline-flex',
+                alignItems:'center', justifyContent:'center', padding:'0 4px' }}>{tab.badge}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
       {/* ── CONTENT ── */}
       <div style={{ padding:'16px' }}>
         {activeTab==='kot'     && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={(order) => { setNewOrderAlert(order); setOrderCount(c=>c+1) }} />}
         {activeTab==='menu'    && <MenuManager eventData={eventData} />}
         {activeTab==='reports' && <ReportsDashboard eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='feedback' && <FeedbackReport eventData={eventData} />}
-        {activeTab==='tables'  && <TableManager eventData={eventData} />}
+        {activeTab==='tables'  && <TableManager eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='events'  && <EventManager onEventChange={(ev) => { setEventData(ev); loadEvents() }} />}
       </div>
 
-      {/* ── BOTTOM TABS ── */}
-      <div style={{ position:'fixed', bottom:0, left:0, right:0, background:'#fff', borderTop:'1px solid var(--line)', display:'flex', zIndex:50 }}>
-        {TABS.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ flex:1, padding:'10px 4px', background:'none', border:'none', display:'flex', flexDirection:'column', alignItems:'center', gap:2, cursor:'pointer', borderTop:activeTab===tab.id?'3px solid var(--ink)':'3px solid transparent', position:'relative' }}>
-            <span style={{ fontSize:20 }}>{tab.emoji}</span>
-            <span style={{ fontSize:10, fontWeight:activeTab===tab.id?800:500, color:activeTab===tab.id?'var(--ink)':'#999' }}>{tab.label}</span>
-            {tab.badge>0 && <div style={{ position:'absolute', top:6, right:'18%', background:'#DC2626', color:'#fff', fontSize:9, fontWeight:800, borderRadius:999, minWidth:15, height:15, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 3px' }}>{tab.badge}</div>}
-          </button>
-        ))}
-      </div>
     </div>
   )
 }

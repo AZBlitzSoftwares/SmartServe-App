@@ -8,6 +8,8 @@ export default function SupervisorLogin({ onLogin }) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showPass, setShowPass] = useState(false)
+  // Populated only when one name and PIN match several events
+  const [choices, setChoices] = useState(null)
 
   async function handleLogin() {
     if (!username.trim() || !password.trim()) { setError('Please enter username and password'); return }
@@ -22,10 +24,42 @@ export default function SupervisorLogin({ onLogin }) {
       // Admin fallback
       if (u === 'admin' && p === '1234') { onLogin({ name:'Admin', role:'admin', id:'demo' }); return }
 
-      // Check supervisors — match by name (case-insensitive) and pin
+      // Check supervisors — match by name (case-insensitive) and pin.
+      // Every match is kept, not just the first: the same name and PIN
+      // legitimately exist on several events, and picking one silently is
+      // how a supervisor ends up working somebody else's function.
       const { data: sups } = await supabase.from('supervisors').select('*').eq('pin', p).eq('is_active', true)
-      const sup = sups?.find(s => s.name.toLowerCase() === u.toLowerCase())
-      if (sup) { onLogin({ ...sup, role:'supervisor' }); return }
+      const matches = (sups || []).filter(s => (s.name || '').toLowerCase() === u.toLowerCase())
+
+      if (matches.length) {
+        const ids = matches.map(m => m.event_id).filter(Boolean)
+        const { data: evs } = ids.length
+          ? await supabase.from('events').select('*').in('id', ids)
+          : { data: [] }
+        const byId = {}
+        ;(evs || []).forEach(e => { byId[e.id] = e })
+
+        // Today first, then the nearest upcoming, then the most recent past.
+        const today = new Date(); today.setHours(0,0,0,0)
+        const rank = ev => {
+          if (!ev?.date) return 1e9
+          const d = new Date(ev.date); d.setHours(0,0,0,0)
+          const days = Math.round((d - today) / 86400000)
+          return days === 0 ? 0 : days > 0 ? days : 1000 - days
+        }
+        const opts = matches
+          .map(m => ({ sup:m, event: byId[m.event_id] || null }))
+          .sort((a, b) => rank(a.event) - rank(b.event))
+
+        if (opts.length === 1) {
+          const only = opts[0]
+          if (!only.event) { setError('Your event could not be found. Ask the admin to check your account.'); return }
+          onLogin({ ...only.sup, role:'supervisor', assignedEvent: only.event })
+          return
+        }
+        setChoices(opts)
+        return
+      }
 
       setError('Incorrect username or password.')
     } catch(e) {
@@ -33,6 +67,43 @@ export default function SupervisorLogin({ onLogin }) {
       setError('Connection error. Try again.')
     } finally { setLoading(false) }
   }
+
+  // Shown only when a name and PIN belong to more than one event. Rare, but
+  // silently choosing here is worse than one extra tap.
+  if (choices) return (
+    <div style={{ minHeight:'100vh', background:'linear-gradient(160deg,#2A1B2E 0%,#4A2340 50%,#8E2A5C 100%)',
+      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24 }}>
+      <h1 style={{ color:'#fff', fontSize:22, fontWeight:800, marginBottom:6 }}>Which event?</h1>
+      <p style={{ color:'rgba(255,255,255,0.6)', fontSize:14, marginBottom:28, textAlign:'center' }}>
+        This login is on more than one event.
+      </p>
+      <div style={{ width:'100%', maxWidth:380 }}>
+        {choices.map((o, i) => {
+          const d = o.event?.date ? new Date(o.event.date) : null
+          const today = new Date(); today.setHours(0,0,0,0)
+          const isToday = d && d.setHours(0,0,0,0) === today.getTime()
+          return (
+            <button key={i} onClick={() => onLogin({ ...o.sup, role:'supervisor', assignedEvent:o.event })}
+              disabled={!o.event}
+              style={{ width:'100%', textAlign:'left', background:'rgba(255,255,255,0.08)',
+                border:'1px solid rgba(255,255,255,0.2)', borderRadius:14, padding:'14px 16px',
+                marginBottom:10, cursor:o.event?'pointer':'not-allowed', color:'#fff' }}>
+              <div style={{ fontSize:15, fontWeight:800 }}>
+                {o.event?.name || 'Event not found'}
+                {isToday && <span style={{ color:'#4ADE80', fontSize:11, fontWeight:800, marginLeft:8 }}>TODAY</span>}
+              </div>
+              <div style={{ fontSize:12, color:'rgba(255,255,255,0.6)', marginTop:3 }}>
+                {o.event?.date || '—'}{o.event?.venue ? ' · ' + o.event.venue : ''}
+              </div>
+            </button>
+          )
+        })}
+        <button onClick={() => { setChoices(null); setPassword('') }}
+          style={{ width:'100%', background:'none', border:'none', color:'rgba(255,255,255,0.5)',
+            fontSize:13, padding:'10px', cursor:'pointer' }}>← Back to sign in</button>
+      </div>
+    </div>
+  )
 
   return (
     <div style={{ minHeight:'100vh', background:'linear-gradient(160deg,#2A1B2E 0%,#4A2340 50%,#8E2A5C 100%)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24 }}>

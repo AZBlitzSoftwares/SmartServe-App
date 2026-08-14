@@ -162,7 +162,22 @@ export function WaiterList({ eventId, embedded = false }) {
     if (!eventId) return
     const { data } = await supabase.from('waiters')
       .select('*').eq('event_id', eventId).eq('is_active', true).order('waiter_number')
-    setRows(data || [])
+
+    // waiter_number is text, so the database sorts it as text: 07, 1, 10 ...
+    // 19, 20, 8, 9 - which buried waiters 8 and 9 after 20. Re-sorted here by
+    // the leading digits, falling back to text for anything that is not a
+    // number, so "01" and "1" sit together and a label like "W3" still lands
+    // somewhere sensible.
+    const num = w => {
+      const m = String(w.waiter_number || '').match(/\d+/)
+      return m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER
+    }
+    const sorted = [...(data || [])].sort((a, b) => {
+      const d = num(a) - num(b)
+      if (d !== 0) return d
+      return String(a.waiter_number || '').localeCompare(String(b.waiter_number || ''))
+    })
+    setRows(sorted)
 
     // Orders and help requests both make a waiter busy
     const [{ data: o }, { data: sr }] = await Promise.all([
@@ -198,6 +213,16 @@ export function WaiterList({ eventId, embedded = false }) {
   }
 
   async function removeOne(w) {
+    // A waiter mid-delivery cannot be removed. Doing so left the order on
+    // the board with nobody against it, and the supervisor had no way back
+    // to it - so the guard names the table to clear rather than refusing
+    // without explanation.
+    const onTable = busyMap[w.id]
+    if (onTable !== undefined) {
+      alert((w.waiter_number || w.name) + ' is on a delivery to table ' + onTable + '.\n\n' +
+        'Mark that order delivered, or reassign it to another waiter, then remove them.')
+      return
+    }
     if (!window.confirm('Remove waiter ' + (w.waiter_number || w.name) + '?')) return
     setBusy(true)
     // Soft delete, so delivered orders keep the name in the reports
@@ -225,11 +250,21 @@ export function WaiterList({ eventId, embedded = false }) {
   return (
     <>
       <style>{`
-        /* Three across on a laptop, dropping to two then one rather than
-           squeezing three into a phone width. */
-        .ss-wgrid { display:grid; gap:6px; grid-template-columns:repeat(3, minmax(0,1fr)); }
-        @media (max-width: 900px) { .ss-wgrid { grid-template-columns:repeat(2, minmax(0,1fr)); } }
-        @media (max-width: 560px) { .ss-wgrid { grid-template-columns:1fr; } }
+        /* CSS columns, not grid. Grid fills left to right, which put 01, 02,
+           03 across the top and made finding waiter 14 a zigzag scan. Columns
+           fill downwards - 1-7, then 8-14, then 15-21 - which is how a
+           numbered list is read.
+
+           Splitting the array in JavaScript would do the same, but then the
+           column count has to be counted out in code and kept in step with
+           the breakpoints. This way the browser does it. */
+        .ss-wgrid { column-count:3; column-gap:6px; }
+        .ss-wgrid > div {
+          break-inside:avoid; -webkit-column-break-inside:avoid; page-break-inside:avoid;
+          margin-bottom:6px;
+        }
+        @media (max-width: 900px) { .ss-wgrid { column-count:2; } }
+        @media (max-width: 560px) { .ss-wgrid { column-count:1; } }
       `}</style>
 
       {/* Same three-card shape as the Tables view, so the two read as one screen */}
@@ -325,7 +360,7 @@ export function WaiterList({ eventId, embedded = false }) {
   )
 }
 
-function HelpItemsEditor({ eventId }) {
+export function HelpItemsEditor({ eventId }) {
   const [items, setItems] = useState([])
   const [isCustom, setIsCustom] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -407,26 +442,22 @@ function HelpItemsEditor({ eventId }) {
 
   return (
     <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
-      {/* Collapsed by default - this list is long and is rarely changed,
-          so it should not push the rest of the event settings down. */}
-      <button onClick={() => setOpen(!open)}
-        style={{ width:'100%', background:'none', border:'none', padding:0, cursor:'pointer',
-          display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+      {/* Always open. It was collapsed when it lived inside a long admin
+          event form and had other sections to avoid pushing down. On its
+          own tab there is nothing below it, and a tab that opens to one
+          closed row reads as broken. */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
         <span style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', textTransform:'uppercase' }}>
           🔔 Help Items
         </span>
-        <span style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <span style={{ fontSize:11, fontWeight:700, borderRadius:999, padding:'3px 10px',
-            background: isCustom ? '#DCFCE7' : '#F3F4F6',
-            color: isCustom ? '#15803D' : '#6B7280' }}>
-            {items.length} item{items.length === 1 ? '' : 's'} · {isCustom ? 'custom' : 'default list'}
-          </span>
-          <span style={{ fontSize:13, color:'#888', transform: open ? 'rotate(180deg)' : 'none',
-            transition:'transform 0.15s', display:'inline-block' }}>▼</span>
+        <span style={{ fontSize:11, fontWeight:700, borderRadius:999, padding:'3px 10px',
+          background: isCustom ? '#DCFCE7' : '#F3F4F6',
+          color: isCustom ? '#15803D' : '#6B7280' }}>
+          {items.length} item{items.length === 1 ? '' : 's'} · {isCustom ? 'custom' : 'default list'}
         </span>
-      </button>
+      </div>
 
-      {!open ? null : (
+      {true && (
       <div style={{ marginTop:12 }}>
 
       {!isCustom && (
@@ -590,7 +621,9 @@ export default function EventManager({ onEventChange }) {
   const [newEvent, setNewEvent] = useState({
     name:'', date:'', venue:'', number_of_tables:'',
     catering_company:'', catering_logo_url:'', welcome_note:'', banner_image_url:'', max_orders_per_table:1,
-    video_url:'', call_waiter_enabled:true
+    video_url:'', call_waiter_enabled:true,
+    // An event with no supervisor cannot be worked, so one is created with it
+    sup_name:'', sup_pin:'', sup_mobile:''
   })
   const [createStep, setCreateStep] = useState(1) // 1=basic, 2=config, 3=branding
   const [newLogoFile, setNewLogoFile] = useState(null)
@@ -680,7 +713,7 @@ export default function EventManager({ onEventChange }) {
   }
 
   function resetCreate() {
-    setNewEvent({ name:'', date:'', venue:'', number_of_tables:'', catering_company:'', catering_logo_url:'', welcome_note:'', banner_image_url:'', max_orders_per_table:1, video_url:'', call_waiter_enabled:true })
+    setNewEvent({ name:'', date:'', venue:'', number_of_tables:'', catering_company:'', catering_logo_url:'', welcome_note:'', banner_image_url:'', max_orders_per_table:1, video_url:'', call_waiter_enabled:true, sup_name:'', sup_pin:'', sup_mobile:'' })
     setHelpTouched(false); setHelpOpen(false)
     setNewHelp(prev => prev.map(h => ({ ...h, include:true })))
     setCreateStep(1); setNewLogoFile(null); setNewLogoPreview(''); setNewVideoFile(null); setNewVideoMode('url')
@@ -706,6 +739,10 @@ export default function EventManager({ onEventChange }) {
 
   async function createEvent() {
     if (!newEvent.name||!newEvent.date) { alert('Event name and date are required'); return }
+    // Checked here rather than only on the step, so the event and its
+    // supervisor are never half created.
+    if (!newEvent.sup_name.trim()) { alert('A supervisor name is required. The supervisor is the only person who can work this event.'); return }
+    if (!/^\d{4}$/.test(newEvent.sup_pin.trim())) { alert('The supervisor PIN must be exactly 4 digits.'); return }
     // Check for duplicate event name
     const { data: existing } = await supabase.from('events').select('id').ilike('name', newEvent.name.trim()).limit(1)
     if (existing?.length) {
@@ -740,13 +777,20 @@ export default function EventManager({ onEventChange }) {
         is_closed: false, ai_enabled: false
       }).select().single()
 
-      // Help items, only when the default list was actually changed
-      if (ev && helpTouched) {
-        const rows = newHelp.filter(h => h.include).map((h, i) => ({
-          event_id: ev.id, name: h.name, has_quantity: h.has_quantity,
-          sort_order: i + 1, is_active: true
-        }))
-        if (rows.length) await supabase.from('help_items').insert(rows)
+      // Help items are no longer chosen here. Every event starts on the
+      // shared default list, and the supervisor adjusts it from
+      // Control > Help once they can see the room.
+
+      // The supervisor, written straight after the event. If this fails the
+      // admin is told plainly - an event nobody can log in to is worse than
+      // no event, and they need to add one from the Events screen.
+      if (ev) {
+        const { error: supErr } = await supabase.from('supervisors').insert({
+          event_id: ev.id, name: newEvent.sup_name.trim(), pin: newEvent.sup_pin.trim(),
+          mobile: newEvent.sup_mobile.trim() || null, is_active: true
+        })
+        if (supErr) alert('The event was created, but the supervisor could not be saved:\n\n' +
+          supErr.message + '\n\nAdd one from the Events screen before the event day.')
       }
 
       // Upload video if file selected
@@ -951,54 +995,39 @@ export default function EventManager({ onEventChange }) {
                   </button>
                 </div>
 
-                {/* Help items - collapsed, defaults preselected */}
+                {/* Supervisor. Required, because an event nobody can log in to
+                    is not an event. Help items used to sit here and have moved
+                    to Control > Help, where the person at the venue sets them. */}
                 <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
-                  <button type="button" onClick={()=>setHelpOpen(!helpOpen)}
-                    style={{ width:'100%', background:'none', border:'none', padding:0, cursor:'pointer',
-                      display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
-                    <span style={{ textAlign:'left' }}>
-                      <span style={{ display:'block', fontSize:14, fontWeight:700 }}>🔔 Help Items</span>
-                      <span style={{ display:'block', fontSize:12, color:'var(--ink2)', marginTop:2 }}>
-                        {helpTouched
-                          ? newHelp.filter(h=>h.include).length + ' items selected for this event'
-                          : 'Using the default list (' + newHelp.length + ' items)'}
-                      </span>
-                    </span>
-                    <span style={{ fontSize:13, color:'#888', flexShrink:0,
-                      transform: helpOpen ? 'rotate(180deg)' : 'none', transition:'transform 0.15s',
-                      display:'inline-block' }}>▼</span>
-                  </button>
-
-                  {helpOpen && (
-                    <div style={{ marginTop:10 }}>
-                      {newHelp.map((h, i) => (
-                        <div key={i} style={{ display:'flex', alignItems:'center', gap:8, background:'#fff',
-                          border:'1px solid var(--line)', borderRadius:10, padding:'7px 10px', marginBottom:6 }}>
-                          <button type="button"
-                            onClick={()=>{ setHelpTouched(true); setNewHelp(p=>p.map((x,j)=>j===i?{...x,include:!x.include}:x)) }}
-                            style={{ flexShrink:0, width:22, height:22, borderRadius:6, cursor:'pointer',
-                              border:'1.5px solid ' + (h.include ? '#16A34A' : '#D1D5DB'),
-                              background: h.include ? '#16A34A' : '#fff', color:'#fff',
-                              fontSize:13, fontWeight:900, lineHeight:1, padding:0 }}>
-                            {h.include ? '✓' : ''}
-                          </button>
-                          <span style={{ flex:1, minWidth:0, fontSize:13, fontWeight:700,
-                            color: h.include ? '#1A1A1A' : '#AAA' }}>{h.name}</span>
-                          <button type="button"
-                            onClick={()=>{ setHelpTouched(true); setNewHelp(p=>p.map((x,j)=>j===i?{...x,has_quantity:!x.has_quantity}:x)) }}
-                            style={{ flexShrink:0, background: h.has_quantity ? '#DCFCE7' : '#F3F4F6',
-                              border:'1px solid ' + (h.has_quantity ? '#86EFAC' : '#E5E7EB'),
-                              color: h.has_quantity ? '#15803D' : '#6B7280', borderRadius:999,
-                              padding:'4px 10px', fontSize:11, fontWeight:700, cursor:'pointer' }}>
-                            {h.has_quantity ? '± Qty' : 'Tap only'}
-                          </button>
-                        </div>
-                      ))}
-                      <div style={{ fontSize:11, color:'#888', marginTop:6, lineHeight:1.5 }}>
-                        More items can be added after the event is created.
-                      </div>
-                    </div>
-                  )}
+                  <div style={{ fontSize:14, fontWeight:700 }}>👤 Supervisor <span style={{ color:'#DC2626' }}>*</span></div>
+                  <div style={{ fontSize:12, color:'var(--ink2)', marginTop:2, marginBottom:10, lineHeight:1.5 }}>
+                    They log in with this name and PIN and run the event. More can be added later.
+                  </div>
+                  <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                    <input value={newEvent.sup_name}
+                      onChange={e=>setNewEvent(p=>({...p,sup_name:e.target.value}))}
+                      placeholder="Name e.g. Rahul"
+                      style={{ flex:'2 1 140px', minWidth:0, border:'1.5px solid var(--line)',
+                        borderRadius:8, padding:'9px 11px', fontSize:13, fontFamily:'Manrope',
+                        outline:'none', background:'#fff', boxSizing:'border-box' }} />
+                    <input value={newEvent.sup_pin} inputMode="numeric" maxLength={4}
+                      onChange={e=>setNewEvent(p=>({...p,sup_pin:e.target.value.replace(/\D/g,'').slice(0,4)}))}
+                      placeholder="4-digit PIN"
+                      style={{ flex:'1 1 100px', minWidth:0, border:'1.5px solid var(--line)',
+                        borderRadius:8, padding:'9px 11px', fontSize:13, fontFamily:'Manrope',
+                        outline:'none', background:'#fff', boxSizing:'border-box',
+                        letterSpacing:'2px' }} />
+                    <input value={newEvent.sup_mobile}
+                      onChange={e=>setNewEvent(p=>({...p,sup_mobile:e.target.value}))}
+                      placeholder="Mobile (optional)"
+                      style={{ flex:'1 1 130px', minWidth:0, border:'1.5px solid var(--line)',
+                        borderRadius:8, padding:'9px 11px', fontSize:13, fontFamily:'Manrope',
+                        outline:'none', background:'#fff', boxSizing:'border-box' }} />
+                  </div>
+                  <div style={{ fontSize:11, color:'#888', marginTop:8, lineHeight:1.5 }}>
+                    Share the PIN privately. Guest requests (Help items) are now set by the
+                    supervisor under Control › Help.
+                  </div>
                 </div>
 
                 <div style={{ display:'flex', gap:10 }}>
@@ -1346,8 +1375,9 @@ export default function EventManager({ onEventChange }) {
               {/* Which tablet holds which table */}
               <TableClaims eventId={ev.id} tableCount={ev.number_of_tables} />
 
-              {/* Help items — what guests can ask for from the Help panel */}
-              <HelpItemsEditor eventId={ev.id} />
+              {/* Help items moved to Control › Help. The supervisor at the venue
+                  knows which requests that room needs; an admin filling a form
+                  days earlier does not. */}
 
               {/* Genie video sound, per event */}
               <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12,

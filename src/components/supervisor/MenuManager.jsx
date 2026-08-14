@@ -6,6 +6,7 @@ export default function MenuManager({ eventData }) {
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [activeCategory, setActiveCategory] = useState('all')
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [showAddCat, setShowAddCat] = useState(false)
@@ -50,9 +51,19 @@ export default function MenuManager({ eventData }) {
     loadMenu()
   }
 
+  // Updated in place rather than through loadMenu(). A reload flips the
+  // loading flag, tears the list down and drops the supervisor back at the
+  // top - which made hiding six sold-out dishes six scroll journeys. The row
+  // flips immediately and reverts if the write fails.
   async function toggleAvailability(item) {
-    await supabase.from('menu_items').update({ is_available:!item.is_available }).eq('id', item.id)
-    loadMenu()
+    const next = !item.is_available
+    setItems(prev => prev.map(i => i.id === item.id ? { ...i, is_available:next } : i))
+    const { error } = await supabase.from('menu_items')
+      .update({ is_available:next }).eq('id', item.id)
+    if (error) {
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, is_available:!next } : i))
+      alert('Could not update ' + item.name + '. Check the connection and try again.')
+    }
   }
 
   async function saveItem() {
@@ -226,7 +237,14 @@ export default function MenuManager({ eventData }) {
     setActiveCategory(null); loadMenu()
   }
 
-  const filtered = activeCategory === 'all' ? items : items.filter(i => i.category_id === activeCategory)
+  // Category and search stack, so a supervisor can narrow to Starters and
+  // then type. Description is searched too - dishes are often remembered by
+  // an ingredient rather than by their menu name.
+  const byCategory = activeCategory === 'all' ? items : items.filter(i => i.category_id === activeCategory)
+  const q = search.trim().toLowerCase()
+  const filtered = !q ? byCategory : byCategory.filter(i =>
+    (i.name || '').toLowerCase().includes(q) ||
+    (i.description || '').toLowerCase().includes(q))
   const INP = { width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:14, marginBottom:10, fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }
 
   return (
@@ -291,6 +309,30 @@ export default function MenuManager({ eventData }) {
               {sg} only
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Search. Sits above the tabs because it narrows whatever the tabs
+          have already selected, and it is the first thing reached for on a
+          200 dish menu. */}
+      <div style={{ position:'relative', marginBottom:10 }}>
+        <input value={search} onChange={e=>setSearch(e.target.value)}
+          placeholder="Search dishes…"
+          style={{ width:'100%', boxSizing:'border-box', padding:'11px 38px 11px 38px',
+            fontSize:14, borderRadius:12, border:'1.5px solid var(--line)',
+            background:'#fff', outline:'none' }} />
+        <span style={{ position:'absolute', left:13, top:'50%', transform:'translateY(-50%)',
+          fontSize:15, opacity:0.5, pointerEvents:'none' }}>🔍</span>
+        {search && (
+          <button onClick={()=>setSearch('')} title="Clear search"
+            style={{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)',
+              background:'var(--line)', border:'none', borderRadius:999, width:22, height:22,
+              fontSize:12, lineHeight:'22px', color:'var(--ink2)', cursor:'pointer', padding:0 }}>✕</button>
+        )}
+      </div>
+      {search && (
+        <div style={{ fontSize:12, color:'var(--ink2)', marginBottom:10 }}>
+          {filtered.length} {filtered.length === 1 ? 'dish' : 'dishes'} matching “{search}”
         </div>
       )}
 

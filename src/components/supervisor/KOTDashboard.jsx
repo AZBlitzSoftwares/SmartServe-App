@@ -31,6 +31,47 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const prevCount = useRef(-1)
   const audioEnabled = useRef(false)
 
+  /* The order list gets a measured height so it scrolls inside itself and
+     the controls above it stay put.
+
+     Measured rather than hard-coded because the waiter strip wraps to two or
+     three lines as waiters are added - any fixed figure is wrong the moment
+     the team grows. Sticky was tried first and failed silently: an ancestor
+     with overflow set switches it off with no error at all.
+
+     Placed here, below every piece of state it reads. Higher up it threw
+     "Cannot access 'waiterFilter' before initialization" - a const cannot be
+     read before its own declaration line has run. */
+  const listRef = useRef(null)
+  const [listHeight, setListHeight] = useState(null)
+
+  useEffect(() => {
+    function measure() {
+      const el = listRef.current
+      if (!el) return
+      const top = el.getBoundingClientRect().top
+      // 28 covers the 24px of bottom padding the page wrapper adds under this
+      // list, plus a little slack. Without it the page ends up ~24px taller
+      // than the screen and gets its own scrollbar behind the list - which is
+      // how the header ended up scrolled half out of view on an empty board.
+      // getBoundingClientRect().top is viewport-relative, so this stays
+      // correct whatever the page scroll happens to be when it measures.
+      const h = window.innerHeight - top - 28
+      // Below this the list is too short to be worth capping, and on a small
+      // screen a whole-page scroll reads better than a cramped inner one.
+      setListHeight(h > 240 ? h : null)
+    }
+    measure()
+    const t = setTimeout(measure, 150) // after fonts and images settle
+    window.addEventListener('resize', measure)
+    window.addEventListener('orientationchange', measure)
+    return () => {
+      clearTimeout(t)
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('orientationchange', measure)
+    }
+  }, [waiters.length, waiterFilter, tableFilter, filter, loading])
+
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
 
   useEffect(() => {
@@ -471,6 +512,13 @@ ${(order.order_items||[]).map(i => `
 
   return (
     <div>
+      {/* Frozen block. Heading, waiter strip and filters hold at the top of
+          the screen while the orders scroll beneath - a supervisor twenty
+          orders down could not otherwise see who was free or reach a filter.
+          top is the tab bar's height; the negative margins and matching
+          padding let the background run edge to edge through the 16px page
+          padding, so rows do not show through at the sides as they pass. */}
+      <div style={{ background:'var(--bg)' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
         <h2 style={{ fontSize:20, fontWeight:800, display:'flex', alignItems:'baseline', gap:8 }}>
           Live Orders
@@ -521,12 +569,19 @@ ${(order.order_items||[]).map(i => `
         </div>
       )}
 
-      <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+      <div style={{ display:'flex', gap:8, paddingBottom:14 }}>
         {[['active','Active'],['delivered','Delivered'],['cancelled','Cancelled'],['all','All']].map(([val,label]) => (
           <button key={val} onClick={()=>setFilter(val)} style={{ flex:1, padding:'8px 4px', background:filter===val?'var(--ink)':'#fff', color:filter===val?'#fff':'var(--ink)', border:'1.5px solid', borderColor:filter===val?'var(--ink)':'var(--line)', borderRadius:10, fontSize:13, fontWeight:700 }}>{label}</button>
         ))}
       </div>
+      </div>
+      {/* end frozen block */}
 
+      {/* Everything below this line scrolls; everything above it does not.
+          overflowY auto rather than scroll so no empty scrollbar shows when
+          there are only three orders on the board. */}
+      <div ref={listRef} style={{ height: listHeight ? listHeight + 'px' : 'auto',
+        overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch' }}>
       {loading ? <div style={{ textAlign:'center', padding:60, color:'var(--ink2)' }}>Loading...</div> : (
         <>
           {timeline.length === 0 && (
@@ -766,6 +821,9 @@ ${(order.order_items||[]).map(i => `
           </div>
         </>
       )}
+      </div>
+      {/* end scrolling list */}
+
       {/* Cancel reason dialog */}
       {showCancelDialog && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 16px' }}>

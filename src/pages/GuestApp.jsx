@@ -13,7 +13,6 @@ import OrderHistory from '../components/guest/OrderHistory'
 import FeedbackModal from '../components/guest/FeedbackModal'
 import ExitGate from '../components/guest/ExitGate'
 
-const FEEDBACK_DELAY_MS = 5000
 
 // Two back presses within this window on the Welcome screen open the exit dialog.
 const EXIT_DOUBLE_PRESS_MS = 3000
@@ -49,7 +48,6 @@ export default function GuestApp() {
   const menuSheetRef     = useRef(false)
   const activeOrdersRef  = useRef([])
   const showExitGateRef  = useRef(false)
-  const feedbackTimerRef = useRef(null)
 
   // Back-button machinery
   const allowExitRef    = useRef(false) // true only after a valid exit PIN
@@ -288,12 +286,9 @@ export default function GuestApp() {
       .on('postgres_changes', { event:'UPDATE', schema:'public', table:'orders' }, p => {
         if (p.new.table_id !== tableData.id) return
         loadActiveOrders()
-        if (p.new.status === 'delivered') {
-          if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current)
-          feedbackTimerRef.current = setTimeout(() => {
-            setFeedbackOrderId(p.new.id); setShowFeedback(true)
-          }, FEEDBACK_DELAY_MS)
-        }
+        // Deliberately nothing on 'delivered'. The feedback form used to be
+        // pushed onto the screen five seconds after delivery, which caught
+        // guests mid-meal. It now opens only from the Feedback button.
       }).subscribe()
     const poll = setInterval(loadActiveOrders, 8000)
     return () => { supabase.removeChannel(sub); clearInterval(poll) }
