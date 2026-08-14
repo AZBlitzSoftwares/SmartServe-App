@@ -50,14 +50,10 @@ function FacePicker({ onSelect, onClose }) {
   )
 }
 
-// Flash animation for Skip button
-const skipFlashStyle = `
-  @keyframes skipFlash {
-    0%, 100% { background: transparent; border-color: #D1D5DB; color: #9CA3AF; }
-    50% { background: #1A0A0A; border-color: #E8890C; color: #E8890C; }
-  }
-  .skip-flash { animation: skipFlash 2s ease-in-out infinite; }
-`
+// Skip and Submit now use .ss-cta-2 and .ss-cta from index.css, the same
+// pair as View Cart and Order Now. Skip used to flash grey-to-black, which
+// pulled the eye towards leaving without answering - the opposite of what
+// this screen is for.
 
 function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDone }) {
   // When opened straight from the header button there is no face yet, so
@@ -173,20 +169,23 @@ function DetailedForm({ sentiment, orderId, tableData, eventData, onClose, onDon
               style={{ width:'100%', border:'1.5px solid #ddd', borderRadius:10, padding:'10px 14px', fontSize:14, fontFamily:'Manrope', outline:'none', resize:'none', height:52, boxSizing:'border-box' }} />
           </div>
         </div>
-        <div style={{ padding:'10px 24px calc(14px + env(safe-area-inset-bottom))', flexShrink:0, borderTop:'1px solid #F0F0F0', display:'flex', gap:10 }}>
-          <style>{skipFlashStyle}</style>
-          {/* Skip — flashes between grey and amber to attract attention */}
-          <button onClick={onClose} className="skip-flash"
-            style={{ flex:1, border:'2px solid #D1D5DB',
-              borderRadius:14, padding:'15px', fontSize:14, fontWeight:700,
-              cursor:'pointer', letterSpacing:'0.3px', transition:'all 0.3s' }}>
+        {/* Same shape as the cart bar on the menu: neither button stretches,
+            one sits left, the other is pushed right by marginLeft auto. flex
+            1 and 2 made Submit grow with the screen, which on a landscape
+            tablet turned it into a bar wider than anything else in the app. */}
+        <div style={{ padding:'12px 16px calc(12px + env(safe-area-inset-bottom))',
+          flexShrink:0, borderTop:'1px solid #ECECEC',
+          display:'flex', alignItems:'center', gap:12, boxSizing:'border-box' }}>
+          {/* Secondary, sized like View Cart */}
+          <button onClick={onClose} className="ss-cta-2 ss-cta-2-flash"
+            style={{ flexShrink:0, padding:'13px 26px', fontSize:16,
+              letterSpacing:'0.3px' }}>
             Skip
           </button>
-          {/* Submit — solid dark, amber text, larger */}
-          <button onClick={submit} disabled={submitting}
-            style={{ flex:2, background:submitting?'#555':'#1A0A0A', color:'#E8890C',
-              border:'none', borderRadius:14, padding:'15px', fontSize:16,
-              fontWeight:900, cursor:submitting?'wait':'pointer' }}>
+          {/* Primary, sized like Order Now */}
+          <button onClick={submit} disabled={submitting} className="ss-cta"
+            style={{ flexShrink:0, marginLeft:'auto', padding:'14px 27px',
+              fontSize:17, whiteSpace:'nowrap' }}>
             {submitting ? 'Submitting...' : 'Submit →'}
           </button>
         </div>
