@@ -303,9 +303,12 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         )}
 
         {/* Feedback - opens the detailed page directly, no face popup first */}
-        <button onClick={onShowFeedback} style={{ flexShrink:0, background:'#FFF7ED', color:'#C2410C',
-          border:'1.5px solid #FED7AA', borderRadius:999, padding:'8px 14px', fontSize:12,
-          fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>⭐ Feedback</button>
+        {/* Amber like the rest, but deliberately not flashing: two pulsing
+            things on one screen compete, and the one we want pressed is
+            Order Now. Add ss-cta on its own to make it flash. */}
+        <button onClick={onShowFeedback} className="ss-cta ss-cta-still"
+          style={{ flexShrink:0, borderRadius:999, padding:'8px 15px', fontSize:12,
+            whiteSpace:'nowrap' }}>⭐ Feedback</button>
 
         <div style={{ flex:1, minWidth:0, background:'#F5F5F5', borderRadius:999,
           padding:'7px 14px', display:'flex', alignItems:'center', gap:6 }}>

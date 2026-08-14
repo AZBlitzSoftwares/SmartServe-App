@@ -155,27 +155,17 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
           looks finished. */}
       <style>{`
         .ss-fullh { height:100vh; height:100dvh; }
-        /* An amber ring pulsing outward, not a colour swing. The button is
-           near-black, so any dark-to-dark shift is invisible however
-           correctly it animates. */
-        @keyframes ssAgainFlash {
-          0%   { box-shadow:0 0 0 0 rgba(232,137,12,0.55), 0 6px 20px rgba(0,0,0,0.3);
-                 transform:scale(1); }
-          55%  { box-shadow:0 0 0 12px rgba(232,137,12,0), 0 8px 26px rgba(0,0,0,0.35);
-                 transform:scale(1.045); }
-          100% { box-shadow:0 0 0 0 rgba(232,137,12,0), 0 6px 20px rgba(0,0,0,0.3);
-                 transform:scale(1); }
-        }
-        .ss-again { background:#1A0A0A; animation: ssAgainFlash 1.4s ease-out infinite; }
-        @media (prefers-reduced-motion: reduce) { .ss-again { animation:none; } }
+        /* The button itself is .ss-cta from index.css - the same amber fill
+           and flash as Order Now. The near-black version that used to live
+           here needed its own ring animation precisely because a dark button
+           cannot flash visibly, which was the sign it did not belong. */
       `}</style>
-      <button className="ss-again"
+      <button className="ss-cta"
         onClick={() => { if (!doneRef.current) { doneRef.current = true; onOrderAgain() } }}
-        style={{ marginTop:'0.6vh', marginBottom:'0.4vh', color:'#E8890C', border:'none',
-          borderRadius:14, padding:'clamp(11px, 1.6vh, 15px) 40px',
-          fontSize:'clamp(14px, 2vh, 17px)', fontWeight:900, cursor:'pointer',
-          flexShrink:0 }}>
-        Place Another Order
+        style={{ marginTop:'0.6vh', marginBottom:'0.4vh',
+          padding:'clamp(11px, 1.6vh, 15px) 40px',
+          fontSize:'clamp(14px, 2vh, 17px)', flexShrink:0 }}>
+        Place Another Order →
       </button>
     </div>
   )

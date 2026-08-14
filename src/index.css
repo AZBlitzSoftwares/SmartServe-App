@@ -72,3 +72,47 @@ html, body {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+
+/* ── PRIMARY AND SECONDARY ACTIONS ─────────────────────────────
+   One definition for the main button on every guest screen.
+
+   Before this, each screen styled its own: amber and flashing on
+   the menu, near-black with amber text on the genie screen, a grey
+   outline on the feedback form. Same idea, four appearances, so a
+   guest had to work out where to press at each step.
+
+   Values are taken from Order Now in CartDrawer, which is the one
+   guests see most and is therefore the reference. */
+@keyframes ssCtaFlash {
+  0%, 100% { background:#E8890C; box-shadow:0 3px 12px rgba(232,137,12,0.40); transform:scale(1); }
+  50%      { background:#FFB03A; box-shadow:0 5px 26px rgba(232,137,12,0.90); transform:scale(1.045); }
+}
+.ss-cta {
+  background:#E8890C; color:#fff; border:none; border-radius:14px;
+  font-weight:900; cursor:pointer; letter-spacing:0.2px;
+  animation: ssCtaFlash 1s ease-in-out infinite;
+}
+/* Amber, but still - for a button that should be findable without
+   competing with the primary action on the same screen. */
+.ss-cta-still { animation:none; }
+.ss-cta:disabled { animation:none; background:#B0741C; cursor:wait; }
+/* Secondary: same family, clearly not the main action. Matches View Cart. */
+.ss-cta-2 {
+  background:#FFF8EE; color:#C06A00; border:2px solid #E8890C; border-radius:14px;
+  font-weight:800; cursor:pointer; animation:none;
+}
+/* A quieter pulse for when the secondary is a real choice rather than a way
+   back - Skip on the feedback form, where a guest who does not want to answer
+   should see the way out as readily as the way forward.
+
+   Deliberately not the same animation as .ss-cta: two identical flashes side
+   by side read as one flashing block and neither stands out. This breathes
+   the fill and the ring on the same rhythm, so the pair reads as loud and
+   quiet rather than as a stripe. */
+@keyframes ssCta2Flash {
+  0%, 100% { background:#FFF8EE; box-shadow:0 0 0 0 rgba(232,137,12,0.0); }
+  50%      { background:#FFECD2; box-shadow:0 0 0 5px rgba(232,137,12,0.22); }
+}
+.ss-cta-2-flash { animation: ssCta2Flash 1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .ss-cta-2-flash { animation:none; } }
+@media (prefers-reduced-motion: reduce) { .ss-cta { animation:none; } }

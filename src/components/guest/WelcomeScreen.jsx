@@ -137,12 +137,9 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
         .ss-novideo .ss-logo { width:76px; height:76px; max-width:96px; max-height:96px;
           width:clamp(60px, 13vw, 96px); height:clamp(60px, 13vw, 96px); }
         .ss-novideo .ss-name { font-size:clamp(17px, 3.4vw, 28px); }
-        @keyframes ssStartFlash {
-          0%, 100% { background:#E8890C; box-shadow:0 6px 22px rgba(232,137,12,0.45); }
-          50%      { background:#FFB03A; box-shadow:0 8px 32px rgba(232,137,12,0.85); }
-        }
-        .ss-start { animation: ssStartFlash 1.1s ease-in-out infinite; }
-        @media (prefers-reduced-motion: reduce) { .ss-start { animation:none; } }
+        /* Start uses .ss-cta from index.css. It had its own flash at a
+           slightly different speed and shadow, which is exactly the kind of
+           near-miss that makes screens feel unrelated. */
         .ss-welcome-panel {
           display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center;
           gap:10px; width:100%; box-sizing:border-box;
@@ -174,7 +171,7 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
 
       {/* Shape follows the event: three columns with a caterer,
           two without. Nothing to configure. */}
-      {/* Always three columns so Start Ordering stays dead centre.
+      {/* Always three columns so Start stays dead centre.
           Only the contents change when there is no caterer. */}
       <div className={"ss-welcome-panel" + (eventData?.video_url ? "" : " ss-novideo")}>
 
@@ -243,12 +240,11 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
           )}
 
           {eventData ? (
-            <button onClick={onStart} className="ss-start"
-              style={{ marginTop:14, color:'#fff', border:'none', borderRadius:14,
-                padding:'clamp(12px, 1.6vw + 6px, 20px) clamp(22px, 3vw + 10px, 46px)',
-                fontSize:'clamp(14px, 1.6vw + 6px, 21px)', fontWeight:900,
-                cursor:'pointer', whiteSpace:'nowrap' }}>
-              Start Ordering →
+            <button onClick={onStart} className="ss-cta"
+              style={{ marginTop:14,
+                padding:'clamp(12px, 1.6vw + 6px, 20px) clamp(40px, 5vw + 22px, 78px)',
+                fontSize:'clamp(15px, 1.7vw + 7px, 23px)', whiteSpace:'nowrap' }}>
+              Start
             </button>
           ) : (
             <button onClick={openEventPicker}
