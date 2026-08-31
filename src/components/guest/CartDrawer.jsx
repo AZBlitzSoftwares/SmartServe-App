@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { queueOrder } from '../../lib/offlineQueue'
+import CaptainTablePrompt from './CaptainTablePrompt'
 
-export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrderPlaced, onRemove, onAdd, cartOpen, onCartOpenChange }) {
+export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrderPlaced, onRemove, onAdd, cartOpen, onCartOpenChange, captain }) {
   const [open, setOpen] = useState(cartOpen || false)
 
   // Sync with parent
@@ -11,6 +12,12 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
   }, [cartOpen])
   const [placing, setPlacing] = useState(false)
   const [showWait, setShowWait] = useState(false)
+  // Captain mode only: the table is asked for here, at order time
+  const [showTablePrompt, setShowTablePrompt] = useState(false)
+
+  // A captain has no table of their own. Every check below that reads
+  // tableData has to know that rather than treating it as "not ready yet".
+  const captainMode = !!captain
 
   // Order limit waiting screen - visible for 15 seconds, then the guest is
   // back on the menu. The cart is deliberately left untouched so they do not
@@ -25,7 +32,10 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
   const total = cart.reduce((s, i) => s + i.quantity, 0)
 
   const maxOrders = eventData?.max_orders_per_table || 1
-  const orderLimitHit = activeOrderCount >= maxOrders
+  // In captain mode the limit belongs to whichever table is chosen, so it is
+  // checked inside the prompt and again on submit - never here, where there
+  // is no table to check it against.
+  const orderLimitHit = !captainMode && activeOrderCount >= maxOrders
 
   // Real-time watch active orders for this table
   useEffect(() => {
@@ -49,9 +59,69 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
     setActiveOrderCount(data?.length || 0)
   }
 
+  /* Captain path.
+
+     Everything the guest path does at setup time - find or create the table
+     row, check the limit - happens here instead, because until this moment
+     nobody knew which table the order was for.
+
+     The limit is re-checked against the database rather than trusted from
+     the prompt's snapshot: with five captains on the floor, another one may
+     have filled that table in the seconds since the grid was drawn. */
+  async function placeCaptainOrder(tableNum) {
+    if (!eventData?.id) throw new Error('No event loaded. Sign in again.')
+
+    // Find or create the table row for this number
+    const { data: existing } = await supabase.from('tables')
+      .select('*').eq('event_id', eventData.id).eq('table_number', tableNum).limit(1)
+    let tableRecord = existing?.[0]
+    if (!tableRecord) {
+      const { data: made, error: mkErr } = await supabase.from('tables')
+        .insert({ event_id: eventData.id, table_number: tableNum, is_active: true })
+        .select().single()
+      if (mkErr || !made) throw new Error('Could not open table ' + tableNum + '. Please try again.')
+      tableRecord = made
+    }
+
+    // Deliberately NOT claimed_by_device. A captain's tablet is not sitting
+    // on that table, and claiming it would make the supervisor's Tables
+    // screen show a tablet that is not there.
+
+    const limit = eventData?.max_orders_per_table || 0
+    if (limit > 0) {
+      const { data: live } = await supabase.from('orders')
+        .select('id').eq('table_id', tableRecord.id)
+        .in('status', ['pending', 'placed', 'in_progress'])
+      if ((live?.length || 0) >= limit) {
+        throw new Error('Table ' + tableNum + ' just reached its limit of ' + limit +
+          ' order' + (limit === 1 ? '' : 's') + '. Pick another table, or wait for one to be delivered.')
+      }
+    }
+
+    const { data: order, error: orderError } = await supabase.from('orders').insert({
+      event_id: eventData.id,
+      table_id: tableRecord.id,
+      status: 'pending',
+      captain_id: captain.id
+    }).select().single()
+    if (orderError || !order) throw new Error('Order failed. Please try again.')
+
+    const { error: itemsError } = await supabase.from('order_items')
+      .insert(cart.map(i => ({ order_id: order.id, menu_item_id: i.id, quantity: i.quantity })))
+    if (itemsError) throw new Error('The order was created but its items did not save. Tell the supervisor before re-sending.')
+
+    setShowTablePrompt(false)
+    setOpen(false)
+    onCartOpenChange?.(false)
+    onOrderPlaced(order.id, tableNum)
+  }
+
   async function placeOrder() {
     setError('')
     if (placing) return
+
+    // Captain: ask which table, then everything happens in placeCaptainOrder
+    if (captainMode) { setShowTablePrompt(true); return }
 
     // Re-check live count before placing
     await checkActiveOrders()
@@ -122,7 +192,9 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             justifyContent:'center', fontWeight:800, fontSize:13 }}>{total}</span>
         </button>
 
-        {/* RIGHT - Order Now, primary, flashing, takes the rest of the width */}
+        {/* RIGHT - Order Now, primary, flashing, takes the rest of the width.
+            In captain mode the label says what actually happens next: a
+            table is asked for before anything is sent. */}
         <button className={placing ? '' : 'ss-order-now'}
           onClick={() => { if (orderLimitHit) { setShowWait(true) } else { placeOrder() } }}
           disabled={placing}
@@ -130,7 +202,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             border:'none', borderRadius:14, padding:'14px 27px', color:'#fff',
             fontWeight:900, fontSize:17, whiteSpace:'nowrap',
             cursor: placing ? 'wait' : 'pointer' }}>
-          {placing ? 'Placing...' : 'Order Now \u2192'}
+          {placing ? 'Placing...' : captainMode ? 'Choose Table \u2192' : 'Order Now \u2192'}
         </button>
       </div>
 
@@ -159,6 +231,13 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
         </div>
       )}
 
+      {/* CAPTAIN - which table is this order for */}
+      {showTablePrompt && (
+        <CaptainTablePrompt eventData={eventData} itemCount={total}
+          onCancel={() => setShowTablePrompt(false)}
+          onConfirm={placeCaptainOrder} />
+      )}
+
       {open && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:60 }} onClick={() => { setOpen(false); onCartOpenChange?.(false) }}>
           <div onClick={e => e.stopPropagation()} style={{ position:'absolute', bottom:0, left:0, right:0, background:'#fff', borderRadius:'24px 24px 0 0', padding:'24px 20px 36px', maxHeight:'80vh', overflowY:'auto' }}>
@@ -183,9 +262,18 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
               <span>Total items</span><span>{total}</span>
             </div>
 
-            {isOnline === false && (
+            {isOnline === false && !captainMode && (
               <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:10, padding:'10px 14px', fontSize:13, color:'#92400E', marginBottom:12, fontWeight:600 }}>
                 📶 Offline — order will sync when connected
+              </div>
+            )}
+
+            {/* A captain's order cannot be queued offline: the queue stores a
+                table_id, and there is no table until the next screen. Saying so
+                is better than letting it fail at the moment of sending. */}
+            {isOnline === false && captainMode && (
+              <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:10, padding:'10px 14px', fontSize:13, color:'#B91C1C', marginBottom:12, fontWeight:600 }}>
+                📶 No connection — this order cannot be sent yet. The cart is safe; try again once you have signal.
               </div>
             )}
 
@@ -215,7 +303,9 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
                 ? '⏳ Placing Order...'
                 : orderLimitHit
                   ? '🔒 Please Wait'
-                  : '✓ Place Order'}
+                  : captainMode
+                    ? '🔢 Choose Table'
+                    : '✓ Place Order'}
             </button>
           </div>
         </div>

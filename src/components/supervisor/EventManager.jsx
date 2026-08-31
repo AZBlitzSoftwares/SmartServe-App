@@ -247,6 +247,18 @@ export function WaiterList({ eventId, embedded = false }) {
     background:'#fff', boxSizing:'border-box' }
   const onJob = rows.filter(w => busyMap[w.id]).length
 
+  // Suggests the next unused number, zero padded to match what is already
+  // there. Only a placeholder - anyone who wants W3 or 07 still types it.
+  const nextWaiterNumber = (() => {
+    const used = rows.map(w => {
+      const m = String(w.waiter_number || '').match(/^\d+$/)
+      return m ? parseInt(m[0], 10) : null
+    }).filter(n => n != null)
+    let n = 1
+    while (used.includes(n)) n++
+    return String(n).padStart(2, '0')
+  })()
+
   return (
     <>
       <style>{`
@@ -341,10 +353,18 @@ export function WaiterList({ eventId, embedded = false }) {
         })}
       </div>
 
-      <div style={{ display:'flex', gap:6, marginTop:12, paddingTop:12,
+      {/* ss-waiter-add-labels. The number is the required field and the one
+          that goes on the KOT slip, but an unlabelled box showing a grey "01"
+          reads as already filled in - so it gets a label and a real starting
+          value, and Add says what is missing rather than sitting grey. */}
+      <div style={{ fontSize:11, fontWeight:800, color:'var(--ink2)', textTransform:'uppercase',
+        letterSpacing:'0.4px', marginTop:12 }}>Add a waiter</div>
+      <div style={{ display:'flex', gap:6, marginTop:6, paddingTop:6,
         borderTop:'1px solid var(--line)', alignItems:'center', flexWrap:'wrap' }}>
         <input value={add.number} onChange={e => setAdd(p => ({ ...p, number:e.target.value }))}
-          placeholder="01" style={{ ...fld, width:64, fontWeight:900 }} />
+          placeholder={nextWaiterNumber} title="Waiter number - required"
+          style={{ ...fld, width:64, fontWeight:900,
+            borderColor: add.number.trim() ? 'var(--line)' : '#FCD34D' }} />
         <input value={add.name} onChange={e => setAdd(p => ({ ...p, name:e.target.value }))}
           placeholder="Name (optional)" style={{ ...fld, flex:1, minWidth:120 }}
           onKeyDown={e => { if (e.key === 'Enter') create() }} />
@@ -354,7 +374,9 @@ export function WaiterList({ eventId, embedded = false }) {
         <button onClick={create} disabled={busy || !add.number.trim()}
           style={{ background: add.number.trim() ? 'var(--ink)' : '#E5E7EB', color:'#fff',
             border:'none', borderRadius:8, padding:'8px 18px', fontSize:13, fontWeight:800,
-            cursor: add.number.trim() ? 'pointer' : 'not-allowed' }}>Add</button>
+            cursor: add.number.trim() ? 'pointer' : 'not-allowed' }}>
+          {add.number.trim() ? 'Add' : 'Enter a number'}
+        </button>
       </div>
     </>
   )
@@ -621,7 +643,7 @@ export default function EventManager({ onEventChange }) {
   const [newEvent, setNewEvent] = useState({
     name:'', date:'', venue:'', number_of_tables:'',
     catering_company:'', catering_logo_url:'', welcome_note:'', banner_image_url:'', max_orders_per_table:1,
-    video_url:'', call_waiter_enabled:true,
+    video_url:'', call_waiter_enabled:true, service_mode:'self',
     // An event with no supervisor cannot be worked, so one is created with it
     sup_name:'', sup_pin:'', sup_mobile:''
   })
@@ -683,7 +705,7 @@ export default function EventManager({ onEventChange }) {
         }
       }
 
-      for (const table of ['help_items', 'waiters', 'supervisors']) {
+      for (const table of ['help_items', 'waiters', 'supervisors', 'captains']) {
         const { data: src } = await supabase.from(table).select('*').eq('event_id', ev.id)
         if (src?.length) {
           await supabase.from(table).insert(
@@ -713,7 +735,7 @@ export default function EventManager({ onEventChange }) {
   }
 
   function resetCreate() {
-    setNewEvent({ name:'', date:'', venue:'', number_of_tables:'', catering_company:'', catering_logo_url:'', welcome_note:'', banner_image_url:'', max_orders_per_table:1, video_url:'', call_waiter_enabled:true, sup_name:'', sup_pin:'', sup_mobile:'' })
+    setNewEvent({ name:'', date:'', venue:'', number_of_tables:'', catering_company:'', catering_logo_url:'', welcome_note:'', banner_image_url:'', max_orders_per_table:1, video_url:'', call_waiter_enabled:true, service_mode:'self', sup_name:'', sup_pin:'', sup_mobile:'' })
     setHelpTouched(false); setHelpOpen(false)
     setNewHelp(prev => prev.map(h => ({ ...h, include:true })))
     setCreateStep(1); setNewLogoFile(null); setNewLogoPreview(''); setNewVideoFile(null); setNewVideoMode('url')
@@ -774,6 +796,7 @@ export default function EventManager({ onEventChange }) {
         max_orders_per_table: parseInt(newEvent.max_orders_per_table)||1,
         video_url: newEvent.video_url.trim()||null,
         call_waiter_enabled: newEvent.call_waiter_enabled,
+        service_mode: newEvent.service_mode || 'self',
         is_closed: false, ai_enabled: false
       }).select().single()
 
@@ -966,6 +989,37 @@ export default function EventManager({ onEventChange }) {
             {/* STEP 2: Configuration */}
             {createStep===2 && (
               <div>
+                {/* ss-service-mode-create */}
+                <div style={{ marginBottom:20, background:'#F9FAFB', borderRadius:12, padding:'14px 16px' }}>
+                  <div style={{ fontWeight:700, fontSize:14, marginBottom:2 }}>🍽️ Service Mode</div>
+                  <div style={{ fontSize:12, color:'var(--ink2)', marginBottom:10 }}>
+                    How orders reach the kitchen at this event.
+                  </div>
+                  <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+                    {[['self','📱 Self-Service','A tablet sits on every table. Guests order for themselves.'],
+                      ['captain','🧑‍💼 Captain Service','No tablet on the tables. Captains carry a tablet and take orders.']].map(([val,title,desc]) => (
+                      <button key={val} type="button" onClick={()=>setNewEvent(p=>({...p,service_mode:val}))}
+                        style={{ flex:'1 1 220px', textAlign:'left', borderRadius:12, cursor:'pointer',
+                          border:'2px solid',
+                          borderColor:newEvent.service_mode===val?'var(--ink)':'var(--line)',
+                          background:newEvent.service_mode===val?'var(--ink)':'#fff',
+                          color:newEvent.service_mode===val?'#fff':'var(--ink)',
+                          padding:'11px 13px', fontFamily:'Manrope' }}>
+                        <div style={{ fontSize:13, fontWeight:800, marginBottom:3 }}>{title}</div>
+                        <div style={{ fontSize:11, lineHeight:1.45,
+                          opacity:newEvent.service_mode===val?0.85:0.62 }}>{desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {newEvent.service_mode==='captain' && (
+                    <div style={{ background:'#EFF6FF', border:'1px solid #BFDBFE', borderRadius:10,
+                      padding:'9px 12px', fontSize:11.5, color:'#1d4ed8', marginTop:10, lineHeight:1.55 }}>
+                      Add captains after creating the event, under <strong>Control › Captains</strong>.
+                      Without at least one captain, nobody can log in to take orders.
+                    </div>
+                  )}
+                </div>
+
                 <div style={{ marginBottom:20 }}>
                   <label style={LBL}>Max Orders Per Table</label>
                   <div style={{ fontSize:12, color:'var(--ink2)', marginBottom:10 }}>Guests must wait for delivery before placing another order</div>
@@ -1342,6 +1396,27 @@ export default function EventManager({ onEventChange }) {
                     </button>
                     <span style={{ fontSize:12, color:'var(--ink2)' }}>{ev.call_waiter_enabled!==false?'On':'Off'}</span>
                   </div>
+                </div>
+              </div>
+
+              {/* ss-service-mode-detail */}
+              <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', marginBottom:8, textTransform:'uppercase' }}>🍽️ Service Mode</div>
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                  {[['self','📱 Self-Service'],['captain','🧑‍💼 Captain Service']].map(([val,title]) => (
+                    <button key={val} type="button"
+                      onClick={async()=>{ if ((ev.service_mode||'self')!==val) await updateEventField(ev.id,'service_mode',val) }}
+                      style={{ flex:'1 1 160px', borderRadius:10, cursor:'pointer', padding:'9px 12px',
+                        border:'1.5px solid', fontFamily:'Manrope',
+                        borderColor:(ev.service_mode||'self')===val?'var(--ink)':'var(--line)',
+                        background:(ev.service_mode||'self')===val?'var(--ink)':'#fff',
+                        color:(ev.service_mode||'self')===val?'#fff':'var(--ink)',
+                        fontSize:13, fontWeight:800 }}>{title}</button>
+                  ))}
+                </div>
+                <div style={{ fontSize:11, color:'#888', marginTop:8, lineHeight:1.5 }}>
+                  Captain Service adds a Captains tab under Control, where captains and their PINs
+                  are managed. Every tablet picks the change up within a minute.
                 </div>
               </div>
 
