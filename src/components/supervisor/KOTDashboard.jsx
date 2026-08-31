@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
-const BUILD_VERSION = 'v2.1 \u00B7 2026-08-10'
+const BUILD_VERSION = 'v2.2 \u00B7 2026-08-31'
 
 const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
@@ -510,6 +510,9 @@ ${(order.order_items||[]).map(i => `
     'other'
   ]
 
+  // Whole-row colours. One place to change any of them.
+  const PAINT_BG = { green:'#16A34A', amber:'#D97706', red:'#DC2626' }
+
   return (
     <div>
       {/* Frozen block. Heading, waiter strip and filters hold at the top of
@@ -600,6 +603,23 @@ ${(order.order_items||[]).map(i => `
           <style>{`
             .ss-kot-cols { display:grid; grid-template-columns:1fr; gap:10px; align-items:start; }
             @media (min-width: 1100px) { .ss-kot-cols { grid-template-columns:1fr 1fr; } }
+
+            /* A row with no waiter on it flashes red to green until someone is
+               assigned. Hard alternation rather than a fade - a fade spends
+               half its time in a muddy in-between and stops reading as an
+               alarm across a screen holding thirty rows.
+               steps(1,end) gives the clean flip; 1.2s is fast enough to catch
+               the eye from across the KOT station without strobing. */
+            @keyframes ssKotFlash {
+              0%, 49.9%   { background-color:#DC2626; }
+              50%, 100%   { background-color:#16A34A; }
+            }
+            .ss-kot-flash { background-color:#DC2626; animation:ssKotFlash 1.2s steps(1,end) infinite; }
+            /* Some tablets and any supervisor who has switched motion off in
+               the OS get a solid red instead - still unmissable, no movement. */
+            @media (prefers-reduced-motion: reduce) {
+              .ss-kot-flash { animation:none; background-color:#DC2626; }
+            }
           `}</style>
           <div className="ss-kot-cols">
           {[timeline.slice(0, Math.ceil(timeline.length/2)),
@@ -647,9 +667,42 @@ ${(order.order_items||[]).map(i => `
                             : elapsedMin <= 10 ? { bg:'#FEF3C7', fg:'#B45309' }
                             : { bg:'#FEE2E2', fg:'#B91C1C' }
 
+            /* The whole row carries one colour, because that is the only thing
+               a supervisor can read across thirty rows at a glance.
+
+                 no waiter yet  -> flashing red/green
+                 waiter on it   -> solid green, amber past 5 min, red past 10
+                 finished       -> plain white, out of the way
+
+               The minute thresholds run off the same elapsed clock printed on
+               the row, which counts from when the guest ordered. Assignment
+               time was the alternative and is worse: an order that sat
+               unassigned for eight minutes would turn green the moment a
+               waiter took it, and the row would read "on track" while the
+               guest had already been waiting eight minutes. Counting from the
+               order means such a row hands over already amber, which is true.
+               To switch, change the two elapsedMin below to a value derived
+               from rec.assigned_at. */
+            const paint = status === 'new'      ? 'flash'
+                        : status === 'progress' ? (elapsedMin < 5 ? 'green'
+                                                 : elapsedMin < 10 ? 'amber' : 'red')
+                        : null
+            const painted = paint !== null
+            // Delivered and cancelled rows stay white on purpose. Painting a
+            // delivered row solid green would collide with green meaning
+            // "assigned and on time" on the Active tab.
+            const rowBg = paint && paint !== 'flash' ? PAINT_BG[paint] : '#fff'
+            // Pills sit on top of a colour that changes under them, so they
+            // are translucent white rather than any fixed tint.
+            const onPill = 'rgba(255,255,255,0.22)'
+
             return (
-              <div key={id} style={{ borderLeft:'4px solid '+tone.bar,
-                borderBottom:'1px solid var(--line)' }}>
+              <div key={id} className={paint === 'flash' ? 'ss-kot-flash' : undefined}
+                style={{ borderLeft:'4px solid ' + (painted ? 'rgba(0,0,0,0.22)' : tone.bar),
+                  borderBottom:'1px solid ' + (painted ? 'rgba(255,255,255,0.3)' : 'var(--line)'),
+                  // Left unset while flashing so the keyframes own it.
+                  background: paint === 'flash' ? undefined : rowBg,
+                  transition: paint === 'flash' ? 'none' : 'background-color 0.5s ease' }}>
 
                 <div onClick={() => { setExpandedRow(open ? null : id); setShowAllWaiters(null) }}
                   style={{ display:'flex', alignItems:'center', gap:9, padding:'6px 12px',
@@ -665,12 +718,15 @@ ${(order.order_items||[]).map(i => `
                         style={{ fontSize:14, fontWeight:800, minWidth:34, cursor:'pointer',
                           borderRadius:6, padding:'2px 5px', flexShrink:0,
                           background: on ? '#1A0A0A' : 'transparent',
-                          color: on ? '#E8890C' : 'inherit' }}>T{tn ?? '?'}</span>
+                          color: on ? '#E8890C' : (painted ? '#FFFFFF' : 'inherit') }}>T{tn ?? '?'}</span>
                     )
                   })()}
-                  <span style={{ fontSize:12, color:'var(--ink2)', minWidth:42 }}>{timeStr}</span>
+                  <span style={{ fontSize:12, minWidth:42,
+                    color: painted ? 'rgba(255,255,255,0.9)' : 'var(--ink2)' }}>{timeStr}</span>
                   <span style={{ fontSize:11, fontWeight:800, padding:'3px 9px', borderRadius:999,
-                    background:tone.bg, color:tone.fg, minWidth:58, textAlign:'center', flexShrink:0 }}>
+                    background: painted ? onPill : tone.bg,
+                    color: painted ? '#FFFFFF' : tone.fg,
+                    minWidth:58, textAlign:'center', flexShrink:0 }}>
                     {isSos ? 'HELP' : count + (count === 1 ? ' item' : ' items')}
                   </span>
                   {/* Dish names are deliberately NOT on the collapsed row. What
@@ -679,14 +735,19 @@ ${(order.order_items||[]).map(i => `
                       is open. This space is left free so the timer and the action
                       buttons are not crushed against a wall of text. */}
                   <span style={{ flex:1, minWidth:0 }} />
-                  <span style={{ flexShrink:0, background:timerTone.bg, color:timerTone.fg,
+                  <span style={{ flexShrink:0,
+                    background: painted ? onPill : timerTone.bg,
+                    color: painted ? '#FFFFFF' : timerTone.fg,
                     borderRadius:999, padding:'2px 9px', fontSize:11, fontWeight:800,
                     fontVariantNumeric:'tabular-nums', minWidth:46, textAlign:'center' }}>
                     {clock}{running ? '' : ' \u2713'}
                   </span>
                   {/* Inline actions. Unassigned shows chips, assigned shows the
                       waiter and Deliver - so which rows still need a waiter is
-                      obvious without opening anything. */}
+                      obvious without opening anything.
+                      On a painted row every button goes white-on-colour: a green
+                      button on a row that is itself flashing green disappears
+                      for half of every second. */}
                   <span onClick={e => e.stopPropagation()}
                     style={{ display:'flex', alignItems:'center', gap:5, flexShrink:0 }}>
                     {status === 'new' ? (
@@ -695,33 +756,42 @@ ${(order.order_items||[]).map(i => `
                           <button key={w.id}
                             onClick={() => isSos ? assignSOSWaiter(rec.id, w.id) : assignWaiter(rec.id, w.id)}
                             title={'Assign ' + w.name}
-                            style={{ background: wi === 0 ? '#16A34A' : '#1A0A0A', color:'#fff',
+                            style={{ background: wi === 0 ? '#FFFFFF' : 'rgba(255,255,255,0.82)',
+                              color: wi === 0 ? '#15803D' : '#1A0A0A',
                               border:'none', borderRadius:8, padding:'5px 10px', fontSize:12,
                               fontWeight:800, cursor:'pointer' }}>{w.waiter_number || w.name}</button>
                         ))}
                         <button onClick={() => setExpandedRow(open ? null : id)}
                           title="More waiters"
-                          style={{ background:'var(--bg)', border:'1px solid var(--line)',
+                          style={{ background:'rgba(255,255,255,0.18)',
+                            border:'1px solid rgba(255,255,255,0.55)',
                             borderRadius:8, padding:'5px 8px', fontSize:12, fontWeight:700,
-                            color:'var(--ink2)', cursor:'pointer' }}>⋯</button>
+                            color:'#FFFFFF', cursor:'pointer' }}>⋯</button>
                       </>
                     ) : status === 'progress' ? (
                       <>
-                        <span style={{ fontSize:12, fontWeight:800, color:'var(--ink2)' }}>{waiterName || '—'}</span>
+                        <span style={{ fontSize:12, fontWeight:800,
+                          color: painted ? '#FFFFFF' : 'var(--ink2)' }}>{waiterName || '—'}</span>
                         <button onClick={() => isSos ? resolveSOSRequest(rec.id) : markDelivered(rec)}
-                          style={{ background:'#16A34A', color:'#fff', border:'none', borderRadius:8,
+                          style={{ background: painted ? '#FFFFFF' : '#16A34A',
+                            color: painted ? '#15803D' : '#fff',
+                            border:'none', borderRadius:8,
                             padding:'5px 12px', fontSize:12, fontWeight:800, cursor:'pointer' }}>
                           ✓ {isSos ? 'Done' : 'Deliver'}
                         </button>
                       </>
                     ) : (
-                      <span style={{ fontSize:12, fontWeight:700, color:'var(--ink2)' }}>{waiterName || '—'}</span>
+                      <span style={{ fontSize:12, fontWeight:700,
+                        color: painted ? '#FFFFFF' : 'var(--ink2)' }}>{waiterName || '—'}</span>
                     )}
                   </span>
-                  <span style={{ fontSize:11, color:'#999', transform:'rotate('+(open?180:0)+'deg)',
+                  <span style={{ fontSize:11, transform:'rotate('+(open?180:0)+'deg)',
+                    color: painted ? 'rgba(255,255,255,0.85)' : '#999',
                     transition:'transform 0.15s', flexShrink:0 }}>▼</span>
                 </div>
 
+                {/* The detail panel stays light with dark text. It is read, not
+                    scanned, and dish names on a flashing background are unusable. */}
                 {open && (
                   <div style={{ padding:'0 12px 12px', background:'#FAFAFA' }}>
                     <div style={{ display:'flex', alignItems:'center', gap:8, margin:'2px 0 8px' }}>
