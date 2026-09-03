@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { WaiterList, HelpItemsEditor } from './EventManager'
+import CaptainList from './CaptainList'
 
 /* Table management for the current event.
 
@@ -157,7 +158,11 @@ export default function TableManager({ eventData, onEventChange }) {
       </div>
 
       <div style={{ display:'flex', gap:8, marginBottom:14 }}>
-        {[['waiters','Waiters'],['tables','Tables'],['help','Help'],['settings','Settings']].map(([v,label]) => (
+        {[['waiters','Waiters'],
+          // Only on captain events. On a self-service event there are no
+          // captains, and an always-visible empty tab invites someone to fill it.
+          ...(eventData?.service_mode === 'captain' ? [['captains','Captains']] : []),
+          ['tables','Tables'],['help','Help'],['settings','Settings']].map(([v,label]) => (
           <button key={v} onClick={() => setView(v)}
             style={{ flex:1, padding:'9px 4px', borderRadius:10, fontSize:13, fontWeight:700,
               cursor:'pointer', border:'1.5px solid',
@@ -168,6 +173,8 @@ export default function TableManager({ eventData, onEventChange }) {
       </div>
 
       {view === 'waiters' && eventData?.id && <WaiterList eventId={eventData.id} />}
+
+      {view === 'captains' && eventData?.id && <CaptainList eventId={eventData.id} />}
 
       {/* Help list. Was on the admin Events screen, which the supervisor
           cannot open - so the person standing in the room could not change
@@ -182,6 +189,18 @@ export default function TableManager({ eventData, onEventChange }) {
 
       {view === 'tables' && (
       <>
+      {/* ss-captain-tables-note. Without this the Tables screen reads as a
+          room full of dead tablets, when in fact there are no tablets on the
+          tables at all and nothing is wrong. */}
+      {eventData?.service_mode === 'captain' && (
+        <div style={{ background:'#EFF6FF', border:'1.5px solid #BFDBFE', borderRadius:12,
+          padding:'11px 14px', marginBottom:14, fontSize:13, color:'#1d4ed8',
+          fontWeight:600, lineHeight:1.55 }}>
+          This is a Captain Service event, so no tablet sits on a table and every
+          number below stays Not assigned. That is correct. Table rows appear here
+          as captains place the first order for each table.
+        </div>
+      )}
 
       {/* Sits above the counts because it changes what those counts mean */}
       <div style={{ background:'#fff', borderRadius:12, padding:'12px 14px', marginBottom:12,

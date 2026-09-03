@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { getPendingOrders, clearOrder } from '../lib/offlineQueue'
 import SetupScreen from '../components/guest/SetupScreen'
+import CaptainLogin, { EntryChooser } from '../components/guest/CaptainLogin'
 import WelcomeScreen from '../components/guest/WelcomeScreen'
 import MenuScreen from '../components/guest/MenuScreen'
 import CartDrawer from '../components/guest/CartDrawer'
@@ -26,6 +27,11 @@ export default function GuestApp() {
   const [eventData, setEventData] = useState(null)
   const [tableData, setTableData] = useState(null)
   const [tableNumber, setTableNumber] = useState(null)
+  // Set only in captain mode. Null on every self-service tablet, which is
+  // what every guard below tests.
+  const [captain, setCaptain] = useState(null)
+  // Table number of the order just sent, shown briefly then cleared
+  const [captainSent, setCaptainSent] = useState(null)
   const [cart, setCart] = useState([])
   const [activeOrders, setActiveOrders] = useState([])
   const [activeHelp, setActiveHelp] = useState([])
@@ -48,6 +54,7 @@ export default function GuestApp() {
   const menuSheetRef     = useRef(false)
   const activeOrdersRef  = useRef([])
   const showExitGateRef  = useRef(false)
+  const captainRef       = useRef(null)
 
   // Back-button machinery
   const allowExitRef    = useRef(false) // true only after a valid exit PIN
@@ -63,6 +70,7 @@ export default function GuestApp() {
   useEffect(() => { menuSheetRef.current = menuSheetOpen },   [menuSheetOpen])
   useEffect(() => { activeOrdersRef.current = activeOrders }, [activeOrders])
   useEffect(() => { showExitGateRef.current = showExitGate }, [showExitGate])
+  useEffect(() => { captainRef.current = captain },           [captain])
 
   function goTo(screen) {
     appStateRef.current = screen
@@ -105,6 +113,9 @@ export default function GuestApp() {
     // Screen sequence: Track -> Menu -> Welcome
     if (s === 'genie')  { goTo('menu'); return }
     if (s === 'status') { goTo('menu'); return }
+    // A captain has no Welcome screen behind the menu - the menu is their
+    // home screen, so back closes the sheet and stops there.
+    if (s === 'menu' && captainRef.current) { setMenuSheetOpen(false); menuSheetRef.current = false; return }
     if (s === 'menu')   { setMenuSheetOpen(false); menuSheetRef.current = false; goTo('welcome'); return }
   }
 
@@ -228,6 +239,22 @@ export default function GuestApp() {
 
   // Load saved setup from localStorage
   useEffect(() => {
+    // A captain session wins over everything. That tablet has no table and
+    // must not fall into the guest setup flow.
+    const capRaw = localStorage.getItem('ss_captain_session')
+    const capEv  = localStorage.getItem('ss_captain_event')
+    if (capRaw && capEv) {
+      try {
+        const cap = JSON.parse(capRaw)
+        const cev = JSON.parse(capEv)
+        setCaptain(cap); setEventData(cev)
+        goTo('menu'); refreshEvent(cev.id)
+        return
+      } catch (e) {
+        localStorage.removeItem('ss_captain_session')
+        localStorage.removeItem('ss_captain_event')
+      }
+    }
     const ok   = localStorage.getItem('ss_setup_complete')
     const ev   = localStorage.getItem('ss_setup_event')
     const td   = localStorage.getItem('ss_setup_table')
@@ -245,9 +272,55 @@ export default function GuestApp() {
         refreshEvent(evObj.id)
       } catch(e) { localStorage.clear(); goTo('setup') }
     } else {
-      goTo('setup')
+      decideEntry()
     }
   }, [])
+
+  /* Which door this tablet opens on.
+
+     A tablet at a captain-only event must never be asked to claim a table,
+     and one at a self-service event must never be asked for a captain PIN.
+     With only one kind of event running today the tablet decides by itself;
+     the chooser appears only when both kinds are live, which is rare. */
+  async function decideEntry() {
+    try {
+      const d = new Date()
+      const today = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') +
+        '-' + String(d.getDate()).padStart(2,'0')
+      const { data } = await supabase.from('events')
+        .select('*').order('date', { ascending:false }).limit(50)
+      const active = (data || []).filter(e => e.date === today)
+      const capEvents  = active.filter(e => e.service_mode === 'captain')
+      const selfEvents = active.filter(e => e.service_mode !== 'captain')
+      if (capEvents.length && !selfEvents.length) { goTo('captain'); return }
+      if (capEvents.length && selfEvents.length)  { goTo('entry');   return }
+      goTo('setup')
+    } catch (e) {
+      // Offline or the server is unreachable. Self-service is the older and
+      // far commoner case, so that is the safer place to land.
+      goTo('setup')
+    }
+  }
+
+  function handleCaptainLogin(cap, ev) {
+    // Kept apart from the ss_setup_* keys on purpose. A tablet that ended up
+    // holding half a guest session and half a captain session would be very
+    // hard to reason about at a live event.
+    localStorage.setItem('ss_captain_session', JSON.stringify(cap))
+    localStorage.setItem('ss_captain_event', JSON.stringify(ev))
+    setCaptain(cap); setEventData(ev)
+    setTableData(null); setTableNumber(null)
+    setCart([]); setActiveOrders([]); goTo('menu')
+  }
+
+  // Handing the tablet to another captain mid-shift. Without this the
+  // orders would keep being recorded against whoever logged in first.
+  function switchCaptain() {
+    localStorage.removeItem('ss_captain_session')
+    localStorage.removeItem('ss_captain_event')
+    setCaptain(null); setCart([]); goTo('captain')
+  }
+
 
   // Keep event branding in sync with the supervisor's edits
   async function refreshEvent(eventId) {
@@ -389,7 +462,9 @@ export default function GuestApp() {
     function arm() {
       clear()
       idleTimerRef.current = setTimeout(() => {
-        if (appStateRef.current === 'menu') goTo('welcome')
+        // A captain is working, not idling. Throwing them back to a Welcome
+        // screen they do not have would strand the tablet.
+        if (appStateRef.current === 'menu' && !captainRef.current) goTo('welcome')
       }, IDLE_MS)
     }
 
@@ -421,10 +496,21 @@ export default function GuestApp() {
   const cartCount = cart.reduce((s,i) => s+i.quantity, 0)
 
   // After ordering the guest sees the genie screen, not the Track page.
-  function handleOrderPlaced(newOrderId) {
+  function handleOrderPlaced(newOrderId, forTable) {
     // cartOpen must not survive the cart being emptied, or CartDrawer
     // reads it as true the next time it mounts and opens on its own.
     setCart([]); setCartOpen(false)
+
+    // A captain has no genie screen and no table of their own to track.
+    // A short confirmation, then straight back to the menu for the next
+    // table - the genie screen would be a dead end mid-shift.
+    if (captainRef.current) {
+      setCaptainSent(forTable != null ? String(forTable) : '')
+      setTimeout(() => setCaptainSent(null), 2600)
+      goTo('menu')
+      return
+    }
+
     loadActiveOrders(); setLastOrderId(newOrderId || null); goTo('genie')
   }
 
@@ -459,6 +545,14 @@ export default function GuestApp() {
     </div>
   )
 
+  if (appState === 'entry') return (
+    <EntryChooser onGuest={() => goTo('setup')} onCaptain={() => goTo('captain')} />
+  )
+
+  if (appState === 'captain') return (
+    <CaptainLogin onLogin={handleCaptainLogin} onBack={() => decideEntry()} />
+  )
+
   if (appState === 'setup') return (
     <SetupScreen onSetupComplete={handleSetupComplete}
       currentTableNumber={tableNumber} currentEventId={eventData?.id} />
@@ -476,6 +570,7 @@ export default function GuestApp() {
       )}
       {appState === 'menu' && (
         <MenuScreen tableData={tableData} eventData={eventData} tableNumber={tableNumber}
+          captain={captain} onSwitchCaptain={switchCaptain}
           cart={cart} addToCart={addToCart} removeFromCart={removeFromCart}
           cartCount={cartCount} isOnline={isOnline}
           onShowSOS={() => setShowSOS(true)}
@@ -501,9 +596,33 @@ export default function GuestApp() {
         <CartDrawer cart={cart} tableData={tableData} eventData={eventData}
           isOnline={isOnline} onOrderPlaced={handleOrderPlaced}
           onRemove={removeFromCart} onAdd={addToCart}
-          cartOpen={cartOpen} onCartOpenChange={setCartOpen} />
+          cartOpen={cartOpen} onCartOpenChange={setCartOpen} captain={captain} />
       )}
-      {showSOS && <SOSPanel tableData={tableData} eventData={eventData}
+      {/* Captain order confirmation. Deliberately brief and self-clearing:
+          a captain is already walking to the next table. */}
+      {captainSent !== null && (
+        <div style={{ position:'fixed', inset:0, zIndex:150, background:'rgba(26,10,10,0.8)',
+          display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+          <div style={{ background:'#F0FDF4', border:'3px solid #86EFAC', borderRadius:24,
+            padding:'34px 30px', textAlign:'center', maxWidth:380, width:'100%',
+            boxShadow:'0 20px 60px rgba(0,0,0,0.45)' }}>
+            <div style={{ fontSize:52, marginBottom:10, lineHeight:1 }}>✅</div>
+            <div style={{ fontWeight:900, fontSize:26, color:'#15803D', marginBottom:6 }}>
+              Order Sent
+            </div>
+            {captainSent && (
+              <div style={{ fontSize:17, color:'#166534', fontWeight:700 }}>
+                Table {captainSent}
+              </div>
+            )}
+            <div style={{ fontSize:13, color:'#4D7C61', marginTop:10, lineHeight:1.5 }}>
+              The supervisor has it. Ready for the next table.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSOS && <SOSPanel tableData={tableData} eventData={eventData} captain={captain}
         onClose={() => { setShowSOS(false); goTo('menu') }} />}
       {showHistory && <OrderHistory tableData={tableData} eventData={eventData}
         addToCart={addToCart}

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
-const BUILD_VERSION = 'v2.2 \u00B7 2026-08-31'
+const BUILD_VERSION = 'v2.3 \u00B7 2026-09-01'
 
 const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
@@ -89,7 +89,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   async function loadSOS() {
     if (!eventData) return
     const { data } = await supabase.from('sos_requests')
-      .select('*, tables(table_number), sos_request_items(item_name, quantity)').eq('event_id', eventData.id)
+      .select('*, tables(table_number), sos_request_items(item_name, quantity), captains(name)').eq('event_id', eventData.id)
       // No filters at all. Every request of every type and status belongs
       // here - the tabs below decide what is shown. Filtering at the query
       // is what made resolved and cancelled requests invisible.
@@ -109,7 +109,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     if (!eventData) return
     if (showSpinner) setLoading(true)
     const { data } = await supabase.from('orders')
-      .select('*, tables(table_number), order_items(quantity, menu_items(name, is_live_counter)), waiters(name), assigned_at')
+      .select('*, tables(table_number), order_items(quantity, menu_items(name, is_live_counter)), waiters(name), captains(name), assigned_at')
       .eq('event_id', eventData.id).order('created_at', { ascending: false })
     const all = data || []
     const activeCount = all.filter(o => !['delivered','cancelled'].includes(o.status)).length
@@ -152,7 +152,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     if (waiterId) {
       try {
         const { data: fresh } = await supabase.from('orders')
-          .select('*, tables(table_number), waiters(name), order_items(quantity, menu_items(name, is_veg))')
+          .select('*, tables(table_number), waiters(name), captains(name), order_items(quantity, menu_items(name, is_veg))')
           .eq('id', orderId).single()
         if (fresh && autoPrint) setTimeout(() => printKOT(fresh), 300)
       } catch (e) { /* never block assignment if printing fails */ }
@@ -177,7 +177,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     if (waiterId) {
       try {
         const { data: fresh } = await supabase.from('sos_requests')
-          .select('*, tables(table_number), waiters(name), sos_request_items(item_name, quantity)')
+          .select('*, tables(table_number), waiters(name), captains(name), sos_request_items(item_name, quantity)')
           .eq('id', sosId).single()
         if (fresh && autoPrint) setTimeout(() => printHelpKOT(fresh), 300)
       } catch (e) { /* never block assignment if printing fails */ }
@@ -195,6 +195,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
       created_at: sos.created_at,
       tables: sos.tables,
       waiters: sos.waiters,
+      captains: sos.captains,
       order_items: lines.map(li => ({
         quantity: li.quantity,
         menu_items: { name: li.item_name }
@@ -253,6 +254,9 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     const eventName = eventData?.name || 'Event'
     const tableNum = order.tables?.table_number || '?'
     const waiterName = order.waiters?.name || (order.waiter_id ? 'Assigned' : 'Unassigned')
+    // Empty on a self-service event, which is what keeps the slip layout
+    // identical to the one the waiters already know.
+    const captainName = order.captains?.name || ''
     const orderId = '#' + order.id.slice(-6).toUpperCase()
     const d = new Date(order.created_at)
     const dateStr = d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
@@ -349,6 +353,26 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     line-height: 1.1;
     color: #000000;
   }
+  .who-row {
+    display: flex;
+    gap: 1.5mm;
+    margin: 1.5mm 0;
+  }
+  .who-box {
+    flex: 1;
+    border: 1.5px solid #000000;
+    text-align: center;
+    padding: 1.5mm 0.5mm;
+    font-size: 9pt;
+    font-weight: 900;
+    color: #000000;
+    word-break: break-word;
+  }
+  .who-label {
+    font-size: 7.5pt;
+    font-weight: bold;
+    letter-spacing: 1px;
+  }
   .waiter-box {
     border: 1.5px solid #000000;
     text-align: center;
@@ -416,7 +440,12 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   <div class="table-label">TABLE</div>
   <div class="table-num">${tableNum}</div>
 </div>
-<div class="waiter-box">Waiter: ${waiterName}</div>
+${captainName
+  ? `<div class="who-row">
+  <div class="who-box"><div class="who-label">CAPTAIN</div>${captainName}</div>
+  <div class="who-box"><div class="who-label">WAITER</div>${waiterName}</div>
+</div>`
+  : `<div class="waiter-box">Waiter: ${waiterName}</div>`}
 <hr class="divider"/>
 ${(order.order_items||[]).map(i => `
 <div class="item-row">
@@ -647,6 +676,9 @@ ${(order.order_items||[]).map(i => `
             const count = isSos ? lines_.length
               : lines_.reduce((n, li) => n + (li.quantity || 1), 0)
             const waiterName = rec.waiters?.name || (waiters.find(w => w.id === rec.waiter_id)?.name) || ''
+            // Only ever set on a captain event, so every self-service board
+            // looks exactly as it did before.
+            const captainName = rec.captains?.name || ''
             const timeStr = new Date(rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
             const chips = showAllWaiters === id ? availableWaiters : availableWaiters.slice(0, 3)
 
@@ -729,6 +761,19 @@ ${(order.order_items||[]).map(i => `
                     minWidth:58, textAlign:'center', flexShrink:0 }}>
                     {isSos ? 'HELP' : count + (count === 1 ? ' item' : ' items')}
                   </span>
+                  {/* Who took the order. On a captain event this is the only
+                      way back from a wrong dish to the person who wrote it down,
+                      which is the whole reason captains are named. */}
+                  {captainName && (
+                    <span title={'Taken by captain ' + captainName}
+                      style={{ flexShrink:0, fontSize:10, fontWeight:800, padding:'2px 7px',
+                        borderRadius:999, maxWidth:74, overflow:'hidden',
+                        textOverflow:'ellipsis', whiteSpace:'nowrap',
+                        background: painted ? onPill : '#EFF6FF',
+                        color: painted ? '#FFFFFF' : '#2563EB' }}>
+                      🧑 {captainName}
+                    </span>
+                  )}
                   {/* Dish names are deliberately NOT on the collapsed row. What
                       gets scanned here is table, time, count, timer and who is on
                       it. The names are listed in full with quantities once the row
@@ -801,6 +846,11 @@ ${(order.order_items||[]).map(i => `
                       </span>
                       <span style={{ fontSize:11, color:'var(--ink2)' }}>since order received</span>
                     </div>
+                    {captainName && (
+                      <div style={{ fontSize:12, color:'#2563EB', fontWeight:700, marginBottom:8 }}>
+                        Order taken by captain {captainName}
+                      </div>
+                    )}
                     <div style={{ marginBottom:10 }}>
                       {lines_.map((li, i) => (
                         <div key={i} style={{ display:'flex', justifyContent:'space-between',

@@ -14,7 +14,7 @@ function catLabel(name) {
 
 
 /* ── Animated Header Carousel ─────────────────────────────────────────── */
-function HeaderCarousel({ eventData, tableNumber, isOnline }) {
+function HeaderCarousel({ eventData, tableNumber, isOnline, captain, onSwitchCaptain }) {
   const hasWelcomeNote = !!(eventData?.welcome_note)
   const hasCatering = !!(eventData?.catering_company || eventData?.catering_logo_url)
   const totalSlides = 1 + (hasCatering ? 1 : 0) + (hasWelcomeNote ? 1 : 0)
@@ -96,12 +96,27 @@ function HeaderCarousel({ eventData, tableNumber, isOnline }) {
 
       {/* Instagram QR strip removed — just carousel + table */}
 
-      {/* Table — 20% */}
+      {/* Captain, or table. A captain's tablet moves between tables all
+          evening, so a fixed table number here would be a lie. Switch hands
+          the device to another captain without a restart or a reinstall. */}
+      {captain ? (
+        <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3 }}>
+          {isOnline===false && <span style={{ background:'#DC2626', color:'#fff', fontSize:8, fontWeight:700, padding:'1px 4px', borderRadius:999 }}>OFFLINE</span>}
+          <div style={{ color:'rgba(255,255,255,0.5)', fontSize:11, fontWeight:600, letterSpacing:'0.5px' }}>CAPTAIN</div>
+          <div style={{ color:'#fff', fontSize:20, fontWeight:900, lineHeight:1.1, maxWidth:110,
+            overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{captain.name}</div>
+          <button onClick={onSwitchCaptain}
+            style={{ background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.25)',
+              color:'rgba(255,255,255,0.75)', borderRadius:999, padding:'2px 10px', fontSize:10,
+              fontWeight:700, cursor:'pointer', marginTop:2 }}>Switch</button>
+        </div>
+      ) : (
       <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3 }}>
         {isOnline===false && <span style={{ background:'#DC2626', color:'#fff', fontSize:8, fontWeight:700, padding:'1px 4px', borderRadius:999 }}>OFFLINE</span>}
         <div style={{ color:'rgba(255,255,255,0.5)', fontSize:11, fontWeight:600, letterSpacing:'0.5px' }}>TABLE</div>
         <div style={{ color:'#fff', fontSize:28, fontWeight:900, lineHeight:1 }}>{tableNumber}</div>
       </div>
+      )}
     </div>
   )
 }
@@ -178,7 +193,7 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
   )
 }
 
-export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen, onBack }) {
+export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen, onBack, captain, onSwitchCaptain }) {
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [search, setSearch] = useState('')
@@ -286,16 +301,21 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
     <div style={{ height:'100vh', display:'flex', flexDirection:'column', background:'#F5F5F5', overflow:'hidden' }}>
 
       {/* HEADER — Animated carousel brand | Table */}
-      <HeaderCarousel eventData={eventData} tableNumber={tableNumber} isOnline={isOnline} />
+      <HeaderCarousel eventData={eventData} tableNumber={tableNumber} isOnline={isOnline}
+        captain={captain} onSwitchCaptain={onSwitchCaptain} />
 
       {/* ACTION BAR + SEARCH on one row */}
       <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff',
         borderBottom:'1px solid #eee', flexShrink:0, alignItems:'center' }}>
 
-        <button onClick={onShowHistory} style={{ flexShrink:0, background:'#fff', color:'#333',
+        {/* Guest features. A captain is taking someone else's order, so their
+            history and their rating are not the captain's to give. */}
+        <button onClick={onShowHistory} style={{ display: captain ? 'none' : 'inline-block', flexShrink:0, background:'#fff', color:'#333',
           border:'1.5px solid #ddd', borderRadius:999, padding:'8px 14px', fontSize:12,
           fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>📋 History</button>
 
+        {/* ss-help-captain - a captain raises this for whichever table they
+            are standing at; the table is asked for when it is sent. */}
         {eventData?.call_waiter_enabled!==false && (
           <button onClick={onShowSOS} style={{ flexShrink:0, background:'#FEF3C7', color:'#92400E',
             border:'1.5px solid #FCD34D', borderRadius:999, padding:'8px 14px', fontSize:12,
@@ -307,8 +327,8 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
             things on one screen compete, and the one we want pressed is
             Order Now. Add ss-cta on its own to make it flash. */}
         <button onClick={onShowFeedback} className="ss-cta ss-cta-still"
-          style={{ flexShrink:0, borderRadius:999, padding:'8px 15px', fontSize:12,
-            whiteSpace:'nowrap' }}>⭐ Feedback</button>
+          style={{ display: captain ? 'none' : 'inline-flex', flexShrink:0, borderRadius:999,
+            padding:'8px 15px', fontSize:12, whiteSpace:'nowrap' }}>⭐ Feedback</button>
 
         <div style={{ flex:1, minWidth:0, background:'#F5F5F5', borderRadius:999,
           padding:'7px 14px', display:'flex', alignItems:'center', gap:6 }}>

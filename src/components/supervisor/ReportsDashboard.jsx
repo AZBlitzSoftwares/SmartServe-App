@@ -28,7 +28,7 @@ export default function ReportsDashboard({ eventData: defaultEvent, onEventChang
     const ev = allEvents.find(e=>e.id===evId) || eventData
     setEventData(ev)
     const [ordersRes, sosRes, fbRes, waitersRes] = await Promise.all([
-      supabase.from('orders').select('*, tables(table_number), order_items(quantity, menu_items(name))').eq('event_id', evId),
+      supabase.from('orders').select('*, tables(table_number), order_items(quantity, menu_items(name)), captains(name)').eq('event_id', evId),
       supabase.from('sos_requests').select('*, tables(table_number), waiters(name), sos_request_items(item_name, quantity)').eq('event_id', evId),
       supabase.from('feedback').select('*, tables(table_number)').eq('event_id', evId),
       supabase.from('waiters').select('*').eq('event_id', evId)
@@ -57,11 +57,23 @@ export default function ReportsDashboard({ eventData: defaultEvent, onEventChang
       if (!itemMap[n]) itemMap[n] = { name:n, qty:0 }
       itemMap[n].qty += oi.quantity
     }))
+    // Orders per captain. Empty on a self-service event, so the card and
+    // the report section below it simply do not render there.
+    const captainMap = {}
+    orders.forEach(o => {
+      const n = o.captains?.name
+      if (!n) return
+      if (!captainMap[n]) captainMap[n] = { name:n, orders:0, items:0, delivered:0, cancelled:0 }
+      captainMap[n].orders++
+      if (o.status==='delivered') captainMap[n].delivered++
+      if (o.status==='cancelled') captainMap[n].cancelled++
+      o.order_items?.forEach(oi => { captainMap[n].items += oi.quantity })
+    })
     const delivered = orders.filter(o=>o.status==='delivered').length
     const cancelled = orders.filter(o=>o.status==='cancelled').length
     const active = orders.filter(o=>!['delivered','cancelled'].includes(o.status)).length
     const avgRating = fb.length ? (fb.reduce((s,f)=>s+(f.rating||0),0)/fb.length).toFixed(1) : null
-    setData({ orders, sos, fb, ws, stats:{ total:orders.length, delivered, cancelled, active }, tableStats:Object.values(tableMap).sort((a,b)=>a.table-b.table), itemStats:Object.values(itemMap).sort((a,b)=>b.qty-a.qty), avgRating })
+    setData({ orders, sos, fb, ws, stats:{ total:orders.length, delivered, cancelled, active }, tableStats:Object.values(tableMap).sort((a,b)=>a.table-b.table), itemStats:Object.values(itemMap).sort((a,b)=>b.qty-a.qty), captainStats:Object.values(captainMap).sort((a,b)=>b.orders-a.orders), avgRating })
     setLoading(false)
   }
 
@@ -93,6 +105,7 @@ ${data.avgRating?'<p>⭐ Avg Guest Rating: <strong>'+data.avgRating+'/5</strong>
 <table><tr><th>Table</th><th>Waiter</th><th>Orders</th><th>Items</th><th>Delivered</th><th>Cancelled</th></tr>
 ${data.tableStats.map(t=>'<tr><td><strong>Table '+t.table+'</strong></td><td>'+(t.waiter||'—')+'</td><td>'+t.orders+'</td><td>'+t.items+'</td><td><span class="badge g">'+t.delivered+'</span></td><td><span class="badge r">'+t.cancelled+'</span></td></tr>').join('')}
 </table>
+${data.captainStats?.length ? '<h2>Captain-wise Summary</h2><table><tr><th>Captain</th><th>Orders</th><th>Items</th><th>Delivered</th><th>Cancelled</th></tr>'+data.captainStats.map(c=>'<tr><td><strong>'+c.name+'</strong></td><td>'+c.orders+'</td><td>'+c.items+'</td><td><span class="badge g">'+c.delivered+'</span></td><td><span class="badge r">'+c.cancelled+'</span></td></tr>').join('')+'</table>' : ''}
 <h2>Most Ordered Dishes</h2>
 <table><tr><th>#</th><th>Dish</th><th>Qty</th></tr>
 ${data.itemStats.slice(0,15).map((item,i)=>'<tr><td>'+( i+1)+'</td><td>'+item.name+'</td><td><strong>'+item.qty+'</strong></td></tr>').join('')}
@@ -110,14 +123,15 @@ ${data.fb.length>0?'<h2>Guest Feedback</h2><table><tr><th>Name</th><th>Rating</t
     // Fetch full order details for rich export
     const { data: orders } = await supabase
       .from('orders')
-      .select('id,status,created_at,delivered_at,assigned_at,tables(table_number),waiters(name),order_items(quantity,menu_items(name,is_veg,is_live_counter))')
+      .select('id,status,created_at,delivered_at,assigned_at,tables(table_number),captains(name),waiters(name),order_items(quantity,menu_items(name,is_veg,is_live_counter))')
       .eq('event_id', selectedEventId)
       .order('created_at', { ascending: true })
 
-    const rows = [['Order ID','Table No','Waiter','Status','Item Name','Veg/Non-Veg','Live Counter','Qty','Order Time','Delivered Time','Duration (mins)']]
+    const rows = [['Order ID','Table No','Captain','Waiter','Status','Item Name','Veg/Non-Veg','Live Counter','Qty','Order Time','Delivered Time','Duration (mins)']]
     ;(orders||[]).forEach(o => {
       const tableNum = o.tables?.table_number || ''
       const waiter = o.waiters?.name || ''
+      const captain = o.captains?.name || ''
       const orderTime = o.created_at ? new Date(o.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true}) : ''
       const deliveredTime = o.delivered_at ? new Date(o.delivered_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true}) : ''
       const duration = (o.delivered_at && o.assigned_at) ? Math.round((new Date(o.delivered_at)-new Date(o.assigned_at))/60000) : ''
@@ -125,7 +139,7 @@ ${data.fb.length>0?'<h2>Guest Feedback</h2><table><tr><th>Name</th><th>Rating</t
       if (o.order_items?.length) {
         o.order_items.forEach(oi => {
           rows.push([
-            orderId, tableNum, waiter, o.status,
+            orderId, tableNum, captain, waiter, o.status,
             oi.menu_items?.name||'',
             oi.menu_items?.is_veg ? 'Veg' : 'Non-Veg',
             oi.menu_items?.is_live_counter ? 'Yes' : 'No',
@@ -134,7 +148,7 @@ ${data.fb.length>0?'<h2>Guest Feedback</h2><table><tr><th>Name</th><th>Rating</t
           ])
         })
       } else {
-        rows.push([orderId, tableNum, waiter, o.status, '', '', '', '', orderTime, deliveredTime, duration])
+        rows.push([orderId, tableNum, captain, waiter, o.status, '', '', '', '', orderTime, deliveredTime, duration])
       }
     })
 
@@ -212,6 +226,25 @@ ${data.fb.length>0?'<h2>Guest Feedback</h2><table><tr><th>Name</th><th>Rating</t
               </div>
             ))}
           </div>
+
+          {/* Captain-wise. Only rendered when the event actually had
+              captains, so a self-service report is unchanged. */}
+          {data.captainStats?.length > 0 && (
+            <div style={{ background:'#fff',borderRadius:16,padding:16,marginBottom:16,boxShadow:'var(--shadow)' }}>
+              <div style={{ fontWeight:800,fontSize:16,marginBottom:12 }}>Captain-wise Summary</div>
+              {data.captainStats.map(c => (
+                <div key={c.name} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 0',borderBottom:'1px solid var(--line)' }}>
+                  <div style={{ fontWeight:700,fontSize:15 }}>🧑 {c.name}</div>
+                  <div style={{ display:'flex',gap:10,fontSize:13 }}>
+                    <span><strong style={{ color:'var(--ink)' }}>{c.orders}</strong> orders</span>
+                    <span style={{ color:'var(--ink2)' }}>{c.items} items</span>
+                    <span style={{ color:'#16A34A',fontWeight:700 }}>✓{c.delivered}</span>
+                    {c.cancelled>0 && <span style={{ color:'#DC2626',fontWeight:700 }}>✗{c.cancelled}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Top dishes */}
           <div style={{ background:'#fff',borderRadius:16,padding:16,marginBottom:16,boxShadow:'var(--shadow)' }}>
