@@ -89,6 +89,18 @@ export default function CaptainTablePrompt({ eventData, itemCount, onCancel, onC
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(26,10,10,0.82)', zIndex:130,
       display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+      {/* The flash keyframes live in CartDrawer too, but this prompt also
+          opens from the Help panel, where CartDrawer may not be mounted at
+          all - so it carries its own copy rather than depending on another
+          component happening to be on screen. */}
+      <style>{`
+        @keyframes ssPromptFlash {
+          0%, 100% { background: #E8890C; box-shadow: 0 3px 12px rgba(232,137,12,0.40); transform: scale(1); }
+          50%      { background: #FFB03A; box-shadow: 0 5px 26px rgba(232,137,12,0.90); transform: scale(1.045); }
+        }
+        .ss-prompt-go { animation: ssPromptFlash 1s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .ss-prompt-go { animation: none; } }
+      `}</style>
       <div style={{ width:'100%', maxWidth:640, background:'#fff',
         borderRadius:'24px 24px 0 0', padding:'22px 20px calc(24px + env(safe-area-inset-bottom))',
         maxHeight:'92vh', overflowY:'auto', boxSizing:'border-box' }}>
@@ -115,12 +127,16 @@ export default function CaptainTablePrompt({ eventData, itemCount, onCancel, onC
             style={{ flex:1, minWidth:0, border:'2px solid ' + (picked ? '#16A34A' : '#E5E7EB'),
               borderRadius:12, padding:'14px 16px', fontSize:20, fontWeight:900,
               textAlign:'center', fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }} />
+          {/* Flashes once a table is chosen, the same signal Order Now uses
+              on the menu. A flat green button read as decoration and people
+              were not pressing it. */}
           <button onClick={confirm} disabled={!picked || busy}
-            style={{ flexShrink:0, background: picked && !busy ? '#16A34A' : '#E5E7EB',
+            className={picked && !busy ? 'ss-prompt-go' : ''}
+            style={{ flexShrink:0, background: picked && !busy ? '#E8890C' : '#E5E7EB',
               color: picked && !busy ? '#fff' : '#9CA3AF', border:'none', borderRadius:12,
-              padding:'14px 24px', fontSize:16, fontWeight:900,
+              padding:'14px 26px', fontSize:16, fontWeight:900,
               cursor: picked && !busy ? 'pointer' : 'not-allowed', whiteSpace:'nowrap' }}>
-            {busy ? 'Sending…' : picked ? 'Send \u2192' : 'Send'}
+            {busy ? 'Placing…' : 'Place Order'}
           </button>
         </div>
 
@@ -188,7 +204,7 @@ export default function CaptainTablePrompt({ eventData, itemCount, onCancel, onC
           style={{ width:'100%', marginTop:16, background:'#F5F5F5', border:'none',
             borderRadius:12, padding:'14px', fontSize:14, fontWeight:700, color:'#888',
             cursor: busy ? 'wait' : 'pointer' }}>
-          Back to the order
+          Back to cart
         </button>
       </div>
     </div>

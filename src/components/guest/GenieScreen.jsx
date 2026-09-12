@@ -14,12 +14,25 @@ import { FaceSVG, SENTIMENT_CONFIG } from './FeedbackModal'
    Exits, all of which clear the timer:
      Place Another Order  -> Menu
      any face     -> feedback saved -> Welcome
-     30s timeout  -> Welcome                                    */
+     30s timeout  -> Welcome
+
+   CAPTAIN MODE differs in three ways, and only three:
+
+     - No feedback faces. The captain is not the diner; a rating from
+       them would be a rating of their own service, which is worthless
+       to the caterer and pollutes the feedback report.
+     - The table number is shown, because a captain works every table
+       in the room and needs to see the order went where they meant.
+     - Eight seconds rather than thirty, then back to the menu. A guest
+       has finished eating and can sit with it; a captain has four more
+       tables waiting and must not have to dismiss anything.            */
 
 const SECONDS = 30
+const CAPTAIN_SECONDS = 8
 
-export default function GenieScreen({ tableData, eventData, orderId, onOrderAgain, onDone }) {
-  const [left, setLeft] = useState(SECONDS)
+export default function GenieScreen({ tableData, eventData, orderId, onOrderAgain, onDone, captain, forTable }) {
+  const captainMode = !!captain
+  const [left, setLeft] = useState(captainMode ? CAPTAIN_SECONDS : SECONDS)
   const [saving, setSaving] = useState(false)
   const [chosen, setChosen] = useState(null)
   const videoRef = useRef(null)
@@ -30,7 +43,12 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
       setLeft(prev => {
         if (prev <= 1) {
           clearInterval(t)
-          if (!doneRef.current) { doneRef.current = true; onDone() }
+          // A captain goes back to the menu, not to a Welcome screen they
+          // do not have. onOrderAgain is exactly that route.
+          if (!doneRef.current) {
+            doneRef.current = true
+            captainMode ? onOrderAgain() : onDone()
+          }
           return 0
         }
         return prev - 1
@@ -82,6 +100,16 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
         {left}s
       </div>
 
+      {/* Which table this went to. Only in captain mode - a guest already
+          knows which table they are sitting at. */}
+      {captainMode && forTable != null && forTable !== '' && (
+        <div style={{ position:'absolute', top:14, left:14, background:'#16A34A',
+          color:'#fff', borderRadius:999, padding:'6px 16px', fontSize:14, fontWeight:900,
+          boxShadow:'0 3px 12px rgba(22,163,74,0.45)' }}>
+          TABLE {forTable}
+        </div>
+      )}
+
       {/* Video capped by viewport height, never by its own size */}
       {/* Clipping frame. The video is scaled up and nudged upward so the
           generator's watermark in the bottom right corner falls outside
@@ -116,39 +144,52 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
 
       <div style={{ fontSize:'clamp(18px, 2.9vh, 26px)', fontWeight:900, color:'#1A0A0A',
         textAlign:'center', lineHeight:1.25, maxWidth:520, flexShrink:0 }}>
-        Your order will be served in few minutes
+        {captainMode ? 'Order placed' : 'Your order will be served in few minutes'}
       </div>
 
-      <div style={{ fontSize:'clamp(12px, 1.7vh, 15px)', fontWeight:700, color:'#6B6B6B',
-        textAlign:'center', marginTop:'0.6vh', flexShrink:0 }}>
-        How is your experience using the app?
-      </div>
+      {captainMode && (
+        <div style={{ fontSize:'clamp(13px, 1.9vh, 16px)', fontWeight:700, color:'#4B4B4B',
+          textAlign:'center', lineHeight:1.4, maxWidth:480, flexShrink:0 }}>
+          Their order will be served in few minutes
+        </div>
+      )}
 
-      {/* Faces with their names. An unlabelled face is a guess - the
-          middle one especially - and this is the only feedback most
-          guests will ever give, so it should mean what they intended.
-          Labels come from SENTIMENT_CONFIG so this screen and the
-          detailed feedback page can never drift apart. */}
-      <div style={{ display:'flex', gap:'5vw', maxWidth:380, justifyContent:'center',
-        flexShrink:0 }}>
-        {Object.keys(SENTIMENT_CONFIG).map(key => {
-          const cfg = SENTIMENT_CONFIG[key]
-          return (
-            <button key={key} onClick={() => pickFace(key)} disabled={saving}
-              style={{ background:'none', border:'none', padding:'4px 2px', cursor:'pointer',
-                display:'flex', flexDirection:'column', alignItems:'center', gap:5,
-                opacity: chosen && chosen !== key ? 0.35 : 1,
-                transform: chosen === key ? 'scale(1.12)' : 'scale(1)',
-                transition:'all 0.18s', WebkitTapHighlightColor:'transparent' }}>
-              <FaceSVG type={key} size={50} />
-              <span style={{ fontSize:'clamp(11px, 1.5vh, 14px)', fontWeight:800,
-                color: cfg.color, whiteSpace:'nowrap', letterSpacing:'0.2px' }}>
-                {cfg.label}
-              </span>
-            </button>
-          )
-        })}
-      </div>
+      {/* Feedback belongs to the guest who ate the food. A captain rating
+          their own service tells the caterer nothing. */}
+      {!captainMode && (
+        <>
+          <div style={{ fontSize:'clamp(12px, 1.7vh, 15px)', fontWeight:700, color:'#6B6B6B',
+            textAlign:'center', marginTop:'0.6vh', flexShrink:0 }}>
+            How is your experience using the app?
+          </div>
+
+          {/* Faces with their names. An unlabelled face is a guess - the
+              middle one especially - and this is the only feedback most
+              guests will ever give, so it should mean what they intended.
+              Labels come from SENTIMENT_CONFIG so this screen and the
+              detailed feedback page can never drift apart. */}
+          <div style={{ display:'flex', gap:'5vw', maxWidth:380, justifyContent:'center',
+            flexShrink:0 }}>
+            {Object.keys(SENTIMENT_CONFIG).map(key => {
+              const cfg = SENTIMENT_CONFIG[key]
+              return (
+                <button key={key} onClick={() => pickFace(key)} disabled={saving}
+                  style={{ background:'none', border:'none', padding:'4px 2px', cursor:'pointer',
+                    display:'flex', flexDirection:'column', alignItems:'center', gap:5,
+                    opacity: chosen && chosen !== key ? 0.35 : 1,
+                    transform: chosen === key ? 'scale(1.12)' : 'scale(1)',
+                    transition:'all 0.18s', WebkitTapHighlightColor:'transparent' }}>
+                  <FaceSVG type={key} size={50} />
+                  <span style={{ fontSize:'clamp(11px, 1.5vh, 14px)', fontWeight:800,
+                    color: cfg.color, whiteSpace:'nowrap', letterSpacing:'0.2px' }}>
+                    {cfg.label}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
 
       {/* Flashes for the same reason Order Now does on the menu - it is the
           action we want the guest to notice on a screen that otherwise
@@ -165,7 +206,7 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
         style={{ marginTop:'0.6vh', marginBottom:'0.4vh',
           padding:'clamp(11px, 1.6vh, 15px) 40px',
           fontSize:'clamp(14px, 2vh, 17px)', flexShrink:0 }}>
-        Place Another Order →
+        {captainMode ? 'Next Table →' : 'Place Another Order →'}
       </button>
     </div>
   )
