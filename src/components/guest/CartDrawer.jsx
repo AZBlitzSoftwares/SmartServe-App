@@ -176,25 +176,36 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
         padding:'12px 16px calc(12px + env(safe-area-inset-bottom))',
         display:'flex', alignItems:'center', gap:12, boxSizing:'border-box' }}>
 
-        {/* LEFT - View Cart, secondary */}
+        {/* View Cart. Secondary for a guest, who has Order Now beside it -
+            but the ONLY button on a captain's bar, so there it becomes the
+            filled, flashing primary and takes the full width. */}
         <button onClick={() => { setOpen(true); onCartOpenChange?.(true) }}
-          style={{ flexShrink:0, background:'#FFF8EE', border:'2px solid #E8890C',
+          className={captainMode && !placing ? 'ss-order-now' : ''}
+          style={{ flexShrink:0, flex: captainMode ? 1 : 'none',
+            justifyContent: captainMode ? 'center' : 'flex-start',
+            background: captainMode ? '#E8890C' : '#FFF8EE',
+            border: captainMode ? 'none' : '2px solid #E8890C',
             borderRadius:14, padding:'13px 17px', display:'flex', alignItems:'center',
             gap:9, cursor:'pointer' }}>
           <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#C06A00"
-            strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+            style={{ stroke: captainMode ? '#fff' : '#C06A00' }}>
             <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
             <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
           </svg>
-          <span style={{ color:'#C06A00', fontWeight:800, fontSize:16, whiteSpace:'nowrap' }}>View Cart</span>
-          <span style={{ background:'#E8890C', color:'#fff', borderRadius:999, minWidth:23,
+          <span style={{ color: captainMode ? '#fff' : '#C06A00', fontWeight:800,
+            fontSize:16, whiteSpace:'nowrap' }}>View Cart</span>
+          <span style={{ background: captainMode ? 'rgba(255,255,255,0.28)' : '#E8890C',
+            color:'#fff', borderRadius:999, minWidth:23,
             height:23, padding:'0 7px', display:'flex', alignItems:'center',
             justifyContent:'center', fontWeight:800, fontSize:13 }}>{total}</span>
         </button>
 
         {/* RIGHT - Order Now, primary, flashing, takes the rest of the width.
-            In captain mode the label says what actually happens next: a
-            table is asked for before anything is sent. */}
+            Not rendered in captain mode: the table has to be chosen from
+            inside the cart, so two competing primaries on this bar only
+            invited the wrong one to be pressed. */}
+        {!captainMode && (
         <button className={placing ? '' : 'ss-order-now'}
           onClick={() => { if (orderLimitHit) { setShowWait(true) } else { placeOrder() } }}
           disabled={placing}
@@ -202,8 +213,9 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             border:'none', borderRadius:14, padding:'14px 27px', color:'#fff',
             fontWeight:900, fontSize:17, whiteSpace:'nowrap',
             cursor: placing ? 'wait' : 'pointer' }}>
-          {placing ? 'Placing...' : captainMode ? 'Choose Table \u2192' : 'Order Now \u2192'}
+          {placing ? 'Placing...' : 'Order Now \u2192'}
         </button>
+        )}
       </div>
 
       {/* ORDER LIMIT - 15 second waiting screen. Rose card on a dimmed
@@ -297,14 +309,18 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
               </div>
             )}
 
+            {/* Amber and flashing in captain mode. The near-black version read
+                as a disabled button and captains were not pressing it - which
+                is the whole reason this step looked broken. */}
             <button onClick={placeOrder} disabled={placing || orderLimitHit}
-              style={{ width:'100%', background: placing ? '#999' : orderLimitHit ? '#E5E7EB' : '#1A0A0A', color: orderLimitHit ? '#9CA3AF' : '#fff', border:'none', borderRadius:14, padding:'18px', fontSize:17, fontWeight:800, cursor: placing || orderLimitHit ? 'not-allowed' : 'pointer', transition:'all 0.2s', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+              className={captainMode && !placing && !orderLimitHit ? 'ss-order-now' : ''}
+              style={{ width:'100%', background: placing ? '#999' : orderLimitHit ? '#E5E7EB' : captainMode ? '#E8890C' : '#1A0A0A', color: orderLimitHit ? '#9CA3AF' : '#fff', border:'none', borderRadius:14, padding:'18px', fontSize:17, fontWeight:800, cursor: placing || orderLimitHit ? 'not-allowed' : 'pointer', transition:'all 0.2s', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
               {placing
                 ? '⏳ Placing Order...'
                 : orderLimitHit
                   ? '🔒 Please Wait'
                   : captainMode
-                    ? '🔢 Choose Table'
+                    ? '🔢 Select Table'
                     : '✓ Place Order'}
             </button>
           </div>

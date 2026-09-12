@@ -262,6 +262,21 @@ export default function GuestApp() {
     if (ok && ev && td) {
       try {
         const evObj = JSON.parse(ev)
+
+        // A guest session saved for an earlier event must not resume today.
+        // This is exactly what put a Select Table screen in front of a
+        // captain: the tablet restored a previous setup before it ever
+        // looked at which event is actually running.
+        const d0 = new Date()
+        const todayISO = d0.getFullYear() + '-' + String(d0.getMonth()+1).padStart(2,'0') +
+          '-' + String(d0.getDate()).padStart(2,'0')
+        if (evObj.date !== todayISO || evObj.service_mode === 'captain') {
+          ;['ss_setup_complete','ss_setup_event','ss_setup_table','ss_setup_table_number']
+            .forEach(k => localStorage.removeItem(k))
+          decideEntry()
+          return
+        }
+
         setEventData(evObj)
         setTableData(JSON.parse(td))
         setTableNumber(parseInt(tNum))
@@ -292,6 +307,14 @@ export default function GuestApp() {
       const active = (data || []).filter(e => e.date === today)
       const capEvents  = active.filter(e => e.service_mode === 'captain')
       const selfEvents = active.filter(e => e.service_mode !== 'captain')
+
+      // Asked once per tablet, then remembered. With both kinds of event
+      // running today the tablet cannot know by itself, but a device that
+      // was a captain's yesterday is almost certainly a captain's today -
+      // and nobody wants to answer this on twenty tablets before service.
+      const remembered = localStorage.getItem('ss_device_mode')
+      if (remembered === 'captain' && capEvents.length)  { goTo('captain'); return }
+      if (remembered === 'guest'   && selfEvents.length) { goTo('setup');   return }
       if (capEvents.length && !selfEvents.length) { goTo('captain'); return }
       if (capEvents.length && selfEvents.length)  { goTo('entry');   return }
       goTo('setup')
@@ -328,10 +351,29 @@ export default function GuestApp() {
     try {
       const { data } = await supabase.from('events')
         .select('*').eq('id', eventId).single()
-      if (data) {
-        setEventData(data)
-        localStorage.setItem('ss_setup_event', JSON.stringify(data))
+      if (!data) return
+      setEventData(data)
+
+      // A captain tablet keeps its own key and must never write the guest
+      // ones. Doing so left half a guest session on every captain device,
+      // which is what later resumed as a Select Table screen.
+      if (captainRef.current) {
+        localStorage.setItem('ss_captain_event', JSON.stringify(data))
+        return
       }
+
+      // The admin switched this event to Captain Service while the tablet
+      // was sitting on it. Stop being a guest tablet rather than holding a
+      // table number nobody will ever place a tablet on.
+      if (data.service_mode === 'captain') {
+        ;['ss_setup_complete','ss_setup_event','ss_setup_table','ss_setup_table_number']
+          .forEach(k => localStorage.removeItem(k))
+        setTableData(null); setTableNumber(null)
+        goTo('captain')
+        return
+      }
+
+      localStorage.setItem('ss_setup_event', JSON.stringify(data))
     } catch (e) {}
   }
 
@@ -501,13 +543,14 @@ export default function GuestApp() {
     // reads it as true the next time it mounts and opens on its own.
     setCart([]); setCartOpen(false)
 
-    // A captain has no genie screen and no table of their own to track.
-    // A short confirmation, then straight back to the menu for the next
-    // table - the genie screen would be a dead end mid-shift.
+    // A captain gets the Genie screen too - the caterer asked for it, and
+    // it reads as a real confirmation rather than a toast that vanishes.
+    // It differs only in what it shows: the table it went to, no feedback
+    // faces, and eight seconds instead of thirty.
     if (captainRef.current) {
       setCaptainSent(forTable != null ? String(forTable) : '')
-      setTimeout(() => setCaptainSent(null), 2600)
-      goTo('menu')
+      setLastOrderId(newOrderId || null)
+      goTo('genie')
       return
     }
 
@@ -546,7 +589,9 @@ export default function GuestApp() {
   )
 
   if (appState === 'entry') return (
-    <EntryChooser onGuest={() => goTo('setup')} onCaptain={() => goTo('captain')} />
+    <EntryChooser
+      onGuest={() => { localStorage.setItem('ss_device_mode', 'guest'); goTo('setup') }}
+      onCaptain={() => { localStorage.setItem('ss_device_mode', 'captain'); goTo('captain') }} />
   )
 
   if (appState === 'captain') return (
@@ -584,7 +629,8 @@ export default function GuestApp() {
       )}
       {appState === 'genie' && (
         <GenieScreen tableData={tableData} eventData={eventData} orderId={lastOrderId}
-          onOrderAgain={() => goTo('menu')}
+          captain={captain} forTable={captainSent}
+          onOrderAgain={() => { setCaptainSent(null); goTo('menu') }}
           onDone={() => goTo('welcome')} />
       )}
       {appState === 'status' && (
@@ -598,30 +644,7 @@ export default function GuestApp() {
           onRemove={removeFromCart} onAdd={addToCart}
           cartOpen={cartOpen} onCartOpenChange={setCartOpen} captain={captain} />
       )}
-      {/* Captain order confirmation. Deliberately brief and self-clearing:
-          a captain is already walking to the next table. */}
-      {captainSent !== null && (
-        <div style={{ position:'fixed', inset:0, zIndex:150, background:'rgba(26,10,10,0.8)',
-          display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
-          <div style={{ background:'#F0FDF4', border:'3px solid #86EFAC', borderRadius:24,
-            padding:'34px 30px', textAlign:'center', maxWidth:380, width:'100%',
-            boxShadow:'0 20px 60px rgba(0,0,0,0.45)' }}>
-            <div style={{ fontSize:52, marginBottom:10, lineHeight:1 }}>✅</div>
-            <div style={{ fontWeight:900, fontSize:26, color:'#15803D', marginBottom:6 }}>
-              Order Sent
-            </div>
-            {captainSent && (
-              <div style={{ fontSize:17, color:'#166534', fontWeight:700 }}>
-                Table {captainSent}
-              </div>
-            )}
-            <div style={{ fontSize:13, color:'#4D7C61', marginTop:10, lineHeight:1.5 }}>
-              The supervisor has it. Ready for the next table.
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* ss-toast-removed-48 - the Genie screen replaced this in batch 48 */}
       {showSOS && <SOSPanel tableData={tableData} eventData={eventData} captain={captain}
         onClose={() => { setShowSOS(false); goTo('menu') }} />}
       {showHistory && <OrderHistory tableData={tableData} eventData={eventData}

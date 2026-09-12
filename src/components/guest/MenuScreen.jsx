@@ -126,32 +126,38 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
   const setOpen = onMenuSheetChange
   return (
     <>
-      {/* Bottom-right button group: Track Order + MENU */}
-      {/* TRACK - bottom CENTRE, only when something is live. Centre because
-          every menu row is left-aligned text with the image on the right,
-          so the middle column is clear on every row.
-          Lifts above the cart bar when the bar is showing. */}
-      {hasActiveOrders && (
-        <div style={{ position:'fixed', bottom: cartCount>0 ? 96 : 24, left:'50%',
-          transform:'translateX(-50%)', zIndex:60 }}>
+      {/* One solid bar across the bottom instead of two buttons floating
+          over the list. Floating, they sat on top of the dish photo on
+          whichever row happened to be at the bottom of the scroll - and on
+          a tablet that is most of the time.
+
+          Lifts above the cart bar when the cart has items. The scroll area's
+          bottom padding below matches these heights, so the last dish can
+          always be scrolled clear of it. */}
+      <div style={{ position:'fixed', left:0, right:0, zIndex:60,
+        bottom: cartCount>0 ? 'calc(70px + env(safe-area-inset-bottom))' : 0,
+        background:'#fff', borderTop:'1px solid #ECECEC',
+        boxShadow:'0 -4px 16px rgba(0,0,0,0.07)',
+        padding: cartCount>0 ? '9px 16px' : '9px 16px calc(9px + env(safe-area-inset-bottom))',
+        display:'flex', alignItems:'center', gap:10, boxSizing:'border-box' }}>
+
+        {/* Track sits left, so the two never fight for the same corner */}
+        {hasActiveOrders && (
           <button onClick={onShowStatus} style={{
             background:'#16A34A', color:'#fff', border:'none', borderRadius:999,
-            padding:'12px 20px', fontSize:14, fontWeight:800, cursor:'pointer',
-            boxShadow:'0 6px 20px rgba(22,163,74,0.45)',
-            display:'flex', alignItems:'center', gap:6
+            padding:'11px 20px', fontSize:14, fontWeight:800, cursor:'pointer',
+            display:'flex', alignItems:'center', gap:6, flexShrink:0
           }}>
             📦 Track
           </button>
-        </div>
-      )}
+        )}
 
-      {/* MENU - bottom RIGHT corner, always present */}
-      <div style={{ position:'fixed', bottom: cartCount>0 ? 96 : 24, right:16, zIndex:60, display:'flex', gap:8, alignItems:'center' }}>
+        <span style={{ flex:1 }} />
+
         <button onClick={()=>setOpen(true)} style={{
           background:'#1A0A0A', color:'#fff', border:'none', borderRadius:999,
-          padding:'12px 22px', fontSize:14, fontWeight:800, cursor:'pointer',
-          boxShadow:'0 6px 20px rgba(0,0,0,0.4)',
-          display:'flex', alignItems:'center', gap:8, letterSpacing:'0.5px'
+          padding:'11px 22px', fontSize:14, fontWeight:800, cursor:'pointer',
+          display:'flex', alignItems:'center', gap:8, letterSpacing:'0.5px', flexShrink:0
         }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           MENU
@@ -314,9 +320,10 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
           border:'1.5px solid #ddd', borderRadius:999, padding:'8px 14px', fontSize:12,
           fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>📋 History</button>
 
-        {/* ss-help-captain - a captain raises this for whichever table they
-            are standing at; the table is asked for when it is sent. */}
-        {eventData?.call_waiter_enabled!==false && (
+        {/* ss-help-guest-only. Help was opened to captains in 46c and closed
+            again here at the caterer's request - a captain standing at the
+            table simply tells a waiter, which is faster than the app. */}
+        {eventData?.call_waiter_enabled!==false && !captain && (
           <button onClick={onShowSOS} style={{ flexShrink:0, background:'#FEF3C7', color:'#92400E',
             border:'1.5px solid #FCD34D', borderRadius:999, padding:'8px 14px', fontSize:12,
             fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>🔔 Help</button>
@@ -353,7 +360,10 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       )}
 
       {/* SCROLLABLE MENU CONTENT */}
-      <div ref={scrollRef} style={{ flex:1, overflowY:'auto', paddingBottom: cartCount>0?190:96 }}>
+      {/* ss-scroll-pad-49. Must clear the menu bar, and the cart bar under
+          it when the cart has items, or the last dish can never be reached. */}
+      <div ref={scrollRef} style={{ flex:1, overflowY:'auto',
+        paddingBottom: cartCount>0 ? 200 : 110 }}>
         {loading ? (
           <div style={{ textAlign:'center', padding:60, color:'#888' }}>Loading menu...</div>
         ) : search.length>0 ? (
