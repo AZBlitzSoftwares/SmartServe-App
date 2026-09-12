@@ -62,7 +62,10 @@ export default function SOSPanel({ tableData, eventData, onClose, captain }) {
           .select('*').eq('table_id', tableData.id)
           .in('status', ['open', 'in_progress', 'acknowledged'])
           .order('created_at', { ascending: false }).limit(1)
-        if (open && open.length) setActiveRequest(open[0])
+        // Land on the live request rather than the item list. Reopening Help
+        // while something is already outstanding is almost always the guest
+        // asking "is it coming?", not starting a second request.
+        if (open && open.length) { setActiveRequest(open[0]); setSent(true) }
       }
     } catch (e) {
       console.error('Help load error:', e)
@@ -74,6 +77,38 @@ export default function SOSPanel({ tableData, eventData, onClose, captain }) {
   // The panel must not claim a waiter is coming before one is assigned.
   // Poll the live request so it flips by itself when the supervisor acts.
   const assigned = !!(activeRequest && (activeRequest.status === 'in_progress' || activeRequest.waiter_id))
+
+  const [cancelling, setCancelling] = useState(false)
+
+  /* Take back a request nobody has picked up yet.
+
+     Cancelled, not resolved. Closing a request the guest withdrew as
+     'resolved' would tell the caterer's report that a waiter dealt with
+     it, which is the kind of quiet lie that makes a report useless. */
+  async function cancelRequest() {
+    if (!activeRequest?.id || cancelling) return
+    setCancelling(true)
+    try {
+      // Re-read first: the supervisor may have assigned someone in the
+      // seconds since the last poll, and that waiter is already walking.
+      const { data } = await supabase.from('sos_requests')
+        .select('status, waiter_id').eq('id', activeRequest.id).single()
+      if (data?.waiter_id || data?.status === 'in_progress') {
+        setActiveRequest(prev => ({ ...prev, ...data }))
+        setCancelling(false)
+        return
+      }
+      await supabase.from('sos_requests')
+        .update({ status:'cancelled' }).eq('id', activeRequest.id)
+      setActiveRequest(null)
+      setSent(false)
+      setQty({})
+      onClose()
+    } catch (e) {
+      console.error('Help cancel error:', e)
+    }
+    setCancelling(false)
+  }
 
   useEffect(() => {
     if (captainMode) return
@@ -225,18 +260,30 @@ export default function SOSPanel({ tableData, eventData, onClose, captain }) {
             <div style={{ fontWeight:800, fontSize:17, color:'#16A34A', marginBottom:4 }}>
               {captainMode
                 ? 'Request Sent' + (sentTable != null ? ' \u00B7 Table ' + sentTable : '')
-                : assigned ? 'Waiter On The Way' : 'Request Sent'}
+                : 'Request Sent'}
             </div>
             <div style={{ fontSize:14, color:'#15803D', lineHeight:1.5, fontWeight:600 }}>
               {captainMode
                 ? 'The supervisor has it and will send a waiter.'
-                : assigned
-                  ? (activeRequest?.waiters?.name
-                      ? 'Waiter ' + activeRequest.waiters.name + ' is coming to your table.'
-                      : 'Your waiter is coming to your table.')
-                  : 'A waiter will come to your table soon.'}
+                : 'We will reach you soon.'}
             </div>
-            <div style={{ display:'flex', gap:8, marginTop:14 }}>
+            {/* Live status, guest side. The request was previously a dead end:
+                once sent there was no way to see whether anyone had picked it
+                up, and no way to take it back if the guest changed their mind
+                or someone walked past and helped anyway. */}
+            {!captainMode && (
+              <div style={{ background:'#fff', border:'1px solid #BBF7D0', borderRadius:12,
+                padding:'10px 12px', marginTop:12, fontSize:13, fontWeight:700,
+                color: assigned ? '#2563EB' : '#15803D' }}>
+                {assigned
+                  ? (activeRequest?.waiters?.name
+                      ? 'Waiter ' + activeRequest.waiters.name + ' is coming'
+                      : 'Someone is on the way')
+                  : 'Waiting for a waiter to be assigned'}
+              </div>
+            )}
+
+            <div style={{ display:'flex', gap:8, marginTop:14, flexWrap:'wrap' }}>
               {/* A captain will very often need to raise the next one straight
                   away for a different table, so that path stays one tap. */}
               {captainMode && (
@@ -246,8 +293,22 @@ export default function SOSPanel({ tableData, eventData, onClose, captain }) {
                   Another table
                 </button>
               )}
+
+              {/* Only before anyone is assigned. Once a waiter has set off,
+                  cancelling here would send them to a table that is no longer
+                  expecting them - the supervisor has to make that call. */}
+              {!captainMode && !assigned && activeRequest?.id && (
+                <button onClick={cancelRequest} disabled={cancelling}
+                  style={{ flex:1, minWidth:130, background:'transparent',
+                    border:'1.5px solid #FECACA', color:'#DC2626',
+                    borderRadius:12, padding:'13px', fontSize:15, fontWeight:800,
+                    cursor: cancelling ? 'wait' : 'pointer' }}>
+                  {cancelling ? 'Cancelling\u2026' : '\u2715 Cancel request'}
+                </button>
+              )}
+
               <button onClick={onClose}
-                style={{ flex:1, background:'#1A0A0A', color:'#fff', border:'none',
+                style={{ flex:1, minWidth:130, background:'#1A0A0A', color:'#fff', border:'none',
                   borderRadius:12, padding:'13px', fontSize:15, fontWeight:800, cursor:'pointer' }}>
                 Done
               </button>

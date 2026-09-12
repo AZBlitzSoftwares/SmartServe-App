@@ -121,7 +121,9 @@ function HeaderCarousel({ eventData, tableNumber, isOnline, captain, onSwitchCap
   )
 }
 
-function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, onShowStatus, menuSheetOpen, onMenuSheetChange, onBack }) {
+// captain is read by the bottom bar below - without it here the whole
+// menu screen crashes with "captain is not defined" the moment it renders.
+function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, onShowStatus, menuSheetOpen, onMenuSheetChange, onBack, captain }) {
   const open = menuSheetOpen
   const setOpen = onMenuSheetChange
   return (
@@ -142,7 +144,10 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
         display:'flex', alignItems:'center', gap:10, boxSizing:'border-box' }}>
 
         {/* Track sits left, so the two never fight for the same corner */}
-        {hasActiveOrders && (
+        {/* A captain always has this: their orders are spread across the
+            whole room, so "is anything waiting" cannot be answered from the
+            menu screen the way a guest answers it for their own table. */}
+        {(hasActiveOrders || captain) && (
           <button onClick={onShowStatus} style={{
             background:'#16A34A', color:'#fff', border:'none', borderRadius:999,
             padding:'11px 20px', fontSize:14, fontWeight:800, cursor:'pointer',
@@ -394,7 +399,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
 
       {/* FLOATING BOTTOM BUTTONS — MENU (right) + Track Order (left of menu) */}
       {search.length === 0 && categories.length > 0 && (
-        <MenuModal categories={categories} items={items} onSelect={scrollToCategory} cartCount={cartCount} hasActiveOrders={hasActiveOrders} onShowStatus={onShowStatus} menuSheetOpen={menuSheetOpen} onMenuSheetChange={setMenuSheetOpen} onBack={onBack} />
+        <MenuModal categories={categories} items={items} onSelect={scrollToCategory} cartCount={cartCount} hasActiveOrders={hasActiveOrders} onShowStatus={onShowStatus} menuSheetOpen={menuSheetOpen} onMenuSheetChange={setMenuSheetOpen} onBack={onBack} captain={captain} />
       )}
 
       {/* FEEDBACK BUBBLE */}
