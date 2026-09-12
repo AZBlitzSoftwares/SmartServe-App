@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase'
 import { getPendingOrders, clearOrder } from '../lib/offlineQueue'
 import SetupScreen from '../components/guest/SetupScreen'
 import CaptainLogin, { EntryChooser } from '../components/guest/CaptainLogin'
+import CaptainOrders from '../components/guest/CaptainOrders'
+import { installTapFx } from '../lib/feedbackFx'
 import WelcomeScreen from '../components/guest/WelcomeScreen'
 import MenuScreen from '../components/guest/MenuScreen'
 import CartDrawer from '../components/guest/CartDrawer'
@@ -32,6 +34,7 @@ export default function GuestApp() {
   const [captain, setCaptain] = useState(null)
   // Table number of the order just sent, shown briefly then cleared
   const [captainSent, setCaptainSent] = useState(null)
+  const [showCaptainOrders, setShowCaptainOrders] = useState(false)
   const [cart, setCart] = useState([])
   const [activeOrders, setActiveOrders] = useState([])
   const [activeHelp, setActiveHelp] = useState([])
@@ -71,6 +74,11 @@ export default function GuestApp() {
   useEffect(() => { activeOrdersRef.current = activeOrders }, [activeOrders])
   useEffect(() => { showExitGateRef.current = showExitGate }, [showExitGate])
   useEffect(() => { captainRef.current = captain },           [captain])
+
+  // A short vibration and a quiet click on every button, guest and captain
+  // alike. Installed once at the document level rather than wired into each
+  // of the hundred-odd buttons, which would guarantee some got missed.
+  useEffect(() => installTapFx(), [])
 
   function goTo(screen) {
     appStateRef.current = screen
@@ -620,7 +628,7 @@ export default function GuestApp() {
           cartCount={cartCount} isOnline={isOnline}
           onShowSOS={() => setShowSOS(true)}
           onShowHistory={() => setShowHistory(true)}
-          onShowStatus={() => goTo('status')}
+          onShowStatus={() => captain ? setShowCaptainOrders(true) : goTo('status')}
           onBack={() => goTo('welcome')}
           hasActiveOrders={hasActiveOrders}
           menuSheetOpen={menuSheetOpen} setMenuSheetOpen={setMenuSheetOpen}
@@ -645,6 +653,11 @@ export default function GuestApp() {
           cartOpen={cartOpen} onCartOpenChange={setCartOpen} captain={captain} />
       )}
       {/* ss-toast-removed-48 - the Genie screen replaced this in batch 48 */}
+      {showCaptainOrders && captain && (
+        <CaptainOrders eventData={eventData} captain={captain}
+          onClose={() => setShowCaptainOrders(false)} />
+      )}
+
       {showSOS && <SOSPanel tableData={tableData} eventData={eventData} captain={captain}
         onClose={() => { setShowSOS(false); goTo('menu') }} />}
       {showHistory && <OrderHistory tableData={tableData} eventData={eventData}
