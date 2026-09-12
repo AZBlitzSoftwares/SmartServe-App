@@ -119,25 +119,15 @@ export default function CaptainTablePrompt({ eventData, itemCount, onCancel, onC
         </p>
 
         {/* Typing beats the grid past about twenty tables, so both are here
-            and they stay in step with each other. */}
-        <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:16 }}>
+            and they stay in step with each other. The action itself is NOT
+            beside this box - see the note on the bottom button. */}
+        <div style={{ marginBottom:14 }}>
           <input value={typed} onChange={e => onType(e.target.value)} inputMode="numeric"
-            placeholder="Type table no."
+            placeholder="Type table number"
             onKeyDown={e => { if (e.key === 'Enter' && picked) confirm() }}
-            style={{ flex:1, minWidth:0, border:'2px solid ' + (picked ? '#16A34A' : '#E5E7EB'),
+            style={{ width:'100%', border:'2px solid ' + (picked ? '#16A34A' : '#E5E7EB'),
               borderRadius:12, padding:'14px 16px', fontSize:20, fontWeight:900,
               textAlign:'center', fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }} />
-          {/* Flashes once a table is chosen, the same signal Order Now uses
-              on the menu. A flat green button read as decoration and people
-              were not pressing it. */}
-          <button onClick={confirm} disabled={!picked || busy}
-            className={picked && !busy ? 'ss-prompt-go' : ''}
-            style={{ flexShrink:0, background: picked && !busy ? '#E8890C' : '#E5E7EB',
-              color: picked && !busy ? '#fff' : '#9CA3AF', border:'none', borderRadius:12,
-              padding:'14px 26px', fontSize:16, fontWeight:900,
-              cursor: picked && !busy ? 'pointer' : 'not-allowed', whiteSpace:'nowrap' }}>
-            {busy ? 'Placing…' : 'Place Order'}
-          </button>
         </div>
 
         {error && (
@@ -200,15 +190,28 @@ export default function CaptainTablePrompt({ eventData, itemCount, onCancel, onC
           </>
         )}
 
-        {/* ss-back-to-cart-53. Grey on white read as disabled and captains
-            were not pressing it. Outlined amber rather than filled: this is
-            the way back, not the action we want taken, so it has to look
-            available without competing with Place Order. */}
+        {/* The wide button at the bottom of a sheet is where a thumb goes and
+            where the primary action is expected. Place Order used to sit up
+            beside the number box while this slot held Back to cart, and
+            captains were pressing Back out of habit. They have swapped.
+
+            Back to cart is now a plain text link: still obvious, no longer
+            shaped like the thing you press to finish. The X at the top does
+            the same job for anyone who reaches for that instead. */}
+        <button onClick={confirm} disabled={!picked || busy}
+          className={picked && !busy ? 'ss-prompt-go' : ''}
+          style={{ width:'100%', marginTop:16, border:'none', borderRadius:14,
+            background: picked && !busy ? '#E8890C' : '#E5E7EB',
+            color: picked && !busy ? '#fff' : '#9CA3AF',
+            padding:'17px', fontSize:17, fontWeight:900,
+            cursor: picked && !busy ? 'pointer' : 'not-allowed' }}>
+          {busy ? 'Placing…' : picked ? 'Place Order · Table ' + picked : 'Pick a table first'}
+        </button>
+
         <button onClick={onCancel} disabled={busy}
-          style={{ width:'100%', marginTop:16, background:'#FFF8EE',
-            border:'2px solid #E8890C', borderRadius:12, padding:'14px',
-            fontSize:15, fontWeight:800, color:'#C06A00',
-            cursor: busy ? 'wait' : 'pointer' }}>
+          style={{ width:'100%', marginTop:10, background:'transparent', border:'none',
+            padding:'10px', fontSize:14, fontWeight:700, color:'#C06A00',
+            textDecoration:'underline', cursor: busy ? 'wait' : 'pointer' }}>
           ← Back to cart
         </button>
       </div>
