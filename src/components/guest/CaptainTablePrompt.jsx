@@ -200,11 +200,16 @@ export default function CaptainTablePrompt({ eventData, itemCount, onCancel, onC
           </>
         )}
 
+        {/* ss-back-to-cart-53. Grey on white read as disabled and captains
+            were not pressing it. Outlined amber rather than filled: this is
+            the way back, not the action we want taken, so it has to look
+            available without competing with Place Order. */}
         <button onClick={onCancel} disabled={busy}
-          style={{ width:'100%', marginTop:16, background:'#F5F5F5', border:'none',
-            borderRadius:12, padding:'14px', fontSize:14, fontWeight:700, color:'#888',
+          style={{ width:'100%', marginTop:16, background:'#FFF8EE',
+            border:'2px solid #E8890C', borderRadius:12, padding:'14px',
+            fontSize:15, fontWeight:800, color:'#C06A00',
             cursor: busy ? 'wait' : 'pointer' }}>
-          Back to cart
+          ← Back to cart
         </button>
       </div>
     </div>
