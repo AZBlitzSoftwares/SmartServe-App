@@ -206,7 +206,10 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
         style={{ marginTop:'0.6vh', marginBottom:'0.4vh',
           padding:'clamp(11px, 1.6vh, 15px) 40px',
           fontSize:'clamp(14px, 2vh, 17px)', flexShrink:0 }}>
-        {captainMode ? 'Next Table →' : 'Place Another Order →'}
+        {/* The same words in both apps. A captain reading "Next Table" had
+            no reason to expect the table grid; "Place Another Order" is what
+            they are about to do, and it is what the guest app already says. */}
+        {'Place Another Order \u2192'}
       </button>
     </div>
   )

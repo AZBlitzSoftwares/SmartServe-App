@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
-const BUILD_VERSION = 'v2.3 \u00B7 2026-09-01'
+const BUILD_VERSION = 'v2.4 \u00B7 2026-09-13'
 
 const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
@@ -257,6 +257,13 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     // Empty on a self-service event, which is what keeps the slip layout
     // identical to the one the waiters already know.
     const captainName = order.captains?.name || ''
+    // The slip shows the NUMBER, because that is what gets called across a
+    // hall and what the supervisor matches against the waiter strip.
+    // Names are stored as "Raju (07)" or bare "07"; take the bracketed part
+    // when there is one, otherwise print whatever is there.
+    const wRaw = order.waiters?.name || ''
+    const wNum = wRaw.match(/\(([^)]+)\)\s*$/)
+    const waiterLabel = wRaw ? (wNum ? wNum[1] : wRaw) : '--'
     const orderId = '#' + order.id.slice(-6).toUpperCase()
     const d = new Date(order.created_at)
     const dateStr = d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
@@ -289,8 +296,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   }
   body {
     font-family: 'Courier New', Courier, monospace;
-    font-size: 10pt;
-    font-weight: bold;
+    font-size: 11.5pt;
+    font-weight: 900;
     width: 100%;
     margin: 0;
     padding: 0;
@@ -335,23 +342,37 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   .row span:first-child {
     min-width: 14mm;
   }
-  .table-box {
-    border: 2.5px solid #000000;
+  /* One box shape for all three - table at the top, captain under it,
+     waiter at the very bottom. The supervisor is handed a slip by a waiter
+     and has to find two numbers on it fast, under hall lighting, on thermal
+     paper. Same shape in the same place every time beats three different
+     treatments, and everything is a size up from before because they were
+     genuinely struggling to read it. */
+  .big-box {
+    border: 3px solid #000000;
     text-align: center;
-    padding: 1.5mm;
-    margin: 2mm 0;
+    padding: 2mm 1mm;
+    margin: 2.5mm 0;
   }
-  .table-label {
-    font-size: 10pt;
+  .big-label {
+    font-size: 11pt;
     font-weight: 900;
-    letter-spacing: 2px;
+    letter-spacing: 3px;
     color: #000000;
   }
-  .table-num {
-    font-size: 24pt;
+  .big-num {
+    font-size: 34pt;
     font-weight: 900;
-    line-height: 1.1;
+    line-height: 1.05;
     color: #000000;
+  }
+  /* A name rather than a number, so it has to survive being long */
+  .big-text {
+    font-size: 21pt;
+    font-weight: 900;
+    line-height: 1.15;
+    color: #000000;
+    word-break: break-word;
   }
   .who-row {
     display: flex;
@@ -383,12 +404,12 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     color: #000000;
   }
   .item-row {
-    font-size: 10pt;
+    font-size: 13pt;
     font-weight: 900;
-    padding: 1mm 0;
+    padding: 1.4mm 0;
     display: flex;
     justify-content: space-between;
-    border-bottom: 1px dashed #000000;
+    border-bottom: 1.2px dashed #000000;
     color: #000000;
     word-break: break-word;
   }
@@ -409,11 +430,12 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     padding: 0 1.5mm;
     margin-left: 1mm;
   }
+  /* ss-total-59 */
   .total-row {
     display: flex;
     justify-content: space-between;
     font-weight: 900;
-    font-size: 11pt;
+    font-size: 13pt;
     margin-top: 1.5mm;
     padding-top: 1mm;
     border-top: 1.5px solid #000000;
@@ -436,16 +458,14 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
 <div class="row"><span>Time:</span><span>${timeStr}</span></div>
 <div class="row"><span>${isHelp ? 'Help' : 'Order'}:</span><span>${orderId}</span></div>
 <hr class="divider-dash"/>
-<div class="table-box">
-  <div class="table-label">TABLE</div>
-  <div class="table-num">${tableNum}</div>
+<div class="big-box">
+  <div class="big-label">TABLE</div>
+  <div class="big-num">${tableNum}</div>
 </div>
-${captainName
-  ? `<div class="who-row">
-  <div class="who-box"><div class="who-label">CAPTAIN</div>${captainName}</div>
-  <div class="who-box"><div class="who-label">WAITER</div>${waiterName}</div>
-</div>`
-  : `<div class="waiter-box">Waiter: ${waiterName}</div>`}
+${captainName ? `<div class="big-box">
+  <div class="big-label">CAPTAIN</div>
+  <div class="big-text">${captainName}</div>
+</div>` : ''}
 <hr class="divider"/>
 ${(order.order_items||[]).map(i => `
 <div class="item-row">
@@ -456,6 +476,10 @@ ${(order.order_items||[]).map(i => `
 <div class="total-row">
   <span>Total Items</span>
   <span>${(order.order_items||[]).reduce((s,i)=>s+i.quantity,0)}</span>
+</div>
+<div class="big-box">
+  <div class="big-label">WAITER</div>
+  <div class="big-num">${waiterLabel}</div>
 </div>
 <div class="footer">-- Janu's Smart Serve --</div>
 </body>

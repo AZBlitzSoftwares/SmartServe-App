@@ -14,7 +14,7 @@ function catLabel(name) {
 
 
 /* ── Animated Header Carousel ─────────────────────────────────────────── */
-function HeaderCarousel({ eventData, tableNumber, isOnline, captain, onSwitchCaptain }) {
+function HeaderCarousel({ eventData, tableNumber, isOnline, captain, onSwitchCaptain, captainTable, onCaptainBack }) {
   const hasWelcomeNote = !!(eventData?.welcome_note)
   const hasCatering = !!(eventData?.catering_company || eventData?.catering_logo_url)
   const totalSlides = 1 + (hasCatering ? 1 : 0) + (hasWelcomeNote ? 1 : 0)
@@ -100,15 +100,21 @@ function HeaderCarousel({ eventData, tableNumber, isOnline, captain, onSwitchCap
           evening, so a fixed table number here would be a lie. Switch hands
           the device to another captain without a restart or a reinstall. */}
       {captain ? (
-        <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3 }}>
+        /* The table is the thing that matters on this screen now - a captain
+           building an order needs to see, without thinking, which table it is
+           going to. Their own name is secondary and sits above it small. */
+        <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2 }}>
           {isOnline===false && <span style={{ background:'#DC2626', color:'#fff', fontSize:8, fontWeight:700, padding:'1px 4px', borderRadius:999 }}>OFFLINE</span>}
-          <div style={{ color:'rgba(255,255,255,0.5)', fontSize:11, fontWeight:600, letterSpacing:'0.5px' }}>CAPTAIN</div>
-          <div style={{ color:'#fff', fontSize:20, fontWeight:900, lineHeight:1.1, maxWidth:110,
-            overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{captain.name}</div>
-          <button onClick={onSwitchCaptain}
-            style={{ background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.25)',
-              color:'rgba(255,255,255,0.75)', borderRadius:999, padding:'2px 10px', fontSize:10,
-              fontWeight:700, cursor:'pointer', marginTop:2 }}>Switch</button>
+          <div style={{ color:'rgba(255,255,255,0.5)', fontSize:10, fontWeight:700,
+            maxWidth:110, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+            {captain.name}
+          </div>
+          <div style={{ color:'rgba(255,255,255,0.5)', fontSize:10, fontWeight:600, letterSpacing:'0.5px' }}>TABLE</div>
+          <div style={{ color:'#fff', fontSize:28, fontWeight:900, lineHeight:1 }}>{captainTable ?? '-'}</div>
+          <button onClick={onCaptainBack}
+            style={{ background:'rgba(232,137,12,0.25)', border:'1px solid rgba(232,137,12,0.6)',
+              color:'#FFD9A0', borderRadius:999, padding:'3px 11px', fontSize:10,
+              fontWeight:800, cursor:'pointer', marginTop:3 }}>Change table</button>
         </div>
       ) : (
       <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3 }}>
@@ -136,11 +142,19 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
           Lifts above the cart bar when the cart has items. The scroll area's
           bottom padding below matches these heights, so the last dish can
           always be scrolled clear of it. */}
+      {/* ss-single-bar-64. Two stacked bars cost two rows the moment a dish
+          was added, which on a ten inch tablet is most of a dish card. Once
+          the cart has something in it, Track and MENU move down into the
+          cart's own bar and this strip stands down entirely. */}
+      {cartCount === 0 && (
       <div style={{ position:'fixed', left:0, right:0, zIndex:60,
-        bottom: cartCount>0 ? 'calc(70px + env(safe-area-inset-bottom))' : 0,
+        bottom: 0,
         background:'#fff', borderTop:'1px solid #ECECEC',
         boxShadow:'0 -4px 16px rgba(0,0,0,0.07)',
-        padding: cartCount>0 ? '9px 16px' : '9px 16px calc(9px + env(safe-area-inset-bottom))',
+        /* ss-bar-inset-60. Jammed into the corners of a ten inch tablet these
+           were genuinely hard to find, and on an eleven inch one the thumb
+           never reaches them. */
+        padding: cartCount>0 ? '9px 34px' : '9px 34px calc(9px + env(safe-area-inset-bottom))',
         display:'flex', alignItems:'center', gap:10, boxSizing:'border-box' }}>
 
         {/* Track sits left, so the two never fight for the same corner */}
@@ -168,6 +182,8 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
           MENU
         </button>
       </div>
+      )}
+      {/* ss-single-bar-64-end */}
 
       {/* Category picker modal */}
       {open && (
@@ -204,7 +220,7 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
   )
 }
 
-export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen, onBack, captain, onSwitchCaptain }) {
+export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen, onBack, captain, onSwitchCaptain, captainTable, onCaptainBack }) {
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [search, setSearch] = useState('')
@@ -313,7 +329,8 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
 
       {/* HEADER — Animated carousel brand | Table */}
       <HeaderCarousel eventData={eventData} tableNumber={tableNumber} isOnline={isOnline}
-        captain={captain} onSwitchCaptain={onSwitchCaptain} />
+        captain={captain} onSwitchCaptain={onSwitchCaptain}
+        captainTable={captainTable} onCaptainBack={onCaptainBack} />
 
       {/* ACTION BAR + SEARCH on one row */}
       <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff',
@@ -365,10 +382,10 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       )}
 
       {/* SCROLLABLE MENU CONTENT */}
-      {/* ss-scroll-pad-49. Must clear the menu bar, and the cart bar under
-          it when the cart has items, or the last dish can never be reached. */}
+      {/* ss-scroll-pad-64. One bar either way now, so the old 200px gap for
+          two stacked bars would just be dead space at the end of the list. */}
       <div ref={scrollRef} style={{ flex:1, overflowY:'auto',
-        paddingBottom: cartCount>0 ? 200 : 110 }}>
+        paddingBottom: 110 }}>
         {loading ? (
           <div style={{ textAlign:'center', padding:60, color:'#888' }}>Loading menu...</div>
         ) : search.length>0 ? (
