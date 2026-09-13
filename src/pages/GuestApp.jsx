@@ -4,6 +4,8 @@ import { getPendingOrders, clearOrder } from '../lib/offlineQueue'
 import SetupScreen from '../components/guest/SetupScreen'
 import CaptainLogin, { EntryChooser } from '../components/guest/CaptainLogin'
 import CaptainOrders from '../components/guest/CaptainOrders'
+import CaptainTableGrid from '../components/guest/CaptainTableGrid'
+import CaptainTableBlocked from '../components/guest/CaptainTableBlocked'
 import { installTapFx } from '../lib/feedbackFx'
 import WelcomeScreen from '../components/guest/WelcomeScreen'
 import MenuScreen from '../components/guest/MenuScreen'
@@ -35,6 +37,13 @@ export default function GuestApp() {
   // Table number of the order just sent, shown briefly then cleared
   const [captainSent, setCaptainSent] = useState(null)
   const [showCaptainOrders, setShowCaptainOrders] = useState(false)
+  // The table this captain is currently ordering for. Chosen on the grid
+  // before the menu opens, so every screen below can rely on it.
+  const [captainTable, setCaptainTable] = useState(null)
+  // tableNumber -> cart, so a cart built for a blocked table survives a trip
+  // back to the grid and can go the moment that table frees up.
+  const [heldCarts, setHeldCarts] = useState({})
+  const [blockedTable, setBlockedTable] = useState(null)
   const [cart, setCart] = useState([])
   const [activeOrders, setActiveOrders] = useState([])
   const [activeHelp, setActiveHelp] = useState([])
@@ -58,6 +67,15 @@ export default function GuestApp() {
   const activeOrdersRef  = useRef([])
   const showExitGateRef  = useRef(false)
   const captainRef       = useRef(null)
+  // Read inside handleBack, which runs from a listener and would otherwise
+  // close over a stale value.
+  const captainTableRef  = useRef(null)
+  // Track and the blocked-table dialog are overlays like any other, and back
+  // has to close them. Missing from the chain, a back press fell straight
+  // through and appeared to do nothing at all.
+  const showCaptainOrdersRef = useRef(false)
+  const blockedTableRef  = useRef(null)
+  const cartRef          = useRef([])
 
   // Back-button machinery
   const allowExitRef    = useRef(false) // true only after a valid exit PIN
@@ -74,6 +92,10 @@ export default function GuestApp() {
   useEffect(() => { activeOrdersRef.current = activeOrders }, [activeOrders])
   useEffect(() => { showExitGateRef.current = showExitGate }, [showExitGate])
   useEffect(() => { captainRef.current = captain },           [captain])
+  useEffect(() => { captainTableRef.current = captainTable }, [captainTable])
+  useEffect(() => { cartRef.current = cart },                 [cart])
+  useEffect(() => { showCaptainOrdersRef.current = showCaptainOrders }, [showCaptainOrders])
+  useEffect(() => { blockedTableRef.current = blockedTable },           [blockedTable])
 
   // A short vibration and a quiet click on every button, guest and captain
   // alike. Installed once at the document level rather than wired into each
@@ -117,13 +139,25 @@ export default function GuestApp() {
     if (cartOpenRef.current)     { setCartOpen(false); return }
     if (showSOSRef.current)      { setShowSOS(false); return }
     if (showHistoryRef.current)  { setShowHistory(false); return }
+    if (showCaptainOrdersRef.current) { setShowCaptainOrders(false); return }
+    if (blockedTableRef.current)      { setBlockedTable(null); return }
 
     // Screen sequence: Track -> Menu -> Welcome
+    // A captain returning from the Genie screen has no table selected any
+    // more, so the menu would show "TABLE -". The grid is where they are
+    // actually going next.
+    if (s === 'genie' && captainRef.current) { setCaptainSent(null); captainBackToGrid(); return }
     if (s === 'genie')  { goTo('menu'); return }
     if (s === 'status') { goTo('menu'); return }
-    // A captain has no Welcome screen behind the menu - the menu is their
-    // home screen, so back closes the sheet and stops there.
-    if (s === 'menu' && captainRef.current) { setMenuSheetOpen(false); menuSheetRef.current = false; return }
+    // A captain's menu sits behind the table grid, not a Welcome screen:
+    //   cart -> menu -> table grid -> stop
+    // The grid is their home, so back goes no further than that.
+    if (s === 'captaintable') return
+    if (s === 'menu' && captainRef.current) {
+      setMenuSheetOpen(false); menuSheetRef.current = false
+      captainBackToGrid()
+      return
+    }
     if (s === 'menu')   { setMenuSheetOpen(false); menuSheetRef.current = false; goTo('welcome'); return }
   }
 
@@ -256,7 +290,7 @@ export default function GuestApp() {
         const cap = JSON.parse(capRaw)
         const cev = JSON.parse(capEv)
         setCaptain(cap); setEventData(cev)
-        goTo('menu'); refreshEvent(cev.id)
+        goTo('captaintable'); refreshEvent(cev.id)
         return
       } catch (e) {
         localStorage.removeItem('ss_captain_session')
@@ -341,16 +375,148 @@ export default function GuestApp() {
     localStorage.setItem('ss_captain_event', JSON.stringify(ev))
     setCaptain(cap); setEventData(ev)
     setTableData(null); setTableNumber(null)
-    setCart([]); setActiveOrders([]); goTo('menu')
+    setCart([]); setActiveOrders([]); setCaptainTable(null); setHeldCarts({})
+    goTo('captaintable')
   }
 
   // Handing the tablet to another captain mid-shift. Without this the
   // orders would keep being recorded against whoever logged in first.
+  //
+  // Held carts are NOT cleared. They belong to the tables, not to whoever
+  // happens to be holding the tablet - that is the entire point of keeping
+  // them in the database. The incoming captain sees what every other captain
+  // sees, with the name of whoever took it down.
   function switchCaptain() {
     localStorage.removeItem('ss_captain_session')
     localStorage.removeItem('ss_captain_event')
-    setCaptain(null); setCart([]); goTo('captain')
+    setCaptain(null); setCart([]); setCaptainTable(null)
+    goTo('captain')
   }
+
+  /* Picking a table is now the captain's first act, not their last.
+
+     The old flow built a cart and asked for the table at the end, which put
+     "this table is blocked" after the guest had already given their order.
+     The captain then had to go back and explain. Asking first moves that
+     refusal to before anyone has spoken.
+
+     Carts are held PER TABLE. Building for table 5, going back and picking
+     table 7 gives an empty cart for 7, with table 5's still waiting. Merging
+     them would eventually send table 5's biryani to table 7. */
+  // Refreshed while the grid is up, so a cart another captain adds appears
+  // here without anyone reloading.
+  useEffect(() => {
+    if (appState !== 'captaintable' || !captain || !eventData?.id) return
+    loadHeldCarts()
+    const t = setInterval(loadHeldCarts, 5000)
+    return () => clearInterval(t)
+  }, [appState, captain?.id, eventData?.id])
+
+  function captainPickTable(n, state, live) {
+    if (state === 'red') {
+      setBlockedTable({ n, live, limit: eventData?.max_orders_per_table || 1 })
+      return
+    }
+    openTableMenu(n)
+  }
+
+  async function openTableMenu(n) {
+    setBlockedTable(null)
+    setCaptainTable(n)
+    setCartOpen(false)
+
+    // Read the table's held cart fresh rather than trusting the grid's last
+    // poll - another captain may have added to it thirty seconds ago.
+    let items = heldCarts[n]?.items || []
+    try {
+      const { data } = await supabase.from('table_carts')
+        .select('items').eq('event_id', eventData.id).eq('table_number', n).maybeSingle()
+      if (data && Array.isArray(data.items)) items = data.items
+    } catch (e) { /* fall back to what the grid had */ }
+
+    setCart(items)
+    goTo('menu')
+  }
+
+  /* Held carts live in the database, not on this tablet.
+
+     A guest whose table is blocked gives their order to whichever captain is
+     standing there. Ten minutes later the table frees up and a DIFFERENT
+     captain walks past. If the cart only existed on the first tablet, that
+     second captain has to take the whole order again - which is precisely the
+     irritation this feature was meant to remove.
+
+     So the cart belongs to the table. One row per table per event, deleted
+     the moment the order goes. Last write wins if two captains type at once;
+     the row records who touched it last so the other one can see whose it is
+     rather than presenting it as their own. */
+  async function loadHeldCarts() {
+    if (!eventData?.id) return
+    try {
+      const { data } = await supabase.from('table_carts')
+        .select('table_number, items, captains(name)')
+        .eq('event_id', eventData.id)
+      const m = {}
+      ;(data || []).forEach(r => {
+        const items = Array.isArray(r.items) ? r.items : []
+        const count = items.reduce((n, i) => n + (i.quantity || 0), 0)
+        if (count > 0) {
+          m[r.table_number] = { count, captain: r.captains?.name || '', items }
+        }
+      })
+      setHeldCarts(m)
+    } catch (e) { /* the next poll covers it */ }
+  }
+
+  // Written on a delay rather than per keystroke: a captain adding six items
+  // would otherwise fire six writes, and the last one is the only one that
+  // matters.
+  const cartSaveRef = useRef(null)
+  useEffect(() => {
+    if (!captain || captainTable == null || !eventData?.id) return
+    if (cartSaveRef.current) clearTimeout(cartSaveRef.current)
+    const snapshot = cart
+    const t = captainTable
+    cartSaveRef.current = setTimeout(async () => {
+      try {
+        if (!snapshot.length) {
+          await supabase.from('table_carts').delete()
+            .eq('event_id', eventData.id).eq('table_number', t)
+        } else {
+          await supabase.from('table_carts').upsert({
+            event_id: eventData.id,
+            table_number: t,
+            items: snapshot,
+            captain_id: captain.id,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'event_id,table_number' })
+        }
+      } catch (e) { /* a lost save is recoverable; the captain still has it */ }
+    }, 700)
+    return () => { if (cartSaveRef.current) clearTimeout(cartSaveRef.current) }
+  }, [cart, captainTable, captain?.id, eventData?.id])
+
+  async function clearHeldCart(tableNum) {
+    if (!eventData?.id || tableNum == null) return
+    try {
+      await supabase.from('table_carts').delete()
+        .eq('event_id', eventData.id).eq('table_number', tableNum)
+    } catch (e) {}
+    setHeldCarts(prev => { const next = { ...prev }; delete next[tableNum]; return next })
+  }
+
+
+  // Whatever is in the cart belongs to the table it was built for, and has
+  // to survive going back to the grid - that is the whole point of holding
+  // it while a table is blocked.
+  function captainBackToGrid() {
+    // Nothing to stash - the debounced save above has it in the database
+    // already, and that is where every other captain will look for it.
+    setCart([]); setCartOpen(false); setCaptainTable(null)
+    goTo('captaintable')
+    loadHeldCarts()
+  }
+
 
 
   // Keep event branding in sync with the supervisor's edits
@@ -556,6 +722,10 @@ export default function GuestApp() {
     // It differs only in what it shows: the table it went to, no feedback
     // faces, and eight seconds instead of thirty.
     if (captainRef.current) {
+      // That table's held cart has just gone out. It has to leave the
+      // database too, or the next captain past that table is shown an order
+      // that was already sent.
+      if (forTable != null) clearHeldCart(forTable)
       setCaptainSent(forTable != null ? String(forTable) : '')
       setLastOrderId(newOrderId || null)
       goTo('genie')
@@ -611,6 +781,29 @@ export default function GuestApp() {
       currentTableNumber={tableNumber} currentEventId={eventData?.id} />
   )
 
+  if (appState === 'captaintable' && captain) return (
+    <>
+      <CaptainTableGrid eventData={eventData} captain={captain}
+        heldCarts={heldCarts}
+        onPick={captainPickTable}
+        onSwitchCaptain={switchCaptain}
+        onTrack={() => setShowCaptainOrders(true)} />
+
+      {blockedTable && (
+        <CaptainTableBlocked tableNum={blockedTable.n} live={blockedTable.live}
+          limit={blockedTable.limit}
+          hasHeld={heldCarts[blockedTable.n]?.count || 0}
+          onBrowse={() => openTableMenu(blockedTable.n)}
+          onBack={() => setBlockedTable(null)} />
+      )}
+
+      {showCaptainOrders && (
+        <CaptainOrders eventData={eventData} captain={captain}
+          onClose={() => setShowCaptainOrders(false)} />
+      )}
+    </>
+  )
+
   // Track turns on for a live order OR a live help request
   const hasActiveOrders = activeOrders.length > 0 || activeHelp.length > 0
 
@@ -624,6 +817,7 @@ export default function GuestApp() {
       {appState === 'menu' && (
         <MenuScreen tableData={tableData} eventData={eventData} tableNumber={tableNumber}
           captain={captain} onSwitchCaptain={switchCaptain}
+          captainTable={captainTable} onCaptainBack={captainBackToGrid}
           cart={cart} addToCart={addToCart} removeFromCart={removeFromCart}
           cartCount={cartCount} isOnline={isOnline}
           onShowSOS={() => setShowSOS(true)}
@@ -638,7 +832,7 @@ export default function GuestApp() {
       {appState === 'genie' && (
         <GenieScreen tableData={tableData} eventData={eventData} orderId={lastOrderId}
           captain={captain} forTable={captainSent}
-          onOrderAgain={() => { setCaptainSent(null); goTo('menu') }}
+          onOrderAgain={() => { setCaptainSent(null); captain ? captainBackToGrid() : goTo('menu') }}
           onDone={() => goTo('welcome')} />
       )}
       {appState === 'status' && (
@@ -650,7 +844,11 @@ export default function GuestApp() {
         <CartDrawer cart={cart} tableData={tableData} eventData={eventData}
           isOnline={isOnline} onOrderPlaced={handleOrderPlaced}
           onRemove={removeFromCart} onAdd={addToCart}
-          cartOpen={cartOpen} onCartOpenChange={setCartOpen} captain={captain} />
+          cartOpen={cartOpen} onCartOpenChange={setCartOpen}
+          captain={captain} captainTable={captainTable}
+          onShowStatus={() => captain ? setShowCaptainOrders(true) : goTo('status')}
+          onOpenMenu={() => setMenuSheetOpen(true)}
+          showTrack={hasActiveOrders || !!captain} />
       )}
       {/* ss-toast-removed-48 - the Genie screen replaced this in batch 48 */}
       {showCaptainOrders && captain && (
