@@ -175,7 +175,9 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
           fontSize:13, color:'#FCA5A5', fontWeight:700 }}>{err}</div>
       )}
 
-      <div style={{ flex:1, overflowY:'auto', padding:'4px 16px 28px' }}>
+      {/* The extra bottom padding clears the floating chat pill, so the last
+          row of tables can still be tapped rather than sitting under it. */}
+      <div style={{ flex:1, overflowY:'auto', padding:'4px 16px 84px' }}>
         {loading ? (
           <div style={{ textAlign:'center', padding:50, color:'rgba(255,255,255,0.5)' }}>Loading…</div>
         ) : total === 0 ? (

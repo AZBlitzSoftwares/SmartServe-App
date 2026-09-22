@@ -23,16 +23,19 @@ import { FaceSVG, SENTIMENT_CONFIG } from './FeedbackModal'
        to the caterer and pollutes the feedback report.
      - The table number is shown, because a captain works every table
        in the room and needs to see the order went where they meant.
-     - Eight seconds rather than thirty, then back to the menu. A guest
-       has finished eating and can sit with it; a captain has four more
-       tables waiting and must not have to dismiss anything.            */
+     - The timeout goes back to the table grid, not to a Welcome screen
+       the captain does not have. The animation itself runs its full
+       thirty seconds in both apps - the captain sees exactly what the
+       guest sees - and Place Another Order is on screen the whole
+       time for anyone who wants to leave early.                       */
 
+// One length for both apps. Eight seconds cut the video off halfway,
+// which is why the captain only ever saw half a genie.
 const SECONDS = 30
-const CAPTAIN_SECONDS = 8
 
 export default function GenieScreen({ tableData, eventData, orderId, onOrderAgain, onDone, captain, forTable }) {
   const captainMode = !!captain
-  const [left, setLeft] = useState(captainMode ? CAPTAIN_SECONDS : SECONDS)
+  const [left, setLeft] = useState(SECONDS)
   const [saving, setSaving] = useState(false)
   const [chosen, setChosen] = useState(null)
   const videoRef = useRef(null)

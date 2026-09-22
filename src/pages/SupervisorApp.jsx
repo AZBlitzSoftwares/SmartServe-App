@@ -8,6 +8,8 @@ import ReportsDashboard from '../components/supervisor/ReportsDashboard'
 import EventManager from '../components/supervisor/EventManager'
 import TableManager from '../components/supervisor/TableManager'
 import FeedbackReport from '../components/supervisor/FeedbackReport'
+import SupervisorChat from '../components/supervisor/SupervisorChat'
+import { playChatChime, unlockChime } from '../lib/chime'
 
 
 // ─── Event Status Helper ───────────────────────────────────────────────────
@@ -40,6 +42,23 @@ export default function SupervisorApp() {
   const [sosCount, setSosCount] = useState(0)
   const [showEventPicker, setShowEventPicker] = useState(false)
   const [pickerStatus, setPickerStatus] = useState('active')
+  // Captain chat. Open is the panel, shut is the pill it lives in - the
+  // pill is also how it is opened, so there is no separate closed state.
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatUnread, setChatUnread] = useState(0)
+  // Which thread a new message should open. A nonce rather than a plain id,
+  // so a second message from the same captain reopens their thread too.
+  const [chatFocus, setChatFocus] = useState(null)
+  // Read inside the poll, which would otherwise close over a stale value and
+  // reopen the panel every few seconds.
+  const chatOpenRef = useRef(false)
+
+  useEffect(() => { chatOpenRef.current = chatOpen }, [chatOpen])
+
+  // Audio is blocked until the page has had a real user gesture. Arming on
+  // the first interaction of any kind means logging in is usually enough,
+  // and the chime works from the first message rather than the second.
+  useEffect(() => unlockChime(), [])
 
   // SOS alert hook — runs regardless of which tab is active
   const { openRequests, newAlert, clearAlert } = useSOSAlert(eventData)
@@ -88,6 +107,71 @@ export default function SupervisorApp() {
       lastSeenOrderId.current = null
     }
   }, [eventData])
+
+  /* Unread captain messages.
+
+     Polled whether or not the panel is open, because the badge and the
+     banner are the entire point while it is shut. The panel marks a thread
+     read as it is read, so answering one captain does not silence another. */
+  // The id of the newest message the panel has already opened for. Keyed to
+  // the message rather than to the poll, so minimising does not make the
+  // panel spring straight back, but the next message opens it again.
+  const chatPoppedRef = useRef(null)
+  useEffect(() => {
+    if (!authed || !eventData?.id) return
+    chatPoppedRef.current = null
+    let stop = false
+    async function pollCaptainChat() {
+      try {
+        const { data } = await supabase.from('chat_messages')
+          .select('id, body, sender_name, captain_id, created_at')
+          .eq('event_id', eventData.id)
+          .eq('sender', 'captain')
+          .eq('read_by_supervisor', false)
+          .order('created_at', { ascending: false })
+        if (stop) return
+        const list = data || []
+        setChatUnread(list.length)
+        const newest = list[0] || null
+        /* ss-no-priming-70. There was a first pass here that recorded the
+           newest message and fired for nothing, so that opening the laptop
+           did not replay the afternoon.
+
+           It was wrong. A message still sitting unread when the page loads -
+           or when it is refreshed in the middle of service, which happens
+           every time anything is deployed - is exactly as urgent as one
+           that lands a second later. Swallowing it meant a captain could
+           be waiting on an answer that the supervisor was never told about.
+
+           Read messages are already excluded by the query, so there is
+           nothing here to replay: if it is in this list, nobody has
+           answered it yet. */
+        if (newest && newest.id !== chatPoppedRef.current) {
+          chatPoppedRef.current = newest.id
+          /* The panel itself is the notification.
+
+             A banner across the top pushed the whole board down, and it
+             stacked underneath the new-order banner - which had to be
+             dismissed before the message was even visible. The panel is
+             already where the answer gets typed, so opening it costs a
+             click less and no vertical space at all.
+
+             Already open on another captain's thread means the supervisor
+             is mid-reply. That is not yanked away; the chime sounds and
+             the unread badge carries it instead. */
+          if (!chatOpenRef.current) {
+            setChatOpen(true)
+            setChatFocus({ captainId: newest.captain_id, nonce: Date.now() })
+          }
+          playChatChime()
+        }
+        if (!newest) chatPoppedRef.current = null
+      } catch (e) { /* the next poll covers it */ }
+    }
+    pollCaptainChat()
+    const t = setInterval(pollCaptainChat, 3000)
+    return () => { stop = true; clearInterval(t) }
+  }, [authed, eventData?.id])
 
   useEffect(() => {
     if (!authed) return
@@ -178,6 +262,11 @@ export default function SupervisorApp() {
           <div style={{ height:72 }} />
         </>
       )}
+
+      {/* ss-chat-alert-removed-69 - the chat panel opens itself now, with a
+          chime. The banner it replaced cost 72px of board height and queued
+          up behind the new-order banner, so an urgent message could be
+          sitting underneath something the supervisor had to close first. */}
 
       {/* ── FLOATING SOS ALERT — shows on top of everything ── */}
       {newAlert && (
@@ -322,6 +411,16 @@ export default function SupervisorApp() {
         {activeTab==='tables'  && <TableManager eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='events'  && <EventManager onEventChange={(ev) => { setEventData(ev); loadEvents() }} />}
       </div>
+
+      {/* Docked over the board rather than living in a tab. A supervisor
+          answering "table 12 has been waiting" needs to see table 12 while
+          they type, and a tab would replace the very thing being asked about. */}
+      {eventData && (
+        <SupervisorChat eventData={eventData}
+          meName={currentUser?.name || currentUser?.username || (isAdmin ? 'Admin' : 'Supervisor')}
+          minimized={!chatOpen} unread={chatUnread} focus={chatFocus}
+          onToggle={() => setChatOpen(o => !o)} />
+      )}
 
     </div>
   )

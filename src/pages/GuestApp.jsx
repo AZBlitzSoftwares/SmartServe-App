@@ -6,6 +6,7 @@ import CaptainLogin, { EntryChooser } from '../components/guest/CaptainLogin'
 import CaptainOrders from '../components/guest/CaptainOrders'
 import CaptainTableGrid from '../components/guest/CaptainTableGrid'
 import CaptainTableBlocked from '../components/guest/CaptainTableBlocked'
+import CaptainChat from '../components/guest/CaptainChat'
 import { installTapFx } from '../lib/feedbackFx'
 import WelcomeScreen from '../components/guest/WelcomeScreen'
 import MenuScreen from '../components/guest/MenuScreen'
@@ -44,6 +45,15 @@ export default function GuestApp() {
   // back to the grid and can go the moment that table frees up.
   const [heldCarts, setHeldCarts] = useState({})
   const [blockedTable, setBlockedTable] = useState(null)
+  // Supervisor chat. Open is the panel; minimised is the pill it shrinks
+  // back to. There is deliberately no third "closed" state - the pill is
+  // how the chat is opened, so hiding it would leave no way back in.
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatUnread, setChatUnread] = useState(0)
+  // Newest unread supervisor message, shown as a toast while the captain is
+  // anywhere but the grid. The panel is not rendered on the menu screen -
+  // that bottom strip belongs to the order bar.
+  const [chatToast, setChatToast] = useState(null)
   const [cart, setCart] = useState([])
   const [activeOrders, setActiveOrders] = useState([])
   const [activeHelp, setActiveHelp] = useState([])
@@ -75,6 +85,7 @@ export default function GuestApp() {
   // through and appeared to do nothing at all.
   const showCaptainOrdersRef = useRef(false)
   const blockedTableRef  = useRef(null)
+  const chatOpenRef      = useRef(false)
   const cartRef          = useRef([])
 
   // Back-button machinery
@@ -96,6 +107,7 @@ export default function GuestApp() {
   useEffect(() => { cartRef.current = cart },                 [cart])
   useEffect(() => { showCaptainOrdersRef.current = showCaptainOrders }, [showCaptainOrders])
   useEffect(() => { blockedTableRef.current = blockedTable },           [blockedTable])
+  useEffect(() => { chatOpenRef.current = chatOpen },                   [chatOpen])
 
   // A short vibration and a quiet click on every button, guest and captain
   // alike. Installed once at the document level rather than wired into each
@@ -140,6 +152,9 @@ export default function GuestApp() {
     if (showSOSRef.current)      { setShowSOS(false); return }
     if (showHistoryRef.current)  { setShowHistory(false); return }
     if (showCaptainOrdersRef.current) { setShowCaptainOrders(false); return }
+    // The chat panel is an overlay like any other: back shrinks it to the
+    // pill rather than falling through to the screen behind it.
+    if (chatOpenRef.current)          { setChatOpen(false); return }
     if (blockedTableRef.current)      { setBlockedTable(null); return }
 
     // Screen sequence: Track -> Menu -> Welcome
@@ -519,6 +534,53 @@ export default function GuestApp() {
 
 
 
+  /* Unread messages from the supervisor.
+
+     Polled here rather than inside the panel, because the badge and the
+     toast have to work while the panel is shut - which is most of the
+     time. When the panel IS open it marks those messages read, so this
+     query comes back empty and the badge clears itself.                */
+  const chatSeenRef = useRef(null)
+  useEffect(() => {
+    if (!captain?.id || !eventData?.id) return
+    let stop = false
+    let primed = false
+    async function pollChatUnread() {
+      try {
+        const { data } = await supabase.from('chat_messages')
+          .select('id, body, sender_name, created_at')
+          .eq('event_id', eventData.id)
+          .eq('captain_id', captain.id)
+          .eq('sender', 'supervisor')
+          .eq('read_by_captain', false)
+          .order('created_at', { ascending: false })
+        if (stop) return
+        const list = data || []
+        setChatUnread(list.length)
+        const newest = list[0] || null
+        // The first poll only records where we are. Without it, opening the
+        // app to a message from twenty minutes ago throws a toast for it.
+        if (!primed) { primed = true; chatSeenRef.current = newest ? newest.id : null; return }
+        if (newest && newest.id !== chatSeenRef.current) {
+          chatSeenRef.current = newest.id
+          if (!chatOpenRef.current) setChatToast({ id:newest.id, body:newest.body })
+        }
+        if (!newest) chatSeenRef.current = null
+      } catch (e) { /* the next poll covers it */ }
+    }
+    pollChatUnread()
+    const t = setInterval(pollChatUnread, 4000)
+    return () => { stop = true; clearInterval(t) }
+  }, [captain?.id, eventData?.id])
+
+  // Toasts clear themselves. A captain with a guest in front of them should
+  // not have to dismiss anything to carry on.
+  useEffect(() => {
+    if (!chatToast) return
+    const t = setTimeout(() => setChatToast(null), 9000)
+    return () => clearTimeout(t)
+  }, [chatToast])
+
   // Keep event branding in sync with the supervisor's edits
   async function refreshEvent(eventId) {
     if (!eventId) return
@@ -801,6 +863,12 @@ export default function GuestApp() {
         <CaptainOrders eventData={eventData} captain={captain}
           onClose={() => setShowCaptainOrders(false)} />
       )}
+
+      {/* Docked bottom-right over the grid. The pill is both the minimised
+          state and the way in, so there is always a route back to it. */}
+      <CaptainChat eventData={eventData} captain={captain}
+        minimized={!chatOpen} unread={chatUnread}
+        onToggle={() => setChatOpen(o => !o)} />
     </>
   )
 
@@ -817,6 +885,7 @@ export default function GuestApp() {
       {appState === 'menu' && (
         <MenuScreen tableData={tableData} eventData={eventData} tableNumber={tableNumber}
           captain={captain} onSwitchCaptain={switchCaptain}
+          onChat={() => setChatOpen(true)} chatUnread={chatUnread}
           captainTable={captainTable} onCaptainBack={captainBackToGrid}
           cart={cart} addToCart={addToCart} removeFromCart={removeFromCart}
           cartCount={cartCount} isOnline={isOnline}
@@ -864,6 +933,42 @@ export default function GuestApp() {
         onClose={() => { setShowHistory(false); goTo('menu') }} />}
       {showFeedback && <FeedbackModal orderId={feedbackOrderId} tableData={tableData}
         eventData={eventData} onClose={handleFeedbackClose} mode="detailed" />}
+
+      {/* ss-chat-on-menu - the same panel as on the grid, lifted clear of
+          the order bar. No pill here: the bar carries the launcher, so
+          nothing floats over the buttons. */}
+      {captain && appState === 'menu' && (
+        <CaptainChat eventData={eventData} captain={captain}
+          minimized={!chatOpen} unread={chatUnread} hidePill
+          bottomOffset={cartCount > 0 ? 96 : 78}
+          onToggle={() => setChatOpen(o => !o)} />
+      )}
+
+      {/* ss-chat-toast - a supervisor message arriving while the captain is
+          away from the grid. Top of the screen on purpose: the bottom belongs
+          to the order bar, and a chat landing on Place Order would be the
+          worst place on the screen to put it. */}
+      {chatToast && captain && (
+        <div onClick={() => setChatToast(null)}
+          style={{ position:'fixed', top:0, left:0, right:0, zIndex:300,
+            background:'#1A0A0A', borderBottom:'3px solid #E8890C',
+            padding:'12px 16px', display:'flex', alignItems:'center', gap:12,
+            cursor:'pointer', boxShadow:'0 6px 24px rgba(0,0,0,0.5)' }}>
+          <span style={{ fontSize:26 }}>💬</span>
+          <span style={{ flex:1, minWidth:0 }}>
+            <span style={{ display:'block', color:'#E8890C', fontSize:11,
+              fontWeight:900, letterSpacing:'0.5px' }}>SUPERVISOR</span>
+            <span style={{ display:'block', color:'#fff', fontSize:14, fontWeight:700,
+              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {chatToast.body}
+            </span>
+          </span>
+          <span style={{ flexShrink:0, color:'rgba(255,255,255,0.55)', fontSize:11,
+            fontWeight:700, textAlign:'right', lineHeight:1.4 }}>
+            Reply from<br />the table screen
+          </span>
+        </div>
+      )}
 
       {showExitGate && (
         <ExitGate eventId={eventData?.id} onCancel={cancelExit} onVerified={performExit} />
