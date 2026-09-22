@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
-const BUILD_VERSION = 'v2.4 \u00B7 2026-09-13'
+const BUILD_VERSION = 'v2.5 \u00B7 2026-09-22'
 
 const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
@@ -703,6 +703,11 @@ ${(order.order_items||[]).map(i => `
             // Only ever set on a captain event, so every self-service board
             // looks exactly as it did before.
             const captainName = rec.captains?.name || ''
+            // waiters.name is stored as "Raju (07)" or just "07". The number is
+            // what gets called across a hall, so that is what the row shows -
+            // the same extraction the printed KOT slip already uses.
+            const wNumMatch = waiterName.match(/\(([^)]+)\)\s*$/)
+            const waiterLabel = waiterName ? (wNumMatch ? wNumMatch[1] : waiterName) : ''
             const timeStr = new Date(rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
             const chips = showAllWaiters === id ? availableWaiters : availableWaiters.slice(0, 3)
 
@@ -777,6 +782,23 @@ ${(order.order_items||[]).map(i => `
                           color: on ? '#E8890C' : (painted ? '#FFFFFF' : 'inherit') }}>T{tn ?? '?'}</span>
                     )
                   })()}
+                  {/* Waiter number, ahead of the clock and in a white box so it
+                      survives every row colour including the flashing ones. The
+                      slot is always drawn so the column lines up down the board;
+                      an empty dashed box is itself the signal that this order
+                      still has nobody on it. */}
+                  <span title={waiterName ? 'Waiter ' + waiterName : 'No waiter assigned yet'}
+                    style={{ flexShrink:0, minWidth:36, textAlign:'center',
+                      borderRadius:6, padding:'2px 7px', boxSizing:'border-box',
+                      fontSize:14, fontWeight:900, lineHeight:1.15,
+                      fontVariantNumeric:'tabular-nums',
+                      background: waiterLabel ? '#FFFFFF' : 'transparent',
+                      color: waiterLabel ? '#0A0A0A'
+                        : (painted ? 'rgba(255,255,255,0.7)' : '#BBBBBB'),
+                      border: waiterLabel ? '1.5px solid #0A0A0A'
+                        : '1.5px dashed ' + (painted ? 'rgba(255,255,255,0.55)' : '#DDDDDD') }}>
+                    {waiterLabel || '\u2013'}
+                  </span>
                   <span style={{ fontSize:12, minWidth:42,
                     color: painted ? 'rgba(255,255,255,0.9)' : 'var(--ink2)' }}>{timeStr}</span>
                   <span style={{ fontSize:11, fontWeight:800, padding:'3px 9px', borderRadius:999,
@@ -839,8 +861,9 @@ ${(order.order_items||[]).map(i => `
                       </>
                     ) : status === 'progress' ? (
                       <>
-                        <span style={{ fontSize:12, fontWeight:800,
-                          color: painted ? '#FFFFFF' : 'var(--ink2)' }}>{waiterName || '—'}</span>
+                        {/* waiter-number-leads-row: the number is up front with
+                            the table now, so repeating the name here only
+                            crowded the Deliver button. */}
                         <button onClick={() => isSos ? resolveSOSRequest(rec.id) : markDelivered(rec)}
                           style={{ background: painted ? '#FFFFFF' : '#16A34A',
                             color: painted ? '#15803D' : '#fff',
@@ -850,8 +873,9 @@ ${(order.order_items||[]).map(i => `
                         </button>
                       </>
                     ) : (
-                      <span style={{ fontSize:12, fontWeight:700,
-                        color: painted ? '#FFFFFF' : 'var(--ink2)' }}>{waiterName || '—'}</span>
+                      /* Delivered and cancelled rows: the waiter number is up
+                         front with the table, so nothing goes at the end of the row. */
+                      null
                     )}
                   </span>
                   <span style={{ fontSize:11, transform:'rotate('+(open?180:0)+'deg)',

@@ -220,7 +220,7 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
   )
 }
 
-export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen, onBack, captain, onSwitchCaptain, captainTable, onCaptainBack }) {
+export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen, onBack, captain, onSwitchCaptain, captainTable, onCaptainBack, onChat, chatUnread = 0 }) {
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [search, setSearch] = useState('')
@@ -358,6 +358,28 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         <button onClick={onShowFeedback} className="ss-cta ss-cta-still"
           style={{ display: captain ? 'none' : 'inline-flex', flexShrink:0, borderRadius:999,
             padding:'8px 15px', fontSize:12, whiteSpace:'nowrap' }}>⭐ Feedback</button>
+
+        {/* ss-menu-chat-button. Up here rather than in the bottom bar: that
+            bar stands down the moment a dish is added, which is exactly when
+            a captain is most likely to be asking "is this one finished?".
+            This row never goes away, and for a captain it is otherwise empty -
+            History, Help and Feedback all belong to the guest. */}
+        {captain && onChat && (
+          <button onClick={onChat} style={{ position:'relative', flexShrink:0,
+            background:'#1A0A0A', color:'#fff', border:'2px solid #E8890C',
+            borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:800,
+            cursor:'pointer', whiteSpace:'nowrap', display:'inline-flex',
+            alignItems:'center', gap:6 }}>
+            💬 Supervisor
+            {chatUnread > 0 && (
+              <span style={{ background:'#DC2626', color:'#fff', borderRadius:999,
+                minWidth:18, height:18, fontSize:10, fontWeight:900, padding:'0 5px',
+                display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
+                {chatUnread}
+              </span>
+            )}
+          </button>
+        )}
 
         <div style={{ flex:1, minWidth:0, background:'#F5F5F5', borderRadius:999,
           padding:'7px 14px', display:'flex', alignItems:'center', gap:6 }}>
