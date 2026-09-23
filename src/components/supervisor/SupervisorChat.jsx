@@ -179,7 +179,7 @@ export default function SupervisorChat({ eventData, meName, minimized, unread = 
               half typed reply would follow you into the next thread and be
               sent to the wrong person. */}
           <ChatThread key={open.id} eventId={eventData?.id} captainId={open.id}
-            me="supervisor" meName={meName || 'Supervisor'}
+            me="supervisor" meName={meName || 'Operator'}
             quickReplies={QUICK}
             emptyHint={'Nothing from ' + open.name + ' yet.\nYou can start here.'} />
         </div>

@@ -957,7 +957,7 @@ export default function GuestApp() {
           <span style={{ fontSize:26 }}>💬</span>
           <span style={{ flex:1, minWidth:0 }}>
             <span style={{ display:'block', color:'#E8890C', fontSize:11,
-              fontWeight:900, letterSpacing:'0.5px' }}>SUPERVISOR</span>
+              fontWeight:900, letterSpacing:'0.5px' }}>OPERATOR</span>
             <span style={{ display:'block', color:'#fff', fontSize:14, fontWeight:700,
               overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
               {chatToast.body}

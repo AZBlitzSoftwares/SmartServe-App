@@ -370,7 +370,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
             borderRadius:999, padding:'6px 14px', fontSize:12, fontWeight:800,
             cursor:'pointer', whiteSpace:'nowrap', display:'inline-flex',
             alignItems:'center', gap:6 }}>
-            💬 Supervisor
+            💬 Operator
             {chatUnread > 0 && (
               <span style={{ background:'#DC2626', color:'#fff', borderRadius:999,
                 minWidth:18, height:18, fontSize:10, fontWeight:900, padding:'0 5px',

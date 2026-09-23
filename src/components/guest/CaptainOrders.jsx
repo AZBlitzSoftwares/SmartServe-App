@@ -50,10 +50,7 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
   const [typed, setTyped] = useState('')
   const [openRow, setOpenRow] = useState(null)
   const [confirmId, setConfirmId] = useState(null)
-  // Its own state rather than a mode flag on confirmId: cancelling and
-  // delivering are opposite outcomes and must never share a code path
-  // that a stray tap could send down the wrong branch.
-  const [deliverId, setDeliverId] = useState(null)
+  // ss-no-deliverid-74: the deliver flow is gone; cancel keeps confirmId.
   const [busy, setBusy] = useState(false)
   // { icon, title, text } - the modal had one hardcoded heading, which
   // was wrong the moment there was a second reason to show it.
@@ -115,60 +112,7 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
     setBusy(false)
   }
 
-  async function reallyDeliver(orderId) {
-    setBusy(true)
-    try {
-      // The same re-read Cancel does. This row is up to five seconds old
-      // and the supervisor may already have marked it delivered.
-      const { data } = await supabase.from('orders')
-        .select('waiter_id, status, captain_id, captains(name)').eq('id', orderId).single()
-      if (data && data.captain_id !== captain?.id) {
-        setDeliverId(null)
-        setNotice({ icon:'\u{1F9D1}', title:'Not your order',
-          text:'This order was taken by captain ' + (data.captains?.name || 'someone else') +
-            '. Only the captain who took it can mark it delivered.' })
-        setBusy(false)
-        return
-      }
-      if (!data?.waiter_id) {
-        setDeliverId(null)
-        setNotice({ icon:'\u23F3', title:'No waiter yet',
-          text:'The supervisor has not assigned a waiter to this order yet, so there is nothing to mark delivered.' })
-        setBusy(false)
-        return
-      }
-      if (data?.status === 'delivered') {
-        setDeliverId(null)
-        setNotice({ icon:'\u2705', title:'Already delivered',
-          text:'This order has already been marked delivered.' })
-        setBusy(false)
-        return
-      }
-      if (data?.status === 'cancelled') {
-        setDeliverId(null)
-        setNotice({ icon:'\u26A0\uFE0F', title:'Order was cancelled',
-          text:'This order has been cancelled, so it cannot be marked delivered.' })
-        setBusy(false)
-        return
-      }
-      // delivered_by records who closed it, which is the only way to tell
-      // a captain-side delivery from a supervisor one later. The column may
-      // not exist on every environment yet, so a rejected write falls back
-      // to the plain status update - the status is what the board reads.
-      const base = { status:'delivered', delivered_at:new Date().toISOString() }
-      const { error } = await supabase.from('orders')
-        .update({ ...base, delivered_by:'captain:' + (captain?.name || '') })
-        .eq('id', orderId)
-      if (error) await supabase.from('orders').update(base).eq('id', orderId)
-      setDeliverId(null)
-      load()
-    } catch (e) {
-      setDeliverId(null)
-      setNotice({ icon:'\u26A0\uFE0F', title:'Could not update',
-        text:'Something went wrong. Please tell the supervisor.' })
-    }
-    setBusy(false)
-  }
+  // ss-no-reallydeliver-74: went with the button and the state.
 
   const mine = o => o.captain_id === captain?.id
 
@@ -322,11 +266,7 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
               // cancellation made without knowing what the guest actually said
               // is worse than a short walk to find the person who does.
               const canCancel = isMine && !o.waiter_id && ['pending','placed'].includes(o.status)
-              // The mirror of canCancel, and deliberately the same owner rule.
-              // Before a waiter exists there is nothing to deliver; once one is
-              // assigned the order is moving and cancelling is no longer honest.
-              const canDeliver = isMine && !!o.waiter_id &&
-                ['in_progress','in_preparation','ready'].includes(o.status)
+              // ss-no-candeliver-74: removed with the button it gated.
               const items = o.order_items || []
               const count = items.reduce((n, li) => n + (li.quantity || 1), 0)
               const tNum = o.tables?.table_number ?? '?'
@@ -394,6 +334,26 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
                       </span>
                     )}
 
+                    {/* ss-row-actions-74. Cancel is on the row itself, the
+                        same as the supervisor's board: expanding an order to
+                        reach a button is a tap and a read for something a
+                        captain does while walking away from a table.
+                        The chevron still opens the dish list. */}
+                    {/* ss-no-captain-deliver-74. Delivering is the supervisor's
+                        call again. A captain marking an order delivered was a
+                        second pair of hands on the same switch, and the board is
+                        where the kitchen and the floor actually agree. */}
+
+                    {canCancel && (
+                      <button onClick={e => { e.stopPropagation(); setConfirmId(o.id) }}
+                        style={{ flexShrink:0, background:'#FFFFFF', color:'#DC2626',
+                          border:'1.5px solid #FCA5A5', borderRadius:9, padding:'7px 13px',
+                          fontSize:13, fontWeight:800, cursor:'pointer',
+                          whiteSpace:'nowrap' }}>
+                        ✕ Cancel
+                      </button>
+                    )}
+
                     <span style={{ fontSize:11, color:'#AAA', flexShrink:0,
                       transform:'rotate(' + (open ? 180 : 0) + 'deg)',
                       transition:'transform 0.15s' }}>▼</span>
@@ -415,15 +375,9 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
                         </div>
                       )}
 
-                      {canDeliver && (
-                        <button onClick={e => { e.stopPropagation(); setDeliverId(o.id) }}
-                          style={{ width:'100%', marginTop:10, background:'#16A34A',
-                            border:'none', borderRadius:10, padding:'12px',
-                            fontSize:14, fontWeight:900, color:'#FFFFFF',
-                            cursor:'pointer' }}>
-                          ✓ Mark as delivered
-                        </button>
-                      )}
+                      {/* ss-deliver-moved-72 - it lives on the row now. Two
+                          buttons doing one job is how a captain ends up
+                          wondering whether they are the same button. */}
 
                       {o.status === 'cancelled' && o.cancel_reason && (
                         <div style={{ fontSize:12, color:'#B91C1C', fontWeight:600, marginTop:8 }}>
@@ -431,14 +385,9 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
                         </div>
                       )}
 
-                      {canCancel && (
-                        <button onClick={e => { e.stopPropagation(); setConfirmId(o.id) }}
-                          style={{ width:'100%', marginTop:10, background:'transparent',
-                            border:'1.5px solid #FECACA', borderRadius:10, padding:'10px',
-                            fontSize:13, fontWeight:800, color:'#DC2626', cursor:'pointer' }}>
-                          ✕ Cancel this order
-                        </button>
-                      )}
+                      {/* ss-cancel-moved-72 - on the row now, beside Deliver.
+                          Moving one and not the other would have left the two
+                          halves of the same decision in two different places. */}
 
                       {/* Not a refusal so much as a redirection: it names the
                           person to go and speak to, which is what the captain
@@ -486,32 +435,7 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
         </div>
       )}
 
-      {deliverId && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.72)', zIndex:200,
-          display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
-          <div style={{ width:'100%', maxWidth:370, background:'#fff', borderRadius:22,
-            padding:'28px 24px 24px', textAlign:'center' }}>
-            <div style={{ fontSize:44, marginBottom:12 }}>✅</div>
-            <div style={{ fontSize:20, fontWeight:800, marginBottom:8 }}>Mark this order delivered?</div>
-            <div style={{ fontSize:13, color:'#888', lineHeight:1.6, marginBottom:22 }}>
-              Only do this once the food is on the table.
-            </div>
-            <div style={{ display:'flex', gap:12 }}>
-              <button onClick={() => setDeliverId(null)} disabled={busy}
-                style={{ flex:1, background:'#F3F4F6', color:'#374151', border:'none',
-                  borderRadius:14, padding:'16px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
-                No
-              </button>
-              <button onClick={() => reallyDeliver(deliverId)} disabled={busy}
-                style={{ flex:1, background: busy ? '#999' : '#16A34A', color:'#fff', border:'none',
-                  borderRadius:14, padding:'16px', fontSize:16, fontWeight:800,
-                  cursor: busy ? 'wait' : 'pointer' }}>
-                {busy ? 'Please wait…' : 'Yes'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ss-no-deliver-modal-74: nothing opens it any more. */}
 
       {notice && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.72)', zIndex:200,
