@@ -47,7 +47,8 @@ export default function CaptainChat({ eventData, captain, minimized, unread = 0,
           borderRadius:999, padding:'12px 20px', fontSize:14, fontWeight:900,
           cursor:'pointer', boxShadow:'0 8px 26px rgba(0,0,0,0.45)',
           fontFamily:'Manrope, sans-serif' }}>
-        💬 Supervisor
+        {/* ss-operator-74 */}
+        💬 Operator
         {unread > 0 && (
           <span style={{ background:'#DC2626', color:'#fff', borderRadius:999,
             minWidth:21, height:21, fontSize:11, fontWeight:900, padding:'0 6px',
@@ -72,7 +73,7 @@ export default function CaptainChat({ eventData, captain, minimized, unread = 0,
       <div style={{ flexShrink:0, background:'#1A0A0A', padding:'12px 10px 12px 16px',
         display:'flex', alignItems:'center', gap:10 }}>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ color:'#fff', fontSize:15, fontWeight:900 }}>Supervisor</div>
+          <div style={{ color:'#fff', fontSize:15, fontWeight:900 }}>Operator</div>
           <div style={{ color:'rgba(255,255,255,0.5)', fontSize:11, fontWeight:600,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
             You are {captain?.name || 'captain'}
@@ -90,7 +91,7 @@ export default function CaptainChat({ eventData, captain, minimized, unread = 0,
         <ChatThread eventId={eventData?.id} captainId={captain?.id}
           me="captain" meName={captain?.name || ''}
           quickReplies={QUICK}
-          emptyHint={'Message the supervisor from here.\nThey see it on their screen straight away.'} />
+          emptyHint={'Message the operator from here.\nThey see it on their screen straight away.'} />
       </div>
     </div>
   )

@@ -51,12 +51,77 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
   const [selectedTableNum, setSelectedTableNum] = useState(null)
   const [supervisorPins, setSupervisorPins] = useState([])
 
+  /* ss-sound-toggle-75. Whether the sound is actually on right now, which
+     is not the same question as whether the event wants it: the browser
+     has the final say until somebody touches the screen. The speaker
+     button reads this, so it always shows the truth rather than the
+     intention. */
+  const [soundOn, setSoundOn] = useState(false)
+
+  /* ss-welcome-sound-74. The welcome video was hard-coded muted, so the
+     sound never had a chance regardless of the event setting.
+
+     It now follows the same event flag the genie screen uses. The catch is
+     one no amount of code gets around: browsers refuse to start audio until
+     the page has had a real touch, and a tablet sitting on a table has had
+     none. So the first attempt is made with sound; if the browser refuses,
+     it falls back to muted and arms a one-time listener, and the speaker
+     button gives anyone an obvious way to turn it on deliberately.       */
   useEffect(() => {
-    if (videoRef.current && eventData?.video_url) {
-      videoRef.current.load()
-      videoRef.current.play().catch(()=>{})
+    const v = videoRef.current
+    if (!v || !eventData?.video_url) return
+    const wantSound = eventData?.video_sound_enabled !== false
+    v.load()
+    v.muted = !wantSound
+    v.volume = 1
+    setSoundOn(wantSound)
+
+    let armed = false
+    function unmute() {
+      if (!wantSound) return
+      try { v.muted = false; v.volume = 1; v.play().catch(() => {}) } catch (e) {}
+      setSoundOn(true)
+      disarm()
     }
-  }, [eventData?.video_url])
+    function disarm() {
+      if (!armed) return
+      armed = false
+      document.removeEventListener('pointerdown', unmute, true)
+      document.removeEventListener('touchstart', unmute, true)
+      document.removeEventListener('keydown', unmute, true)
+    }
+    function arm() {
+      if (armed || !wantSound) return
+      armed = true
+      document.addEventListener('pointerdown', unmute, true)
+      document.addEventListener('touchstart', unmute, true)
+      document.addEventListener('keydown', unmute, true)
+    }
+
+    const p = v.play()
+    if (p && p.catch) {
+      p.catch(() => {
+        // Refused with sound. A silent video beats an empty black box, so
+        // start muted and wait for the first touch - or for the button.
+        try { v.muted = true; v.play().catch(() => {}) } catch (e) {}
+        setSoundOn(false)
+        arm()
+      })
+    }
+    return disarm
+  }, [eventData?.video_url, eventData?.video_sound_enabled])
+
+  /* The tap on this button IS the user gesture the browser was waiting
+     for, which is why it works when nothing else does. */
+  function toggleSound() {
+    const v = videoRef.current
+    if (!v) return
+    const turningOn = v.muted
+    v.muted = !turningOn
+    v.volume = 1
+    setSoundOn(turningOn)
+    try { const q = v.play(); if (q && q.catch) q.catch(() => {}) } catch (e) {}
+  }
 
   async function openTablePicker() {
     setShowTablePicker(true); setTablePinInput(''); setTablePinError(''); setPinVerified(false); setSelectedTableNum(null)
@@ -116,8 +181,38 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
           invisible and wasted the asset entirely. */}
       {eventData?.video_url && (
         <div style={{ width:'100%', flex:1, minHeight:0, position:'relative', overflow:'hidden' }}>
-          <video ref={videoRef} src={eventData.video_url} autoPlay loop muted playsInline
+          {/* ss-welcome-sound-74-el. No muted attribute: the effect above
+              owns it, so the event's sound setting is what decides. */}
+          <video ref={videoRef} src={eventData.video_url} autoPlay loop playsInline
             style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+
+          {/* ss-sound-words-76. A word, not a symbol. The speaker icon that
+              was here read as decoration to anyone who was not already
+              looking for a sound control, and a guest at a wedding is not.
+
+              The label is the ACTION, not the state: it says Unmute when
+              there is no sound, which is what the person wants to do. Saying
+              "Muted" would describe the problem and leave them to work out
+              that tapping it is the answer.
+
+              Amber while silent, because that is when it needs to be found;
+              quiet and translucent once the sound is on, because then it is
+              just an off switch nobody needs. Not shown at all on an event
+              whose sound is switched off, where it would do nothing. */}
+          {eventData?.video_sound_enabled !== false && (
+            <button onClick={toggleSound}
+              style={{ position:'absolute', top:14, right:14, zIndex:5,
+                borderRadius:999, padding:'11px 22px', cursor:'pointer',
+                fontSize:15, fontWeight:800, letterSpacing:'0.3px',
+                fontFamily:'Manrope, sans-serif', lineHeight:1,
+                background: soundOn ? 'rgba(0,0,0,0.5)' : '#E8890C',
+                color:'#FFFFFF',
+                border: soundOn ? '1.5px solid rgba(255,255,255,0.5)' : 'none',
+                boxShadow: soundOn ? 'none' : '0 4px 16px rgba(232,137,12,0.5)',
+                WebkitBackdropFilter:'blur(4px)', backdropFilter:'blur(4px)' }}>
+              {soundOn ? 'Mute' : 'Unmute'}
+            </button>
+          )}
           {/* Fades the video into the panel so the two read as one
               surface instead of two blocks butted together. */}
           <div style={{ position:'absolute', left:0, right:0, bottom:0, height:90,

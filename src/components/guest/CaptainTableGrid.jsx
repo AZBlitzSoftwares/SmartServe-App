@@ -14,10 +14,14 @@ import janusLogo from '../../assets/janus_logo.jpg'
 
    Three states, because two was not enough to be useful:
      GREEN   nothing outstanding, order freely
-     ORANGE  something is live but the table is under its limit
+     BLUE    something is live but the table is under its limit
      RED     at the limit, ordering blocked until something is delivered
 
-   With the limit set to 1, orange never appears - that is correct, not a
+   The middle one was amber until it turned out that amber and red read the
+   same at arm's length across forty tiles. Blue cannot be mistaken for
+   either, and it already means "on its way" everywhere else in this app.
+
+   With the limit set to 1, blue never appears - that is correct, not a
    gap. It earns its place the moment the limit is 2 or more, where "one
    order out, room for another" is a real and common state.
 
@@ -71,14 +75,19 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
   function stateOf(n) {
     const live = counts[n] || 0
     if (limit > 0 && live >= limit) return 'red'
-    if (live > 0) return 'orange'
+    if (live > 0) return 'busy'
     return 'green'
   }
 
+  /* ss-busy-blue-74. The middle state was amber, which on a grid of forty
+     tiles sat too close to the red one - at arm's length on a tablet, under
+     hall lighting, "something is out" and "you cannot order" read the same.
+     Blue is unmistakably neither, and it is already this app's colour for
+     an order on its way. */
   const TONE = {
-    green:  { bg:'#F0FDF4', border:'#16A34A', fg:'#15803D' },
-    orange: { bg:'#FFF7ED', border:'#E8890C', fg:'#C2410C' },
-    red:    { bg:'#FEF2F2', border:'#DC2626', fg:'#B91C1C' },
+    green: { bg:'#F0FDF4', border:'#16A34A', fg:'#15803D' },
+    busy:  { bg:'#EFF6FF', border:'#2563EB', fg:'#1D4ED8' },
+    red:   { bg:'#FEF2F2', border:'#DC2626', fg:'#B91C1C' },
   }
 
   function pick(n) {
@@ -135,7 +144,7 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
 
       <div style={{ display:'flex', alignItems:'center', gap:14, padding:'10px 16px',
         flexShrink:0, flexWrap:'wrap' }}>
-        {[['green','Free'],['orange','In progress'],['red','At limit']].map(([k,label]) => (
+        {[['green','Free'],['busy','In progress'],['red','At limit']].map(([k,label]) => (
           <span key={k} style={{ display:'flex', alignItems:'center', gap:6,
             fontSize:12, color:'rgba(255,255,255,0.65)', fontWeight:700 }}>
             <span style={{ width:13, height:13, borderRadius:4,

@@ -709,7 +709,11 @@ ${(order.order_items||[]).map(i => `
             const wNumMatch = waiterName.match(/\(([^)]+)\)\s*$/)
             const waiterLabel = waiterName ? (wNumMatch ? wNumMatch[1] : waiterName) : ''
             const timeStr = new Date(rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
-            const chips = showAllWaiters === id ? availableWaiters : availableWaiters.slice(0, 3)
+            // ss-eight-waiters-74. Three meant the waiter they wanted was
+            // usually behind More - a tap on nearly every order, while a guest
+            // waited. Eight covers almost every assignment outright, and More
+            // still opens the rest on an event with more staff than that.
+            const chips = showAllWaiters === id ? availableWaiters : availableWaiters.slice(0, 8)
 
             // Two inline, because a row in a two column grid has no space for
             // three plus More. The rest live behind the chevron.
@@ -894,21 +898,16 @@ ${(order.order_items||[]).map(i => `
                       </span>
                       <span style={{ fontSize:11, color:'var(--ink2)' }}>since order received</span>
                     </div>
-                    {captainName && (
-                      <div style={{ fontSize:12, color:'#2563EB', fontWeight:700, marginBottom:8 }}>
-                        Order taken by captain {captainName}
-                      </div>
-                    )}
-                    <div style={{ marginBottom:10 }}>
-                      {lines_.map((li, i) => (
-                        <div key={i} style={{ display:'flex', justifyContent:'space-between',
-                          fontSize:13, padding:'3px 0', borderBottom:'1px solid #F0F0F0' }}>
-                          <span style={{ fontWeight:600 }}>{isSos ? li.item_name : li.menu_items?.name}</span>
-                          <span style={{ color:'#888' }}>x{li.quantity}</span>
-                        </div>
-                      ))}
-                    </div>
 
+                    {/* ss-kot-waiter-first-74. Assigning a waiter is the only
+                        thing this panel is opened to DO. It was below the dish
+                        list, which meant scrolling past the order to reach the
+                        buttons on every single assignment.
+
+                        Eight waiters are offered now rather than three. The
+                        right one was usually behind More, which made it a tap
+                        on nearly every order. More is still there for an event
+                        with more staff than that. */}
                     {status === 'new' ? (
                       <div style={{ marginBottom:10 }}>
                         <div style={{ fontSize:12, color:'var(--ink2)', marginBottom:6, fontWeight:600 }}>
@@ -925,7 +924,7 @@ ${(order.order_items||[]).map(i => `
                               {w.waiter_number || w.name}
                             </button>
                           ))}
-                          {availableWaiters.length > 3 && (
+                          {availableWaiters.length > 8 && (
                             <button onClick={e => { e.stopPropagation(); setShowAllWaiters(showAllWaiters===id ? null : id) }}
                               style={{ background:'var(--bg)', border:'1px solid var(--line)',
                                 borderRadius:10, padding:'9px 14px', fontSize:13, fontWeight:700,
@@ -946,6 +945,24 @@ ${(order.order_items||[]).map(i => `
                         Waiter {waiterName} assigned
                       </div>
                     ) : null}
+
+                    {captainName && (
+                      <div style={{ fontSize:12, color:'#2563EB', fontWeight:700, marginBottom:8 }}>
+                        Order taken by captain {captainName}
+                      </div>
+                    )}
+                    <div style={{ marginBottom:10 }}>
+                      {lines_.map((li, i) => (
+                        <div key={i} style={{ display:'flex', justifyContent:'space-between',
+                          fontSize:13, padding:'3px 0', borderBottom:'1px solid #F0F0F0' }}>
+                          <span style={{ fontWeight:600 }}>{isSos ? li.item_name : li.menu_items?.name}</span>
+                          <span style={{ color:'#888' }}>x{li.quantity}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* ss-kot-waiter-moved-74 - now above the order, where it
+                        is the first thing the panel offers. */}
 
                     <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                       <button onClick={() => isSos ? printHelpKOT(rec) : printKOT(rec)}
