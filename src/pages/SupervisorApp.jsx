@@ -234,7 +234,17 @@ export default function SupervisorApp() {
   ]
 
   return (
-    <div style={{ minHeight:'100vh', background:'var(--bg)', paddingBottom:24 }}>
+    <div style={{ minHeight:'100vh', background:'var(--bg)', paddingBottom:110 }}>
+
+      {/* ss-pill-clearance-77. The Captains pill is position:fixed in the
+          bottom right, so it sat on top of whatever happened to be the last
+          thing on the page - at a live event that was the Mobile field of
+          ADD A WAITER, and the field simply could not be reached.
+
+          The space is reserved here rather than by moving the pill, which
+          fixes every tab at once: Control, Menu, Reports and Events all
+          have something at the bottom of a long page, and all of them
+          would have hit this sooner or later. */}
 
       {/* ── FLOATING ORDER ALERT ── */}
       {newOrderAlert && (
