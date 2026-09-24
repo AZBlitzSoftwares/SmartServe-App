@@ -112,12 +112,16 @@ export default function SupervisorChat({ eventData, meName, minimized, unread = 
           100% {background:#DC2626;box-shadow:0 0 0 0 rgba(220,38,38,0);transform:scale(1)}
         }.ss-chat-pulse{animation:ssChatPulse 0.85s ease-in-out infinite}`}</style>
       )}
+      {/* ss-pill-compact-77. Smaller and closer to the corner, so it covers
+          as little as possible on the way past. The page reserves room for
+          it as well, but a control that floats over the work should take up
+          the least space it can and still be findable. */}
       <button onClick={onToggle} className={shouting ? 'ss-chat-pulse' : undefined}
-        style={{ position:'fixed', right:18, bottom:18, zIndex:150,
-          display:'flex', alignItems:'center', gap:9,
+        style={{ position:'fixed', right:12, bottom:12, zIndex:150,
+          display:'flex', alignItems:'center', gap:7,
           background:'#1A0A0A', color:'#fff',
           border:'2px solid ' + (shouting ? '#FFFFFF' : '#E8890C'),
-          borderRadius:999, padding:'12px 20px', fontSize:14, fontWeight:900,
+          borderRadius:999, padding:'9px 16px', fontSize:13, fontWeight:900,
           cursor:'pointer', boxShadow:'0 8px 26px rgba(0,0,0,0.4)' }}>
         💬 Captains
         {unread > 0 && (
