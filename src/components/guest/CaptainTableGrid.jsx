@@ -45,7 +45,15 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
   const [err, setErr] = useState('')
 
   const total = eventData?.number_of_tables || 0
-  const limit = eventData?.max_orders_per_table || 0
+  // ss-multi-kitchen. A multi-kitchen table takes many orders - one per
+  // group of chairs - so there is no "at limit" there and no red tile.
+  // The admin links each captain to one table; a linked captain sees only
+  // that table here. An unlinked one still gets the whole grid, so service
+  // never stops because a link was missed.
+  const multi = !!eventData?.multi_kitchen
+  const linked = multi && captain?.table_number != null && captain.table_number !== ''
+    ? Number(captain.table_number) : null
+  const limit = multi ? 0 : (eventData?.max_orders_per_table || 0)
 
   useEffect(() => {
     load()
@@ -90,6 +98,16 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
     red:   { bg:'#FEF2F2', border:'#DC2626', fg:'#B91C1C' },
   }
 
+  // ss-multi-kitchen: two captains can share a table there, each ordering
+  // for their own chairs, so a held cart is only ever picked up by the
+  // captain who wrote it. The badge follows the same rule.
+  function heldFor(n) {
+    const h = heldCarts?.[n]
+    if (!h) return null
+    if (h.captain && captain?.name && h.captain !== captain.name) return null
+    return h
+  }
+
   function pick(n) {
     setErr('')
     onPick(n, stateOf(n), counts[n] || 0)
@@ -116,7 +134,7 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
         <img src={janusLogo} alt="" style={{ width:42, height:42, borderRadius:10,
           objectFit:'contain', background:'rgba(232,137,12,0.12)' }} />
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ color:'#fff', fontSize:17, fontWeight:900 }}>Which table?</div>
+          <div style={{ color:'#fff', fontSize:17, fontWeight:900 }}>{linked != null ? 'Your table' : 'Which table?'}</div>
           <div style={{ color:'rgba(255,255,255,0.5)', fontSize:12, fontWeight:600,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
             {eventData?.name || ''}
@@ -142,9 +160,12 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
         </div>
       </div>
 
+      {/* ss-multi-kitchen: a linked captain has exactly one table, so the
+          legend and the table-number box have nothing to do. */}
+      {linked == null && (
       <div style={{ display:'flex', alignItems:'center', gap:14, padding:'10px 16px',
         flexShrink:0, flexWrap:'wrap' }}>
-        {[['green','Free'],['busy','In progress'],['red','At limit']].map(([k,label]) => (
+        {(multi ? [['green','Free'],['busy','In progress']] : [['green','Free'],['busy','In progress'],['red','At limit']]).map(([k,label]) => (
           <span key={k} style={{ display:'flex', alignItems:'center', gap:6,
             fontSize:12, color:'rgba(255,255,255,0.65)', fontWeight:700 }}>
             <span style={{ width:13, height:13, borderRadius:4,
@@ -177,6 +198,16 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
             color: typed ? '#fff' : 'rgba(255,255,255,0.4)',
             cursor: typed ? 'pointer' : 'not-allowed' }}>Go</button>
       </div>
+      )}
+
+      {multi && linked == null && (
+        <div style={{ margin:'0 16px 10px', background:'rgba(245,158,11,0.16)',
+          border:'1.5px solid rgba(245,158,11,0.55)', borderRadius:12, padding:'11px 14px',
+          fontSize:14, color:'#FCD34D', fontWeight:800, display:'flex', alignItems:'center', gap:10 }}>
+          <span style={{ fontSize:18 }}>{'⚠️'}</span>
+          You are not linked to a table yet {'—'} ask the admin. You can still pick a table below.
+        </div>
+      )}
 
       {err && (
         <div style={{ margin:'0 16px 8px', background:'rgba(220,38,38,0.18)',
@@ -187,7 +218,45 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
       {/* The extra bottom padding clears the floating chat pill, so the last
           row of tables can still be tapped rather than sitting under it. */}
       <div style={{ flex:1, overflowY:'auto', padding:'4px 16px 84px' }}>
-        {loading ? (
+        {linked != null ? (
+          (() => {
+            const live = counts[linked] || 0
+            const held = heldFor(linked)
+            const tone = TONE[live > 0 ? 'busy' : 'green']
+            return (
+              <div style={{ display:'flex', flexDirection:'column', alignItems:'center',
+                justifyContent:'center', gap:16, padding:'clamp(28px, 9vh, 110px) 0 10px',
+                boxSizing:'border-box' }}>
+                <button onClick={() => pick(linked)}
+                  style={{ position:'relative', width:260, maxWidth:'100%', padding:'26px 10px 22px',
+                    borderRadius:24, border:'3px solid ' + tone.border, background:tone.bg,
+                    color:tone.fg, cursor:'pointer', fontFamily:'Manrope',
+                    display:'flex', flexDirection:'column', alignItems:'center', gap:4,
+                    boxShadow:'0 12px 40px rgba(0,0,0,0.35)' }}>
+                  <span style={{ fontSize:13, fontWeight:900, letterSpacing:'1.5px', opacity:0.8 }}>TABLE</span>
+                  <span style={{ fontSize:84, fontWeight:900, lineHeight:1 }}>{linked}</span>
+                  <span style={{ fontSize:13, fontWeight:800, opacity:0.9, minHeight:18 }}>
+                    {live > 0 ? live + (live === 1 ? ' order' : ' orders') + ' in progress' : 'No order in progress'}
+                  </span>
+                  {held?.count > 0 && (
+                    <span style={{ position:'absolute', top:-12, right:-12, background:'#1A0A0A',
+                      color:'#E8890C', borderRadius:999, minWidth:34, height:34, fontSize:15,
+                      fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center',
+                      padding:'0 8px', border:'3px solid ' + tone.border }}>{held.count}</span>
+                  )}
+                  <span style={{ marginTop:12, background:'#E8890C', color:'#fff', borderRadius:12,
+                    padding:'11px 26px', fontSize:16, fontWeight:900 }}>
+                    {held?.count > 0 ? 'Open menu · ' + held.count + ' in cart' : 'Open menu →'}
+                  </span>
+                </button>
+                <div style={{ color:'rgba(255,255,255,0.6)', fontSize:13, fontWeight:700,
+                  display:'flex', alignItems:'center', gap:7 }}>
+                  {'\u{1F512}'} Your table is set by the admin
+                </div>
+              </div>
+            )
+          })()
+        ) : loading ? (
           <div style={{ textAlign:'center', padding:50, color:'rgba(255,255,255,0.5)' }}>Loading…</div>
         ) : total === 0 ? (
           <div style={{ textAlign:'center', padding:'40px 20px', color:'rgba(255,255,255,0.6)',
@@ -203,7 +272,7 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
               const st = stateOf(n)
               const tone = TONE[st]
               const live = counts[n] || 0
-              const held = heldCarts?.[n]
+              const held = multi ? heldFor(n) : heldCarts?.[n]
               return (
                 <button key={n} onClick={() => pick(n)}
                   style={{ position:'relative', padding:'14px 4px', borderRadius:13,

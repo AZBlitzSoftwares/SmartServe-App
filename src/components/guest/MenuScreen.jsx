@@ -114,7 +114,10 @@ function HeaderCarousel({ eventData, tableNumber, isOnline, captain, onSwitchCap
           <button onClick={onCaptainBack}
             style={{ background:'rgba(232,137,12,0.25)', border:'1px solid rgba(232,137,12,0.6)',
               color:'#FFD9A0', borderRadius:999, padding:'3px 11px', fontSize:10,
-              fontWeight:800, cursor:'pointer', marginTop:3 }}>Change table</button>
+              fontWeight:800, cursor:'pointer', marginTop:3 }}>
+            {/* ss-multi-kitchen: a captain linked to a table does not change tables */}
+            {eventData?.multi_kitchen && captain?.table_number != null && captain.table_number !== '' ? 'My table' : 'Change table'}
+          </button>
         </div>
       ) : (
       <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3 }}>

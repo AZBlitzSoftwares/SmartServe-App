@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { chairsLabel, kotState, serverNow, CANCEL_WINDOW_MS, NoteBadge } from './mkShared'
 
 /* Track and cancel, captain side.
 
@@ -39,6 +40,12 @@ function mapStatus(raw) {
 }
 
 export default function CaptainOrders({ eventData, captain, onClose }) {
+  // ss-multi-kitchen: chairs, one KOT chip per kitchen, and a 2-minute
+  // cancel window. Off for every other event, where this screen behaves
+  // exactly as it always has.
+  const multi = !!eventData?.multi_kitchen
+  const chairCount = parseInt(eventData?.chairs_per_table, 10) || 10
+  const [kotsByOrder, setKotsByOrder] = useState({})
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('active')
@@ -47,6 +54,12 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
   // state, because "everyone's orders" as a browsable list is the thing
   // that made this screen unreadable.
   const [tableView, setTableView] = useState(null)
+  // Read by the multi-kitchen poll, which runs from an interval
+  const tableViewRef = useRef(null)
+  useEffect(() => {
+    tableViewRef.current = tableView
+    if (multi) load()   // a new table view needs that table's KOTs now, not in 5 s
+  }, [tableView])
   const [typed, setTyped] = useState('')
   const [openRow, setOpenRow] = useState(null)
   const [confirmId, setConfirmId] = useState(null)
@@ -60,10 +73,11 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
     load()
     const t = setInterval(load, 5000)
     return () => clearInterval(t)
-  }, [eventData?.id])
+  }, [eventData?.id, multi])
 
   async function load() {
     if (!eventData?.id) { setLoading(false); return }
+    if (multi) { await loadMulti(); return }
     try {
       const { data } = await supabase.from('orders')
         .select('*, tables(table_number), waiters(name), captains(name), order_items(quantity, menu_items(name))')
@@ -74,13 +88,59 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
     setLoading(false)
   }
 
+  // Multi-kitchen: the same orders plus each dish's note, and the KOTs of
+  // the orders on screen. Kept as a separate query so the columns it needs
+  // are never asked for at an event that does not have them.
+  async function loadMulti() {
+    try {
+      const o = await supabase.from('orders')
+        .select('*, tables(table_number), waiters(name), captains(name), order_items(quantity, note, menu_items(name))')
+        .eq('event_id', eventData.id)
+        .order('created_at', { ascending: false })
+      if (o.error) { setLoading(false); return }
+      setOrders(o.data || [])
+      // KOTs only for the orders this screen can show - this captain's own,
+      // plus the table being looked at - not the whole event every 5 s.
+      const tv = tableViewRef.current
+      const ids = (o.data || [])
+        .filter(x => x.captain_id === captain?.id ||
+          (tv != null && Number(x.tables?.table_number) === Number(tv)))
+        .map(x => x.id)
+      const k = ids.length
+        ? await supabase.from('kots')
+            .select('id, order_id, kitchen_name, kot_no, status, print_status')
+            .in('order_id', ids).eq('kind', 'order')
+        : { data: [], error: null }
+      if (!k.error) {
+        const m = {}
+        ;(k.data || []).forEach(r => { (m[r.order_id] = m[r.order_id] || []).push(r) })
+        Object.values(m).forEach(list => list.sort((a, b) => String(a.kot_no || '').localeCompare(String(b.kot_no || ''))))
+        setKotsByOrder(m)
+      }
+    } catch (e) { /* the next poll will catch it */ }
+    setLoading(false)
+  }
+
+  // Multi-kitchen cancel rule: the captain who took it, within two minutes
+  // of sending, and only while no kitchen has delivered anything. After
+  // that it is the operator's call - the food may already be on a plate.
+  function mkCancelState(o) {
+    const kots = kotsByOrder[o.id] || []
+    const anyDelivered = kots.some(k => k.status === 'delivered')
+    const age = serverNow() - Date.parse(o.created_at)
+    const open = !['delivered', 'cancelled'].includes(o.status)
+    return { open, anyDelivered, inWindow: age < CANCEL_WINDOW_MS,
+      can: o.captain_id === captain?.id && open && !anyDelivered && age < CANCEL_WINDOW_MS }
+  }
+
   async function reallyCancel(orderId) {
     setBusy(true)
     try {
       // Re-read rather than trusting the list: the supervisor may have
       // assigned a waiter in the seconds since this screen last polled.
       const { data } = await supabase.from('orders')
-        .select('waiter_id, status, captain_id, captains(name)').eq('id', orderId).single()
+        .select(multi ? 'waiter_id, status, captain_id, created_at, captains(name)' : 'waiter_id, status, captain_id, captains(name)')
+        .eq('id', orderId).single()
       // The button is already hidden on another captain's order; this is the
       // same rule enforced where it actually matters, in case a row goes
       // stale between the poll and the tap.
@@ -92,7 +152,25 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
         setBusy(false)
         return
       }
-      if (data?.waiter_id || !['pending','placed'].includes(data?.status)) {
+      if (multi) {
+        // Same rule as the button, checked again against fresh rows - a
+        // kitchen may have delivered in the seconds since the last poll.
+        const { data: ks } = await supabase.from('kots')
+          .select('status').eq('order_id', orderId).eq('kind', 'order')
+        const delivered = (ks || []).some(k => k.status === 'delivered')
+        const late = !data?.created_at || serverNow() - Date.parse(data.created_at) >= CANCEL_WINDOW_MS
+        if (delivered || late || ['delivered', 'cancelled'].includes(data?.status)) {
+          setConfirmId(null)
+          setNotice({ icon:'\u23F1\uFE0F', title:'Ask the operator to cancel',
+            text: delivered
+              ? 'A kitchen has already delivered part of this order, so it can no longer be cancelled here.'
+              : data?.status === 'cancelled'
+                ? 'This order is already cancelled.'
+                : 'Orders can be cancelled here only in the first 2 minutes. Please ask the operator.' })
+          setBusy(false)
+          return
+        }
+      } else if (data?.waiter_id || !['pending','placed'].includes(data?.status)) {
         setConfirmId(null)
         setNotice({ icon:'\u{1F3C3}', title:'Already on the way',
           text:'A waiter has already been assigned to this order, so it can no longer be cancelled here. Please tell the supervisor.' })
@@ -259,13 +337,21 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
               display: col.length ? 'block' : 'none' }}>
             {col.map((o, i) => {
               const s = mapStatus(o.status)
-              const cfg = STATUS[s]
               const open = openRow === o.id
               const isMine = mine(o)
+              // ss-multi-kitchen: KOTs, chairs and the 2-minute rule
+              const kots = multi ? (kotsByOrder[o.id] || []) : []
+              const mkc = multi ? mkCancelState(o) : null
+              const partDelivered = multi && s === 'placed' && kots.some(k => k.status === 'delivered')
+              const cfg = partDelivered
+                ? { label:'Part delivered', color:'#2563EB', bg:'#EFF6FF' }
+                : STATUS[s]
               // Only the captain who took it. Anyone can see any table, but a
               // cancellation made without knowing what the guest actually said
               // is worse than a short walk to find the person who does.
-              const canCancel = isMine && !o.waiter_id && ['pending','placed'].includes(o.status)
+              const canCancel = multi
+                ? mkc.can
+                : isMine && !o.waiter_id && ['pending','placed'].includes(o.status)
               // ss-no-candeliver-74: removed with the button it gated.
               const items = o.order_items || []
               const count = items.reduce((n, li) => n + (li.quantity || 1), 0)
@@ -301,6 +387,15 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
                     <span style={{ fontSize:12, color:'#555', fontWeight:700, flexShrink:0 }}>
                       {count} {count === 1 ? 'item' : 'items'}
                     </span>
+
+                    {multi && o.chairs?.length > 0 && (
+                      <span style={{ fontSize:12, color:'#1A0A0A', fontWeight:800, flexShrink:1,
+                        minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                        background:'#FFF8EE', border:'1px solid #F5C77E', borderRadius:7,
+                        padding:'2px 8px' }}>
+                        {chairsLabel(o.chairs, chairCount)}
+                      </span>
+                    )}
 
                     <span style={{ flex:1, minWidth:0 }} />
 
@@ -359,15 +454,68 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
                       transition:'transform 0.15s' }}>▼</span>
                   </div>
 
+                  {/* One chip per kitchen: KOT number and where it has got to.
+                      Tapping the row still opens the dish list. */}
+                  {multi && kots.length > 0 && (
+                    <div onClick={() => setOpenRow(open ? null : o.id)}
+                      style={{ display:'flex', flexWrap:'wrap', gap:6, padding:'0 11px 9px 11px',
+                        cursor:'pointer' }}>
+                      {kots.map(k => {
+                        const st = kotState(k)
+                        return (
+                          <span key={k.id} title={k.kitchen_name || ''}
+                            style={{ display:'inline-flex', alignItems:'center', gap:5,
+                              background:st.bg, color:st.fg, borderRadius:999, padding:'3px 10px',
+                              fontSize:11.5, fontWeight:800, whiteSpace:'nowrap',
+                              border:'1px solid ' + (st.key === 'failed' ? '#FCA5A5' : 'transparent') }}>
+                            <span style={{ fontWeight:900 }}>{k.kot_no || k.kitchen_name || 'KOT'}</span>
+                            <span style={{ opacity:0.85 }}>{'\u00B7'} {st.short}</span>
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+
                   {open && (
                     <div style={{ padding:'0 12px 12px', background:'#FAFAFA' }}>
                       {items.map((oi, j) => (
                         <div key={j} style={{ display:'flex', justifyContent:'space-between',
                           fontSize:13, padding:'4px 0', borderBottom:'1px solid #F0F0F0' }}>
                           <span style={{ fontWeight:600 }}>{oi.menu_items?.name || 'Item'}</span>
+                          {multi && oi.note && (
+                            <span style={{ flex:1, display:'flex', justifyContent:'flex-end', margin:'0 10px' }}>
+                              <NoteBadge note={oi.note} />
+                            </span>
+                          )}
                           <span style={{ color:'#888', fontWeight:700 }}>x{oi.quantity}</span>
                         </div>
                       ))}
+
+                      {multi && kots.length > 0 && (
+                        <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:3 }}>
+                          {kots.map(k => {
+                            const st = kotState(k)
+                            return (
+                              <div key={k.id} style={{ fontSize:12, fontWeight:700, color:'#555',
+                                display:'flex', gap:8, alignItems:'center' }}>
+                                <span style={{ fontWeight:900, color:'#1A0A0A' }}>{k.kot_no}</span>
+                                <span>{k.kitchen_name} kitchen</span>
+                                <span style={{ color:st.key === 'printed' ? '#15803D' : st.key === 'delivered' ? '#16A34A' : st.fg }}>{st.label}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      {multi && mkc.open && !mkc.can && (isMine || mkc.anyDelivered || !mkc.inWindow) && (
+                        <div style={{ marginTop:10, background:'#FFF7ED',
+                          border:'1px solid #FED7AA', borderRadius:10, padding:'9px 12px',
+                          fontSize:12, color:'#9A3412', fontWeight:700, lineHeight:1.5 }}>
+                          Ask the operator to cancel. {mkc.anyDelivered
+                            ? 'A kitchen has already delivered part of this order.'
+                            : 'Captains can cancel only in the first 2 minutes after sending.'}
+                        </div>
+                      )}
 
                       {o.waiters?.name && (
                         <div style={{ fontSize:12, color:'#2563EB', fontWeight:700, marginTop:8 }}>
@@ -392,7 +540,7 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
                       {/* Not a refusal so much as a redirection: it names the
                           person to go and speak to, which is what the captain
                           needs to know next. */}
-                      {!isMine && !o.waiter_id && ['pending','placed'].includes(o.status) && (
+                      {!isMine && (multi ? (mkc.open && !mkc.anyDelivered && mkc.inWindow) : (!o.waiter_id && ['pending','placed'].includes(o.status))) && (
                         <div style={{ marginTop:10, background:'#FFF7ED',
                           border:'1px solid #FED7AA', borderRadius:10, padding:'9px 12px',
                           fontSize:12, color:'#9A3412', fontWeight:700, lineHeight:1.5 }}>

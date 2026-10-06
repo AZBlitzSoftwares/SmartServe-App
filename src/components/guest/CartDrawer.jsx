@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { queueOrder } from '../../lib/offlineQueue'
+import { NoteChips } from './mkShared'
 
-export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrderPlaced, onRemove, onAdd, cartOpen, onCartOpenChange, captain, captainTable, onShowStatus, onOpenMenu, showTrack }) {
+export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrderPlaced, onRemove, onAdd, cartOpen, onCartOpenChange, captain, captainTable, onShowStatus, onOpenMenu, showTrack, onOpenChairs, onNote }) {
   const [open, setOpen] = useState(cartOpen || false)
 
   // Sync with parent
@@ -17,6 +18,12 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
   // table?" prompt is gone with it.
   const captainMode = !!captain
 
+  // ss-multi-kitchen. A captain at a multi-kitchen event sends through the
+  // chair picker, and a table there takes many orders (one per chair group),
+  // so max_orders_per_table means nothing and is ignored entirely. Every
+  // other tablet - guest or ordinary captain - never sees this flag.
+  const multi = captainMode && !!eventData?.multi_kitchen
+
   // Order limit waiting screen - visible for 15 seconds, then the guest is
   // back on the menu. The cart is deliberately left untouched so they do not
   // have to pick their dishes again.
@@ -30,7 +37,15 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
   const total = cart.reduce((s, i) => s + i.quantity, 0)
 
   const maxOrders = eventData?.max_orders_per_table || 1
-  const orderLimitHit = activeOrderCount >= maxOrders
+  const orderLimitHit = !multi && activeOrderCount >= maxOrders
+
+  // Multi-kitchen: Place Order opens the chair picker instead of sending.
+  function openChairs() {
+    setError('')
+    setOpen(false)
+    onCartOpenChange?.(false)
+    onOpenChairs?.()
+  }
 
   /* Both paths watch the same thing - how many orders this table already has
      outstanding - they just identify the table differently. A guest tablet
@@ -40,6 +55,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
      see it unlock the moment the supervisor marks the earlier order
      delivered, rather than having to guess and retry. */
   useEffect(() => {
+    if (multi) return   // no "table busy" at a multi-kitchen event
     if (!eventData?.id) return
     if (!tableData?.id && !(captainMode && captainTable != null)) return
     checkActiveOrders()
@@ -50,7 +66,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
       .subscribe()
     const poll = setInterval(checkActiveOrders, 5000)
     return () => { supabase.removeChannel(sub); clearInterval(poll) }
-  }, [tableData?.id, eventData?.id, captainTable, captainMode])
+  }, [tableData?.id, eventData?.id, captainTable, captainMode, multi])
 
   async function checkActiveOrders() {
     if (!eventData?.id) return
@@ -134,6 +150,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
   }
 
   async function placeOrder() {
+    if (multi) { openChairs(); return }
     setError('')
     if (placing) return
 
@@ -291,7 +308,28 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
               <button onClick={() => { setOpen(false); onCartOpenChange?.(false) }} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
             </div>
 
-            {cart.map(item => (
+            {/* ss-multi-kitchen: same row, plus one-tap notes for the kitchen
+                (Jain, no onion-garlic...). The note rides on the cart line, so it
+                is saved with the table's held cart and printed on the KOT. */}
+            {multi && cart.map(item => (
+              <div key={item.id} style={{ padding:'12px 0', borderBottom:'1px solid #F0F0F0' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <div style={{ fontWeight:700, fontSize:15, flex:1 }}>{item.name}</div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                    <button onClick={() => onRemove(item.id)} style={{ width:36, height:36, borderRadius:'50%', background:'#F5F5F5', border:'1.5px solid #E5E7EB', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, cursor:'pointer' }}>−</button>
+                    <span style={{ fontWeight:800, fontSize:16, minWidth:20, textAlign:'center' }}>{item.quantity}</span>
+                    <button onClick={() => onAdd(item)} style={{ width:36, height:36, borderRadius:'50%', background:'#1A0A0A', border:'none', color:'#fff', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, cursor:'pointer' }}>+</button>
+                  </div>
+                </div>
+                {onNote && (
+                  <div style={{ marginTop:8 }}>
+                    <NoteChips note={item.note} onChange={v => onNote(item.id, v)} />
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {!multi && cart.map(item => (
               <div key={item.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 0', borderBottom:'1px solid #F0F0F0' }}>
                 <div style={{ fontWeight:700, fontSize:15, flex:1 }}>{item.name}</div>
                 <div style={{ display:'flex', alignItems:'center', gap:12 }}>
@@ -303,7 +341,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             ))}
 
             <div style={{ marginTop:20, display:'flex', justifyContent:'space-between', fontSize:16, fontWeight:700, marginBottom:16 }}>
-              <span>Total items</span><span>{total}</span>
+              <span>{multi ? 'Total plates' : 'Total items'}</span><span>{total}</span>
             </div>
 
             {isOnline === false && !captainMode && (

@@ -7,6 +7,7 @@ import CaptainOrders from '../components/guest/CaptainOrders'
 import CaptainTableGrid from '../components/guest/CaptainTableGrid'
 import CaptainTableBlocked from '../components/guest/CaptainTableBlocked'
 import CaptainChat from '../components/guest/CaptainChat'
+import ChairPicker from '../components/guest/ChairPicker'
 import { installTapFx } from '../lib/feedbackFx'
 import WelcomeScreen from '../components/guest/WelcomeScreen'
 import MenuScreen from '../components/guest/MenuScreen'
@@ -68,6 +69,21 @@ export default function GuestApp() {
   const [showExitGate, setShowExitGate] = useState(false)
   const [exitReady, setExitReady] = useState(false)
 
+  // ── ss-multi-kitchen ─────────────────────────────────────────────────────
+  // Everything below is read only when eventData.multi_kitchen is true. At a
+  // guest event or an ordinary captain event these stay at their defaults
+  // and nothing looks at them.
+  //   chairPickerOpen  the chair sheet that Place Order opens
+  //   mkSent           what the Genie screen shows: table, chairs, KOTs
+  //   mkLand*          land a linked captain on their table's menu once,
+  //                    after sign-in or restore, when both the event and
+  //                    the captain row have been read fresh
+  const [chairPickerOpen, setChairPickerOpen] = useState(false)
+  const [mkSent, setMkSent] = useState(null)
+  const [mkLand, setMkLand] = useState(false)
+  const [mkCapSynced, setMkCapSynced] = useState(false)
+  const [mkEvChecked, setMkEvChecked] = useState(false)
+
   const appStateRef      = useRef('loading')
   const cartOpenRef      = useRef(false)
   const showSOSRef       = useRef(false)
@@ -87,6 +103,7 @@ export default function GuestApp() {
   const blockedTableRef  = useRef(null)
   const chatOpenRef      = useRef(false)
   const cartRef          = useRef([])
+  const chairPickerRef   = useRef(false)
 
   // Back-button machinery
   const allowExitRef    = useRef(false) // true only after a valid exit PIN
@@ -108,6 +125,7 @@ export default function GuestApp() {
   useEffect(() => { showCaptainOrdersRef.current = showCaptainOrders }, [showCaptainOrders])
   useEffect(() => { blockedTableRef.current = blockedTable },           [blockedTable])
   useEffect(() => { chatOpenRef.current = chatOpen },                   [chatOpen])
+  useEffect(() => { chairPickerRef.current = chairPickerOpen },         [chairPickerOpen])
 
   // A short vibration and a quiet click on every button, guest and captain
   // alike. Installed once at the document level rather than wired into each
@@ -147,6 +165,8 @@ export default function GuestApp() {
 
     // Overlays close one at a time, innermost first
     if (showFeedbackRef.current) { handleFeedbackClose(); return }
+    // ss-multi-kitchen: the chair sheet sits over the menu like the cart
+    if (chairPickerRef.current)   { setChairPickerOpen(false); return }
     if (menuSheetRef.current)    { setMenuSheetOpen(false); menuSheetRef.current = false; return }
     if (cartOpenRef.current)     { setCartOpen(false); return }
     if (showSOSRef.current)      { setShowSOS(false); return }
@@ -161,6 +181,10 @@ export default function GuestApp() {
     // A captain returning from the Genie screen has no table selected any
     // more, so the menu would show "TABLE -". The grid is where they are
     // actually going next.
+    // ss-multi-kitchen: a captain linked to a table carries on at that table
+    if (s === 'genie' && captainRef.current && eventData?.multi_kitchen && mkSent?.table != null) {
+      mkOrderAgain(); return
+    }
     if (s === 'genie' && captainRef.current) { setCaptainSent(null); captainBackToGrid(); return }
     if (s === 'genie')  { goTo('menu'); return }
     if (s === 'status') { goTo('menu'); return }
@@ -305,7 +329,11 @@ export default function GuestApp() {
         const cap = JSON.parse(capRaw)
         const cev = JSON.parse(capEv)
         setCaptain(cap); setEventData(cev)
-        goTo('captaintable'); refreshEvent(cev.id)
+        goTo('captaintable')
+        // ss-multi-kitchen: landing waits for the fresh event, so a cached
+        // copy cannot send the captain to a table by mistake.
+        setMkLand(true)
+        refreshEvent(cev.id).then(() => setMkEvChecked(true))
         return
       } catch (e) {
         localStorage.removeItem('ss_captain_session')
@@ -391,6 +419,9 @@ export default function GuestApp() {
     setCaptain(cap); setEventData(ev)
     setTableData(null); setTableNumber(null)
     setCart([]); setActiveOrders([]); setCaptainTable(null); setHeldCarts({})
+    // ss-multi-kitchen: both rows were read moments ago by the sign-in
+    // screen, so a linked captain can go straight to their table.
+    setMkLand(true); setMkEvChecked(true); setMkCapSynced(true)
     goTo('captaintable')
   }
 
@@ -405,7 +436,76 @@ export default function GuestApp() {
     localStorage.removeItem('ss_captain_session')
     localStorage.removeItem('ss_captain_event')
     setCaptain(null); setCart([]); setCaptainTable(null)
+    setMkLand(false); setMkCapSynced(false); setChairPickerOpen(false); setMkSent(null)
     goTo('captain')
+  }
+
+  /* ss-multi-kitchen: the captain row, read fresh.
+
+     The admin links a captain to a table under Control. A tablet that
+     signed in before that - or restored a session cached yesterday - holds
+     a captain object without the link. Read on arrival, again every time
+     the grid comes up, and every 15 seconds while it is up, so an unlinked
+     captain is picked up the moment the admin links them. The cached
+     session is kept in step. Multi-kitchen events only. */
+  const onGrid = appState === 'captaintable'
+  useEffect(() => {
+    if (!captain?.id || !eventData?.multi_kitchen) return
+    let stop = false
+    const id = captain.id
+    async function sync() {
+      try {
+        const { data } = await supabase.from('captains').select('*').eq('id', id).maybeSingle()
+        if (stop) return
+        if (data) {
+          setCaptain(prev => {
+            if (!prev || prev.id !== data.id) return prev
+            const next = { ...prev, ...data }
+            return JSON.stringify(next) === JSON.stringify(prev) ? prev : next
+          })
+          try {
+            const raw = localStorage.getItem('ss_captain_session')
+            const cur = raw ? JSON.parse(raw) : null
+            if (cur && cur.id === data.id) {
+              localStorage.setItem('ss_captain_session', JSON.stringify({ ...cur, ...data }))
+            }
+          } catch (e) { /* storage full or blocked - the in-memory copy is current */ }
+        }
+      } catch (e) { /* offline: carry on with the cached captain */ }
+      if (!stop) setMkCapSynced(true)
+    }
+    sync()
+    const t = onGrid ? setInterval(sync, 15000) : null
+    return () => { stop = true; if (t) clearInterval(t) }
+  }, [captain?.id, eventData?.id, eventData?.multi_kitchen, onGrid])
+
+  // ss-multi-kitchen: a linked captain lands straight on their table's menu
+  // after sign-in or restore. Once only - back from the menu goes to the
+  // grid and stays there.
+  useEffect(() => {
+    if (!mkLand || !mkCapSynced || !mkEvChecked) return
+    if (appState !== 'captaintable' || !captain || !eventData?.multi_kitchen) return
+    const n = captain.table_number
+    if (n == null || n === '') return
+    setMkLand(false)
+    openTableMenu(Number(n))
+  }, [mkLand, mkCapSynced, mkEvChecked, appState, captain?.table_number, eventData?.multi_kitchen])
+
+  // The chair sheet never outlives the menu or the cart it was opened for
+  useEffect(() => {
+    if (chairPickerOpen && (appState !== 'menu' || cart.length === 0)) setChairPickerOpen(false)
+  }, [chairPickerOpen, appState, cart.length])
+
+  // ss-multi-kitchen: after an order the captain carries on at the SAME
+  // table - Place another order, the Genie timeout and Back all come here.
+  function mkOrderAgain() {
+    const t = mkSent?.table
+    setCaptainSent(null); setMkSent(null)
+    if (t != null) openTableMenu(Number(t)); else captainBackToGrid()
+  }
+
+  function setCartNote(itemId, note) {
+    setCart(prev => prev.map(c => c.id === itemId ? { ...c, note } : c))
   }
 
   /* Picking a table is now the captain's first act, not their last.
@@ -428,6 +528,8 @@ export default function GuestApp() {
   }, [appState, captain?.id, eventData?.id])
 
   function captainPickTable(n, state, live) {
+    // ss-multi-kitchen: no "table busy" there - a table takes many orders
+    if (eventData?.multi_kitchen) { openTableMenu(n); return }
     if (state === 'red') {
       setBlockedTable({ n, live, limit: eventData?.max_orders_per_table || 1 })
       return
@@ -439,6 +541,24 @@ export default function GuestApp() {
     setBlockedTable(null)
     setCaptainTable(n)
     setCartOpen(false)
+    setMkLand(false)
+
+    // ss-multi-kitchen: two captains can share a table there, each ordering
+    // for their own chairs. A held cart is picked up only by the captain who
+    // wrote it - otherwise one captain's dishes would go out a second time
+    // on the other's order, to the wrong chairs.
+    const mk = !!eventData?.multi_kitchen
+    if (mk) {
+      let mine = []
+      try {
+        const { data } = await supabase.from('table_carts')
+          .select('items, captain_id').eq('event_id', eventData.id).eq('table_number', n).maybeSingle()
+        if (data && Array.isArray(data.items) && data.captain_id === captain?.id) mine = data.items
+      } catch (e) { /* start empty rather than guess */ }
+      setCart(mine)
+      goTo('menu')
+      return
+    }
 
     // Read the table's held cart fresh rather than trusting the grid's last
     // poll - another captain may have added to it thirty seconds ago.
@@ -495,8 +615,14 @@ export default function GuestApp() {
     cartSaveRef.current = setTimeout(async () => {
       try {
         if (!snapshot.length) {
-          await supabase.from('table_carts').delete()
-            .eq('event_id', eventData.id).eq('table_number', t)
+          // ss-multi-kitchen: only ever clear this captain's own held cart
+          if (eventData?.multi_kitchen) {
+            await supabase.from('table_carts').delete()
+              .eq('event_id', eventData.id).eq('table_number', t).eq('captain_id', captain.id)
+          } else {
+            await supabase.from('table_carts').delete()
+              .eq('event_id', eventData.id).eq('table_number', t)
+          }
         } else {
           await supabase.from('table_carts').upsert({
             event_id: eventData.id,
@@ -514,8 +640,14 @@ export default function GuestApp() {
   async function clearHeldCart(tableNum) {
     if (!eventData?.id || tableNum == null) return
     try {
-      await supabase.from('table_carts').delete()
-        .eq('event_id', eventData.id).eq('table_number', tableNum)
+      // ss-multi-kitchen: only this captain's own held cart
+      if (eventData?.multi_kitchen && captainRef.current) {
+        await supabase.from('table_carts').delete()
+          .eq('event_id', eventData.id).eq('table_number', tableNum).eq('captain_id', captainRef.current.id)
+      } else {
+        await supabase.from('table_carts').delete()
+          .eq('event_id', eventData.id).eq('table_number', tableNum)
+      }
     } catch (e) {}
     setHeldCarts(prev => { const next = { ...prev }; delete next[tableNum]; return next })
   }
@@ -774,7 +906,8 @@ export default function GuestApp() {
   const cartCount = cart.reduce((s,i) => s+i.quantity, 0)
 
   // After ordering the guest sees the genie screen, not the Track page.
-  function handleOrderPlaced(newOrderId, forTable) {
+  // mk is passed only by the multi-kitchen chair picker: { kots, chairs, sentAt }
+  function handleOrderPlaced(newOrderId, forTable, mk) {
     // cartOpen must not survive the cart being emptied, or CartDrawer
     // reads it as true the next time it mounts and opens on its own.
     setCart([]); setCartOpen(false)
@@ -790,6 +923,7 @@ export default function GuestApp() {
       if (forTable != null) clearHeldCart(forTable)
       setCaptainSent(forTable != null ? String(forTable) : '')
       setLastOrderId(newOrderId || null)
+      setMkSent(mk ? { ...mk, orderId: newOrderId, table: forTable } : null)
       goTo('genie')
       return
     }
@@ -901,7 +1035,10 @@ export default function GuestApp() {
       {appState === 'genie' && (
         <GenieScreen tableData={tableData} eventData={eventData} orderId={lastOrderId}
           captain={captain} forTable={captainSent}
-          onOrderAgain={() => { setCaptainSent(null); captain ? captainBackToGrid() : goTo('menu') }}
+          mk={captain && eventData?.multi_kitchen ? mkSent : null}
+          onOrderAgain={() => {
+            if (captain && eventData?.multi_kitchen && mkSent?.table != null) { mkOrderAgain(); return }
+            setCaptainSent(null); captain ? captainBackToGrid() : goTo('menu') }}
           onDone={() => goTo('welcome')} />
       )}
       {appState === 'status' && (
@@ -917,7 +1054,18 @@ export default function GuestApp() {
           captain={captain} captainTable={captainTable}
           onShowStatus={() => captain ? setShowCaptainOrders(true) : goTo('status')}
           onOpenMenu={() => setMenuSheetOpen(true)}
-          showTrack={hasActiveOrders || !!captain} />
+          showTrack={hasActiveOrders || !!captain}
+          onOpenChairs={captain && eventData?.multi_kitchen ? () => setChairPickerOpen(true) : undefined}
+          onNote={captain && eventData?.multi_kitchen ? setCartNote : undefined} />
+      )}
+      {/* ss-multi-kitchen: Place Order -> chairs -> one call sends the order
+          and a KOT to every kitchen it touches. */}
+      {chairPickerOpen && captain && eventData?.multi_kitchen && appState === 'menu' && cartCount > 0 && (
+        <ChairPicker eventData={eventData} captain={captain} tableNumber={captainTable}
+          cart={cart} isOnline={isOnline}
+          onClose={() => setChairPickerOpen(false)}
+          onNote={setCartNote}
+          onSent={r => { setChairPickerOpen(false); handleOrderPlaced(r.orderId, captainTable, r) }} />
       )}
       {/* ss-toast-removed-48 - the Genie screen replaced this in batch 48 */}
       {showCaptainOrders && captain && (

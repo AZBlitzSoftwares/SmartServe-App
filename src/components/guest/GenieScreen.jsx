@@ -1,6 +1,84 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { FaceSVG, SENTIMENT_CONFIG } from './FeedbackModal'
+import { chairsLabel, kotState, learnServerTime } from './mkShared'
+
+/* ss-multi-kitchen: "Sent to N kitchens". One row per KOT with its print
+   status live - Printing..., Printed, or Failed (the operator's desk raises
+   that one itself) - and later Delivered. Read every 2 seconds while the
+   screen is up, and on Realtime as well where it is available. */
+function KotList({ mk }) {
+  const seed = (mk?.kots || []).map(k => ({
+    kitchen_id: k.kitchen_id, kitchen_name: k.kitchen, kot_no: k.kot_no,
+    status: 'open', print_status: 'queued',
+  }))
+  const [kots, setKots] = useState(seed)
+  const learnedRef = useRef(false)
+
+  useEffect(() => {
+    const id = mk?.orderId
+    if (!id) return
+    let stop = false
+    async function load() {
+      try {
+        const { data, error } = await supabase.from('kots')
+          .select('id, kitchen_id, kitchen_name, kot_no, status, print_status, created_at')
+          .eq('order_id', id).eq('kind', 'order')
+        if (stop || error || !data || !data.length) return
+        if (!learnedRef.current && mk.sentAt) {
+          learnedRef.current = true
+          learnServerTime(mk.sentAt, data[0].created_at)
+        }
+        // Keep the order the database gave at send time
+        const pos = k => {
+          const i = seed.findIndex(s => s.kot_no === k.kot_no || (s.kitchen_id && s.kitchen_id === k.kitchen_id))
+          return i === -1 ? 999 : i
+        }
+        setKots([...data].sort((a, b) => pos(a) - pos(b)))
+      } catch (e) { /* the next poll covers it */ }
+    }
+    load()
+    const t = setInterval(load, 2000)
+    let sub = null
+    try {
+      sub = supabase.channel('mk-genie-' + id)
+        .on('postgres_changes', { event:'*', schema:'public', table:'kots', filter:'order_id=eq.' + id }, () => load())
+        .subscribe()
+    } catch (e) { sub = null }
+    return () => { stop = true; clearInterval(t); if (sub) supabase.removeChannel(sub) }
+  }, [mk?.orderId])
+
+  const n = kots.length
+  const cols = Math.max(1, Math.min(n, 3))
+  return (
+    <div style={{ width:'100%', display:'flex', flexDirection:'column', alignItems:'center', gap:'0.8vh', flexShrink:0 }}>
+      <div style={{ fontSize:'clamp(13px, 1.9vh, 16px)', fontWeight:800, color:'#4B4B4B', textAlign:'center' }}>
+        {n ? 'Sent to ' + n + (n === 1 ? ' kitchen' : ' kitchens') : 'Sent to the kitchens'}
+      </div>
+      <div style={{ width:'100%', maxWidth: cols * 290, display:'grid',
+        gridTemplateColumns:'repeat(' + cols + ', minmax(0, 1fr))', gap:8 }}>
+        {kots.map((k, i) => {
+          const st = kotState(k)
+          return (
+            <div key={k.id || k.kot_no || i} style={{ display:'flex', alignItems:'center', gap:10,
+              background:'#fff', border:'1.5px solid ' + (st.key === 'failed' ? '#FECACA' : '#E7E7E7'),
+              borderRadius:14, padding:'clamp(8px, 1.3vh, 12px) 14px', minWidth:0,
+              boxShadow:'0 2px 10px rgba(0,0,0,0.05)' }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontWeight:900, fontSize:15, color:'#1A0A0A', whiteSpace:'nowrap',
+                  overflow:'hidden', textOverflow:'ellipsis' }}>{k.kitchen_name || 'Kitchen'}</div>
+                <div style={{ fontSize:12, color:'#888', fontWeight:700 }}>KOT {k.kot_no || '—'}</div>
+              </div>
+              <span style={{ background:st.bg, color:st.fg, fontWeight:900, fontSize:12.5,
+                padding:'5px 11px', borderRadius:999, flexShrink:1, minWidth:0, textAlign:'center',
+                lineHeight:1.25 }}>{st.label}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 /* Genie confirmation screen.
 
@@ -33,8 +111,11 @@ import { FaceSVG, SENTIMENT_CONFIG } from './FeedbackModal'
 // which is why the captain only ever saw half a genie.
 const SECONDS = 30
 
-export default function GenieScreen({ tableData, eventData, orderId, onOrderAgain, onDone, captain, forTable }) {
+export default function GenieScreen({ tableData, eventData, orderId, onOrderAgain, onDone, captain, forTable, mk }) {
   const captainMode = !!captain
+  // ss-multi-kitchen: set only for a captain order sent through the chair
+  // picker. Null for every guest and every ordinary captain order.
+  const multi = captainMode && !!mk
   const [left, setLeft] = useState(SECONDS)
   const [saving, setSaving] = useState(false)
   const [chosen, setChosen] = useState(null)
@@ -110,6 +191,9 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
           color:'#fff', borderRadius:999, padding:'6px 16px', fontSize:14, fontWeight:900,
           boxShadow:'0 3px 12px rgba(22,163,74,0.45)' }}>
           TABLE {forTable}
+          {multi && mk.chairs?.length > 0 && (
+            ' · ' + chairsLabel(mk.chairs, parseInt(eventData?.chairs_per_table, 10) || 10).toUpperCase()
+          )}
         </div>
       )}
 
@@ -150,12 +234,14 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
         {captainMode ? 'Order placed' : 'Your order will be served in few minutes'}
       </div>
 
-      {captainMode && (
+      {captainMode && !multi && (
         <div style={{ fontSize:'clamp(13px, 1.9vh, 16px)', fontWeight:700, color:'#4B4B4B',
           textAlign:'center', lineHeight:1.4, maxWidth:480, flexShrink:0 }}>
           Their order will be served in few minutes
         </div>
       )}
+
+      {multi && <KotList mk={mk} />}
 
       {/* Feedback belongs to the guest who ate the food. A captain rating
           their own service tells the caterer nothing. */}
