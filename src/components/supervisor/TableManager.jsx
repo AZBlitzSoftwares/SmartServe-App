@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { WaiterList, HelpItemsEditor } from './EventManager'
 import CaptainList from './CaptainList'
+import KitchenSetup from './KitchenSetup'
 
 /* Table management for the current event.
 
@@ -162,6 +163,8 @@ export default function TableManager({ eventData, onEventChange }) {
           // Only on captain events. On a self-service event there are no
           // captains, and an always-visible empty tab invites someone to fill it.
           ...(eventData?.service_mode === 'captain' ? [['captains','Captains']] : []),
+          // Multi-kitchen set-up: kitchens, printers, menu routing, captain tables, waiter kitchens.
+          ...(eventData?.multi_kitchen ? [['kitchens','Kitchens']] : []),
           ['tables','Tables'],['help','Help'],['settings','Settings']].map(([v,label]) => (
           <button key={v} onClick={() => setView(v)}
             style={{ flex:1, padding:'9px 4px', borderRadius:10, fontSize:13, fontWeight:700,
@@ -175,6 +178,8 @@ export default function TableManager({ eventData, onEventChange }) {
       {view === 'waiters' && eventData?.id && <WaiterList eventId={eventData.id} />}
 
       {view === 'captains' && eventData?.id && <CaptainList eventId={eventData.id} />}
+
+      {view === 'kitchens' && eventData?.id && <KitchenSetup eventData={eventData} onEventChange={onEventChange} />}
 
       {/* Help list. Was on the admin Events screen, which the supervisor
           cannot open - so the person standing in the room could not change

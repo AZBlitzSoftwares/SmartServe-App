@@ -796,7 +796,10 @@ export default function EventManager({ onEventChange }) {
         max_orders_per_table: parseInt(newEvent.max_orders_per_table)||1,
         video_url: newEvent.video_url.trim()||null,
         call_waiter_enabled: newEvent.call_waiter_enabled,
-        service_mode: newEvent.service_mode || 'self',
+        service_mode: newEvent.service_mode === 'multi' ? 'captain' : (newEvent.service_mode || 'self'),
+        // Only sent when chosen, so event creation keeps working even before
+        // the multi-kitchen database update has been applied.
+        ...(newEvent.service_mode === 'multi' ? { multi_kitchen: true } : {}),
         is_closed: false, ai_enabled: false
       }).select().single()
 
@@ -997,7 +1000,9 @@ export default function EventManager({ onEventChange }) {
                   </div>
                   <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
                     {[['self','📱 Self-Service','A tablet sits on every table. Guests order for themselves.'],
-                      ['captain','🧑‍💼 Captain Service','No tablet on the tables. Captains carry a tablet and take orders.']].map(([val,title,desc]) => (
+                      ['captain','🧑‍💼 Captain Service','No tablet on the tables. Captains carry a tablet and take orders.'],
+                      // ss-multi-kitchen: captain service where every cuisine has its own kitchen and KOT printer
+                      ['multi','🍳 Captain + Multi-Kitchen','Captains fixed to a table, order by chair. Each cuisine KOT prints in its own kitchen.']].map(([val,title,desc]) => (
                       <button key={val} type="button" onClick={()=>setNewEvent(p=>({...p,service_mode:val}))}
                         style={{ flex:'1 1 220px', textAlign:'left', borderRadius:12, cursor:'pointer',
                           border:'2px solid',
@@ -1011,6 +1016,14 @@ export default function EventManager({ onEventChange }) {
                       </button>
                     ))}
                   </div>
+                  {newEvent.service_mode==='multi' && (
+                    <div style={{ background:'#FFF7ED', border:'1px solid #FED7AA', borderRadius:10,
+                      padding:'9px 12px', fontSize:11.5, color:'#9A3412', marginTop:10, lineHeight:1.55 }}>
+                      After creating the event: add captains and waiters under <strong>Control</strong>, then open
+                      <strong> Control › Kitchens</strong> to add kitchens and printers, route each menu category to a
+                      kitchen, link captains to tables and give waiters a kitchen and PIN.
+                    </div>
+                  )}
                   {newEvent.service_mode==='captain' && (
                     <div style={{ background:'#EFF6FF', border:'1px solid #BFDBFE', borderRadius:10,
                       padding:'9px 12px', fontSize:11.5, color:'#1d4ed8', marginTop:10, lineHeight:1.55 }}>
@@ -1403,16 +1416,27 @@ export default function EventManager({ onEventChange }) {
               <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
                 <div style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', marginBottom:8, textTransform:'uppercase' }}>🍽️ Service Mode</div>
                 <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                  {[['self','📱 Self-Service'],['captain','🧑‍💼 Captain Service']].map(([val,title]) => (
+                  {[['self','📱 Self-Service'],['captain','🧑‍💼 Captain Service'],['multi','🍳 Captain + Multi-Kitchen']].map(([val,title]) => {
+                    const cur = ev.multi_kitchen ? 'multi' : (ev.service_mode||'self')
+                    return (
                     <button key={val} type="button"
-                      onClick={async()=>{ if ((ev.service_mode||'self')!==val) await updateEventField(ev.id,'service_mode',val) }}
+                      onClick={async()=>{
+                        if (cur === val) return
+                        // multi-kitchen is captain service with the kitchen switch on
+                        const upd = val === 'multi'
+                          ? { service_mode:'captain', multi_kitchen:true }
+                          : { service_mode:val, ...(ev.multi_kitchen ? { multi_kitchen:false } : {}) }
+                        const { error } = await supabase.from('events').update(upd).eq('id', ev.id)
+                        if (error) alert('Could not change the service mode: ' + error.message)
+                        loadAll()
+                      }}
                       style={{ flex:'1 1 160px', borderRadius:10, cursor:'pointer', padding:'9px 12px',
                         border:'1.5px solid', fontFamily:'Manrope',
-                        borderColor:(ev.service_mode||'self')===val?'var(--ink)':'var(--line)',
-                        background:(ev.service_mode||'self')===val?'var(--ink)':'#fff',
-                        color:(ev.service_mode||'self')===val?'#fff':'var(--ink)',
+                        borderColor:cur===val?'var(--ink)':'var(--line)',
+                        background:cur===val?'var(--ink)':'#fff',
+                        color:cur===val?'#fff':'var(--ink)',
                         fontSize:13, fontWeight:800 }}>{title}</button>
-                  ))}
+                  )})}
                 </div>
                 <div style={{ fontSize:11, color:'#888', marginTop:8, lineHeight:1.5 }}>
                   Captain Service adds a Captains tab under Control, where captains and their PINs

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import SupervisorLogin from '../components/supervisor/SupervisorLogin'
 import KOTDashboard from '../components/supervisor/KOTDashboard'
+import KitchenBoard from '../components/supervisor/KitchenBoard'
 import SOSRequests, { useSOSAlert } from '../components/supervisor/SOSRequests'
 import MenuManager from '../components/supervisor/MenuManager'
 import ReportsDashboard from '../components/supervisor/ReportsDashboard'
@@ -414,7 +415,9 @@ export default function SupervisorApp() {
 
       {/* ── CONTENT ── */}
       <div style={{ padding:'16px' }}>
-        {activeTab==='kot'     && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={(order) => { setNewOrderAlert(order); setOrderCount(c=>c+1) }} />}
+        {/* Multi-kitchen events have no waiter assignment: the board is per kitchen and per KOT. */}
+        {activeTab==='kot'     && eventData?.multi_kitchen && <KitchenBoard eventData={eventData} />}
+        {activeTab==='kot'     && !eventData?.multi_kitchen && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={(order) => { setNewOrderAlert(order); setOrderCount(c=>c+1) }} />}
         {activeTab==='menu'    && <MenuManager eventData={eventData} />}
         {activeTab==='reports' && <ReportsDashboard eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='feedback' && <FeedbackReport eventData={eventData} />}
