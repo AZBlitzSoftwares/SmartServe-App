@@ -1,0 +1,3 @@
+# keep launcher line endings exactly as written: LF for the Mac, CRLF for Windows
+*.command -text
+*.bat -text
