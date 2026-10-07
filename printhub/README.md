@@ -14,6 +14,17 @@ Keep the Print Hub window open for the whole event. Closing it stops printing.
 
 ---
 
+## How printing works at the event
+
+1. **Each kitchen has its own printer** on the event router, with a **fixed IP** (it never changes), e.g. Italian `192.168.1.101`, Arabic `192.168.1.102`. The same IP is entered for that kitchen in Smart Serve (Control › Kitchens).
+2. A captain sends an order from the tablet. Smart Serve splits it into **one KOT per kitchen**.
+3. The **Print Hub** on the desk laptop picks up each new KOT **within about 2 seconds** and sends it to that kitchen's printer. Before printing it asks the printer whether it has paper.
+4. The result comes back to everyone: the captain sees **Printing… → Printed ✓** (or **Failed — operator alerted**), and the desk sees each KOT's status and each printer's health (**Online / Paper low / Paper out / Offline**).
+5. If a printer is off or out of paper, the KOT goes to the kitchen's **backup printer** if one is set, otherwise it is marked **Failed** and the desk is alerted. The desk can **Reprint** it or **Redirect** it to another kitchen's printer.
+6. When the printer is back (switched on, new roll loaded), the Print Hub notices within about 15 seconds and **its failed KOTs print again by themselves**.
+
+---
+
 ## One-time setup
 
 You need the **anon key** of the Smart Serve server (Supabase dashboard -> Project Settings -> API -> *anon public*). Ask the technical team if you do not have it.
@@ -105,23 +116,33 @@ Use the event's own router. Hotel or "guest" Wi-Fi often blocks devices from see
 
 ---
 
-## Demo without printers
+## Testing without a printer (Virtual Printers)
 
-The **fake printer** shows each KOT as text on the screen instead of on paper.
+**Virtual Printers** are pretend kitchen printers that run on a laptop. They accept KOTs exactly like the real Epson printers do, and show every slip on a web page as a paper receipt. Use them to test, and to demo to a client, when no printer is at hand.
 
-1. Open a command window in the `printhub` folder:
-   - Mac: open **Terminal**, type `cd ` (with a space), drag the `printhub` folder into the window, press Enter.
-   - Windows: open the `printhub` folder, click the address bar, type `cmd`, press Enter.
-2. Type:
-   ```
-   node fake-printer.mjs 9101 9102 9103
-   ```
-   It shows the **laptop's IP**. If the computer asks whether Node.js may accept connections, click **Allow**.
-3. In Smart Serve, give each kitchen the **laptop's IP** as printer IP, and port **9101**, **9102**, **9103** (one per kitchen). (`kitchens.printer_port` holds the port. You can also type `192.168.1.20:9102` in the IP field.)
-4. Start the Print Hub as usual (separate window) and place an order. The KOTs appear in the fake printer window.
-5. To try paper problems, type `o` (paper out), `l` (paper low) or `n` (normal) in the fake printer window and press Enter.
+1. **Start them.** Double-click **Start Virtual Printers** (`.command` on Mac, `.bat` on Windows). This starts **6 printers on ports 9101 to 9106** and opens the **Virtual Printers** page in the browser (`http://localhost:9180`).
+   - If the computer asks whether Node.js may accept connections, click **Allow**.
+   - The window also shows a second address, e.g. `http://192.168.1.20:9180`: open it on a phone or tablet on the same Wi-Fi to watch the slips there too.
+   - From a command window you can choose: `node fake-printer.mjs --kitchens 3` (ports 9101-9103) or `--ports 9101,9102`.
+2. **Point the kitchens at them.** In Smart Serve, Control › Kitchens, for each kitchen:
+   - Printer IP: **127.0.0.1** when the Print Hub runs on this same laptop (otherwise this laptop's IP, shown in the Virtual Printers window).
+   - Port: **9101** for the first kitchen, **9102** for the second, and so on - each kitchen its own port.
+3. **Start the Print Hub** as usual (its own window). On the Print Hub screen every kitchen's printer shows **ONLINE**, and on the Virtual Printers page each printer says *Print Hub checked ... s ago*.
+4. **Place orders** on a captain tablet (or press **Test print** in Control › Kitchens). Within about 2 seconds a slip appears under the right printer, newest on top, with the time it arrived. The printer takes the kitchen's name from its first slip.
+5. **Try the problems** with the buttons on each printer:
+   - **Paper: Out** - the printer prints nothing. The desk shows **PAPER OUT** for that kitchen and new KOTs for it are marked **Failed** (or go to its backup printer).
+   - **Turn off** - the printer is unreachable, like a printer with no power. The desk shows **OFFLINE**.
+   - **Paper: OK** / **Turn on** - within about 15 seconds the failed KOTs **print again by themselves** and the desk alert clears.
+   - **Paper: Low** - still prints; the desk is warned to change the roll.
+6. **Clear** (top right, click twice) removes all slips and resets the counters.
 
-Note: all fake printers share one laptop IP, so in a demo the desk app may show the same printer status for all of them.
+Each virtual printer has its own status, even though they all share one IP: the Print Hub checks and reports every printer by **IP and port**.
+
+Good to know:
+- Leave the Virtual Printers window open; closing it switches all six printers off.
+- *Print Hub not seen* on a printer means nothing has contacted it: is the Print Hub running, and does a kitchen use that port?
+- The **backup printer** and the desk's **Redirect** button choose a printer by IP only, so with Virtual Printers (one IP for all) they cannot pick a particular one. Test those two with real printers.
+- Without the web page (`--no-web`) every slip is drawn as text in the window instead. You can also type `o` (paper out), `l` (paper low) or `n` (paper OK) + Enter there to change all printers at once.
 
 ---
 
@@ -161,9 +182,11 @@ Other options: `--event <event id>` prints only for that event (instead of every
 
 ## For the technical team
 
-- Node 18+ only, no npm packages. Files: `printhub.mjs` (main loop, printer I/O, status board), `escpos.mjs` (KOT layout + decoder), `fake-printer.mjs`, `config.example.json`, the two launchers, `test/`.
+- Node 18+ only, no npm packages. Files: `printhub.mjs` (main loop, printer I/O, status board), `escpos.mjs` (KOT layout + decoder), `fake-printer.mjs` (Virtual Printers: fake printers + web server) with `virtual-printers.html` (the page, plain HTML/CSS/JS, no build, no internet), `config.example.json`, the four launchers, `test/`.
 - Tests: `node --test printhub/test` from the repo root.
 - Server calls (PostgREST, anon key): `rpc/hub_claim_kots`, `rpc/hub_report`, `rpc/hub_printer_status`, `GET kitchens`, `GET events` - see `db/2026-10-07_multikitchen.sql`.
+- Printer status is per printer = **IP + port**: `hub_printer_status(p_event_id, p_printer_ip, p_status, p_printer_port)`. The hub sends the host and the port it actually uses (an IP field written `ip:port` counts as that port); the server updates only the kitchens on that printer and re-queues only the failed KOTs aimed at it (a redirect in `kots.printer_ip` may be `ip:port`). Without `p_printer_port` the old match on the IP text is used. If the server still has the old 3-argument function, the hub notices (PGRST202), says so once and reports per IP instead.
+- Virtual Printers API (same port as the page): `GET /api/state`, `GET /api/events` (Server-Sent Events: `snapshot`, `slip`, `printer`), `POST /api/printers/<port>` with `{"paper":"online|paper_low|paper_out"}` or `{"power":"on|off"}`, `POST /api/clear`. Paper out: answers DLE EOT 4 with paper-end and prints nothing it receives. Off: the port is closed (connection refused).
 - Timings: poll 1.5 s; printer check 15 s; status re-sent on change or every 60 s; connect timeout 4 s; one attempt max 10 s; retries after 1 s and 2 s; a KOT is given up after 40 s (the server re-issues a stuck KOT after 45 s, so two laptops never both print it).
 - Before each KOT the hub asks the printer for its paper status (DLE EOT 4) and does not send the KOT if the paper is out.
 - Exit codes: `0` stopped, `2` settings problem (launchers do not restart), anything else: launchers restart after 5 s.

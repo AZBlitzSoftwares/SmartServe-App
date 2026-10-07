@@ -59,7 +59,9 @@ function clockTime(d = new Date()) {
 /**
  * "192.168.1.104" + port 9100, or "192.168.1.20:9101" (port written in the IP
  * field - handy for demos with several fake printers on one laptop).
- * `text` keeps the value exactly as stored, because hub_printer_status matches on it.
+ * `key` (host:port) is one physical printer: status is checked and reported
+ * per key. `text` keeps the value exactly as stored (the old 3-argument
+ * hub_printer_status matched on it).
  */
 export function parseEndpoint(value, defaultPort = 9100) {
   if (value == null) return null;
@@ -265,10 +267,11 @@ function makeQueue() {
 // ---------------------------------------------------------------------------
 
 export class ServerError extends Error {
-  constructor(message, { network = false, status = 0 } = {}) {
+  constructor(message, { network = false, status = 0, code = '' } = {}) {
     super(message);
     this.network = network;
     this.status = status;
+    this.code = code; // PostgREST / Postgres error code, e.g. PGRST202
   }
 }
 
@@ -331,7 +334,15 @@ export function makeApi({ url, anonKey, timeoutMs = 8000 }) {
     } catch (e) {
       throw new ServerError(networkReason(e, base), { network: true });
     }
-    if (!res.ok) throw new ServerError(httpReason(res.status, text), { status: res.status });
+    if (!res.ok) {
+      let code = '';
+      try {
+        code = String(JSON.parse(text)?.code || '');
+      } catch {
+        /* not JSON */
+      }
+      throw new ServerError(httpReason(res.status, text), { status: res.status, code });
+    }
     if (!text) return null; // e.g. hub_report returns nothing
     try {
       return JSON.parse(text);
@@ -379,7 +390,7 @@ export function startHub(options = {}) {
     eventsNote: 'Looking for today\'s event...',
     kitchens: new Map(), // eventId -> [kitchen rows]
     printers: new Map(), // "host:port" -> { ep, status, lastError, lastTry, queue }
-    reported: new Map(), // "eventId|ip" -> { status, at } last status the server accepted
+    reported: new Map(), // "eventId|host:port" -> { status, at } last status the server accepted
     inFlight: new Set(), // KOT ids claimed and not yet reported: never print these again
     pendingReports: new Map(), // KOT id -> { ok, error } printed but the server was not told yet
     counts: new Map(), // kitchen_id -> { printed, failed }  (since this hub started)
@@ -743,12 +754,35 @@ export function startHub(options = {}) {
   }
 
   // Tell the server each printer's status: when it changed, or every 60 s.
-  // The server re-queues failed KOTs when it hears 'online'.
+  // The server re-queues failed KOTs when it hears 'online' (or 'paper_low').
+  // One report per event and printer, where a printer is IP + port: several
+  // printers may share one IP (Virtual Printers on one laptop), each with its
+  // own status. A server that still has the old 3-argument function (no
+  // port) is told per IP text instead, so status reports never stop.
+  let legacyStatusRpc = false;
+  async function sendPrinterStatus(g, status) {
+    if (!legacyStatusRpc) {
+      try {
+        return await api.rpc('hub_printer_status', {
+          p_event_id: g.eventId,
+          p_printer_ip: g.ep.host,
+          p_printer_port: g.ep.port,
+          p_status: status,
+        });
+      } catch (e) {
+        if (e?.code !== 'PGRST202') throw e;
+        legacyStatusRpc = true;
+        note('warn', 'Server has the old printer-status function: printers sharing one IP share one status. Run the database update.');
+      }
+    }
+    return api.rpc('hub_printer_status', { p_event_id: g.eventId, p_printer_ip: g.ep.text, p_status: status });
+  }
+
   async function reportStatusesOnce() {
-    const groups = new Map(); // one report per event and printer IP (as typed at the desk)
+    const groups = new Map();
     for (const t of printerTargets()) {
-      const k = `${t.eventId}|${t.ep.text}`;
-      if (!groups.has(k)) groups.set(k, { eventId: t.eventId, ip: t.ep.text, label: t.ep.label, statuses: [] });
+      const k = `${t.eventId}|${t.ep.key}`;
+      if (!groups.has(k)) groups.set(k, { eventId: t.eventId, ep: t.ep, label: t.ep.label, statuses: [] });
       groups.get(k).statuses.push(getPrinter(t.ep).status);
     }
     for (const [k, g] of groups) {
@@ -757,7 +791,7 @@ export function startHub(options = {}) {
       if (status === 'unknown') continue;
       const last = state.reported.get(k);
       if (last && last.status === status && Date.now() - last.at < o.heartbeatMs) continue;
-      const send = (s) => api.rpc('hub_printer_status', { p_event_id: g.eventId, p_printer_ip: g.ip, p_status: s });
+      const send = (s) => sendPrinterStatus(g, s);
       let requeued = 0;
       // The server only re-sends failed KOTs on 'online'. A printer that comes
       // back with LOW paper still prints, so say 'online' first, then 'paper_low'.

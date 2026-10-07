@@ -1,16 +1,28 @@
 // A tiny in-memory stand-in for Supabase's REST API (PostgREST), implementing
 // exactly what the Print Hub uses. The RPCs mirror the SQL in
-// db/2026-10-07_multikitchen.sql (hub_claim_kots, hub_report, hub_printer_status).
+// db/2026-10-07_multikitchen.sql (hub_claim_kots, hub_report, and the
+// per-printer hub_printer_status with p_printer_port).
 // Test helper only - importing it has no side effects.
 
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 
+// A printer as the SQL reads it: "ip:port" in the IP field means that port,
+// otherwise the given port (default 9100). Same rule as parseEndpoint().
+const EP = /^[^:\s]+:[0-9]{1,5}$/;
+export function endpointOf(ipText, port) {
+  const s = String(ipText ?? '').replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
+  if (EP.test(s)) return { host: s.split(':')[0], port: Number(s.split(':')[1]) };
+  return { host: s, port: Number(port) || 9100 };
+}
+
 /**
  * @param {object} o
  * @param {number} [o.reclaimMs=45000]  'printing' KOTs older than this are handed out again
+ * @param {boolean} [o.legacyStatus]    behave like a server with the old 3-argument
+ *                                      hub_printer_status (no p_printer_port)
  */
-export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789abcdef', reclaimMs = 45_000 } = {}) {
+export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789abcdef', reclaimMs = 45_000, legacyStatus = false } = {}) {
   const db = { events: [], kitchens: [], kots: [] };
   const calls = []; // every request: { name, args, at }
   let mode = 'up'; // 'up' | 'down' (drop every connection) | 'reports-down' (drop hub_report only)
@@ -58,20 +70,28 @@ export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789ab
       }
       return undefined; // void -> empty body
     },
-    hub_printer_status({ p_event_id, p_printer_ip, p_status }) {
+    // p_printer_port given: only that printer (IP + port); null: every kitchen with that IP text
+    hub_printer_status({ p_event_id, p_printer_ip, p_status, p_printer_port = null }) {
+      const ip = String(p_printer_ip ?? '').trim();
+      const samePrinter = (ipText, port) => {
+        if (p_printer_port == null) return ipText === p_printer_ip;
+        const ep = endpointOf(ipText, port);
+        return ep.host === ip && ep.port === p_printer_port;
+      };
       for (const kt of db.kitchens) {
-        if (kt.event_id === p_event_id && kt.printer_ip === p_printer_ip) {
+        const match = p_printer_port == null ? kt.printer_ip === p_printer_ip : samePrinter(kt.printer_ip, kt.printer_port);
+        if (kt.event_id === p_event_id && match) {
           kt.printer_status = p_status;
           kt.printer_checked_at = new Date().toISOString();
         }
       }
       let requeued = 0;
-      if (p_status === 'online') {
+      if (p_status === 'online' || p_status === 'paper_low') {
         for (const k of db.kots) {
           const kt = kitchenOf(k);
           if (!kt || k.event_id !== p_event_id || k.print_status !== 'failed') continue;
           if (k.kind === 'order' && k.status === 'cancelled') continue;
-          if ((k.printer_ip || kt.printer_ip) !== p_printer_ip) continue;
+          if (!samePrinter(k.printer_ip || kt.printer_ip, kt.printer_port)) continue;
           k.print_status = 'queued';
           k.last_error = null;
           requeued++;
@@ -122,6 +142,9 @@ export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789ab
           if (fn === 'hub_report' && mode === 'reports-down') return req.socket.destroy();
           const args = body ? JSON.parse(body) : {};
           calls.push({ name: fn, args, at: Date.now() });
+          if (fn === 'hub_printer_status' && legacyStatus && 'p_printer_port' in args) {
+            return send(404, { code: 'PGRST202', message: 'Could not find the function public.hub_printer_status(p_event_id, p_printer_ip, p_printer_port, p_status) in the schema cache' });
+          }
           if (!rpc[fn]) return send(404, { code: 'PGRST202', message: `Could not find the function public.${fn}` });
           return send(200, rpc[fn](args));
         }

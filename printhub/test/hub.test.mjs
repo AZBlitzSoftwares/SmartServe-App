@@ -52,8 +52,8 @@ const jobTexts = (printer) => printer.jobs.map((j) => j.decoded.lines.map((l) =>
 const hasLine = (lines, re) => lines.some((l) => (re instanceof RegExp ? re.test(l) : l === re));
 
 /** Common setup: mock server, today's event, a hub; everything is cleaned up afterwards. */
-async function setup(t, { reclaimMs, hub: hubOptions = {} } = {}) {
-  const mock = await startMockPostgrest({ reclaimMs });
+async function setup(t, { reclaimMs, legacyStatus, hub: hubOptions = {} } = {}) {
+  const mock = await startMockPostgrest({ reclaimMs, legacyStatus });
   const event = mock.addEvent({ name: 'Sharma Wedding', date: localDate() });
   const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'printhub-test-'));
   const printers = [];
@@ -235,7 +235,9 @@ test('health check reports offline, paper out and online; failed KOTs print when
   const port = await closedPort();
   const italian = mock.addKitchen({ event_id: event.id, name: 'Italian', prefix: 'IT', printer_ip: '127.0.0.1', printer_port: port });
   const statusCalls = (s) =>
-    mock.callsTo('hub_printer_status').filter((c) => c.args.p_status === s && c.args.p_printer_ip === '127.0.0.1' && c.args.p_event_id === event.id);
+    mock
+      .callsTo('hub_printer_status')
+      .filter((c) => c.args.p_status === s && c.args.p_printer_ip === '127.0.0.1' && c.args.p_printer_port === port && c.args.p_event_id === event.id);
 
   ctx.start();
   await waitFor(() => statusCalls('offline').length === 1, 'offline reported');
@@ -253,7 +255,7 @@ test('health check reports offline, paper out and online; failed KOTs print when
   const b = mock.addKot({ kitchen: italian, kot_no: 'IT-002', table_number: 9, items: [{ name: 'Pizza', qty: 1 }] });
   await waitFor(() => mock.kot(b.id).print_status === 'failed', 'IT-002 failed: no paper');
   assert.equal(mock.kot(b.id).last_error, `Printer 127.0.0.1:${port} is out of paper`);
-  assert.equal(printer.jobs.length, 0, 'nothing is sent to a printer without paper');
+  assert.equal(printer.jobs.length + printer.refused.length, 0, 'nothing is sent to a printer without paper');
 
   // paper loaded: 'online' is reported and the server re-queues both failed KOTs
   printer.setStatus('online');
@@ -266,6 +268,65 @@ test('health check reports offline, paper out and online; failed KOTs print when
   printer.setStatus('paper_low');
   await waitFor(() => statusCalls('paper_low').length === 1, 'paper_low reported');
   assert.equal(italian.printer_status, 'paper_low');
+});
+
+test('printers sharing one IP (one laptop, several ports) each get their own status and reprints', async (t) => {
+  const ctx = await setup(t);
+  const { mock, event } = ctx;
+  const p1 = await ctx.printer();
+  const p2 = await ctx.printer({ status: 'paper_out' });
+  const p3 = await ctx.printer();
+  const italian = mock.addKitchen({ event_id: event.id, name: 'Italian', prefix: 'IT', printer_ip: '127.0.0.1', printer_port: p1.port });
+  const arabic = mock.addKitchen({ event_id: event.id, name: 'Arabic', prefix: 'AR', printer_ip: '127.0.0.1', printer_port: p2.port });
+  // the port written in the IP field also works ("ip:port")
+  const indian = mock.addKitchen({ event_id: event.id, name: 'Indian', prefix: 'IN', printer_ip: `127.0.0.1:${p3.port}` });
+  const statusOf = (k) => k.printer_status;
+
+  ctx.start();
+  await waitFor(() => statusOf(italian) === 'online' && statusOf(arabic) === 'paper_out' && statusOf(indian) === 'online', 'three different statuses');
+  const calls = mock.callsTo('hub_printer_status');
+  assert.ok(calls.every((c) => c.args.p_printer_ip === '127.0.0.1' && Number.isInteger(c.args.p_printer_port)), 'reported per ip + port');
+  assert.deepEqual(new Set(calls.map((c) => c.args.p_printer_port)), new Set([p1.port, p2.port, p3.port]));
+
+  const it = mock.addKot({ kitchen: italian, kot_no: 'IT-001', table_number: 1, items: [{ name: 'Pasta', qty: 1 }] });
+  const ar = mock.addKot({ kitchen: arabic, kot_no: 'AR-001', table_number: 1, items: [{ name: 'Hummus', qty: 1 }] });
+  await waitFor(() => mock.kot(it.id).print_status === 'printed' && mock.kot(ar.id).print_status === 'failed', 'Italian printed, Arabic failed');
+  assert.equal(mock.kot(ar.id).last_error, `Printer 127.0.0.1:${p2.port} is out of paper`);
+  assert.equal(statusOf(italian), 'online', 'Italian is not marked out of paper by its neighbour on the same IP');
+
+  // paper loaded on the Arabic printer only: only its KOT comes back
+  p2.setStatus('online');
+  await waitFor(() => mock.kot(ar.id).print_status === 'printed', 'AR-001 printed after paper loaded');
+  assert.equal(p2.jobs.length, 1);
+  assert.equal(p1.jobs.length, 1, 'IT-001 was not printed twice');
+  assert.equal(statusOf(arabic), 'online');
+
+  // power cut on the Indian printer
+  await p3.switchOff();
+  await waitFor(() => statusOf(indian) === 'offline', 'Indian offline');
+  assert.equal(statusOf(italian), 'online');
+  assert.equal(statusOf(arabic), 'online');
+  const board = renderBoard(ctx.state).join('\n');
+  assert.match(board, new RegExp(`Indian\\s+127\\.0\\.0\\.1:${p3.port}\\s+OFFLINE`));
+  assert.match(board, new RegExp(`Italian\\s+127\\.0\\.0\\.1:${p1.port}\\s+ONLINE`));
+});
+
+test('a server with the old printer-status function (no port) still gets status reports', async (t) => {
+  const ctx = await setup(t, { legacyStatus: true });
+  const { mock, event } = ctx;
+  const port = await closedPort();
+  const italian = mock.addKitchen({ event_id: event.id, name: 'Italian', prefix: 'IT', printer_ip: '127.0.0.1', printer_port: port });
+  ctx.start();
+  await waitFor(() => italian.printer_status === 'offline', 'offline reported the old way');
+  const calls = mock.callsTo('hub_printer_status');
+  assert.ok(calls.some((c) => !('p_printer_port' in c.args) && c.args.p_printer_ip === '127.0.0.1'));
+  assert.equal(calls.filter((c) => 'p_printer_port' in c.args).length, 1, 'the new form is tried once, then not again');
+  assert.ok(ctx.state.recent.some((r) => /old printer-status function/.test(r.text)), 'the operator is told');
+  const a = mock.addKot({ kitchen: italian, kot_no: 'IT-001', table_number: 1, items: [{ name: 'Pasta', qty: 1 }] });
+  await waitFor(() => mock.kot(a.id).print_status === 'failed', 'failed while offline');
+  const printer = await ctx.printer({ port });
+  await waitFor(() => mock.kot(a.id).print_status === 'printed', 'reprinted after the old-style online report');
+  assert.equal(printer.jobs.length, 1);
 });
 
 test('server unreachable: the hub says so, keeps running and recovers by itself', async (t) => {

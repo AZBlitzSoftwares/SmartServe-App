@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Virtual Printers</title>
+<!-- Janu's Smart Serve - Virtual Printers. Served by fake-printer.mjs; no internet needed. -->
+<style>
+:root {
+  --bg: #1b1220;
+  --bg2: #241829;
+  --device: #2d2433;
+  --device2: #221b28;
+  --edge: rgba(255, 255, 255, .07);
+  --text: #f5f0f8;
+  --muted: #a898b3;
+  --faint: #6f6378;
+  --marigold: #e8890c;
+  --marigold-soft: rgba(232, 137, 12, .16);
+  --wine: #8e2a5c;
+  --ok: #22c55e;
+  --warn: #f5a524;
+  --bad: #ef4444;
+  --off: #625a6b;
+  --paper: #fffefa;
+  --paper2: #f8f5ec;
+  --print: #1c1b1f;
+  --fs: 11px;               /* receipt font size; JS fits it to the window */
+  --lh: calc(var(--fs) * 1.3);
+  --ui: Manrope, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", "Courier New", monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: radial-gradient(1200px 600px at 50% -200px, #3a2342 0%, transparent 70%), var(--bg);
+  color: var(--text);
+  font: 14px/1.4 var(--ui);
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+button:focus-visible { outline: 2px solid var(--marigold); outline-offset: 2px; }
+
+/* ---------- top bar ---------- */
+.top {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 14px 24px 12px;
+  border-bottom: 1px solid var(--edge);
+  background: rgba(27, 18, 32, .85);
+}
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.mark {
+  width: 40px; height: 40px; border-radius: 11px; flex: none;
+  background: linear-gradient(145deg, #f29a24, #d9780a);
+  display: grid; place-items: center;
+  box-shadow: 0 6px 16px rgba(232, 137, 12, .35), inset 0 1px 0 rgba(255, 255, 255, .35);
+}
+.mark svg { width: 24px; height: 24px; }
+.brand h1 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; line-height: 1.1; }
+.brand p { color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.spacer { flex: 1; }
+.live { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700; color: var(--muted); }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 3px rgba(245, 165, 36, .18); }
+.live.on i { background: var(--ok); box-shadow: 0 0 0 3px rgba(34, 197, 94, .18); animation: pulse 2s ease-in-out infinite; }
+.live.on span { color: var(--text); }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); } }
+.tools { display: flex; align-items: center; gap: 8px; }
+.btn {
+  height: 34px; padding: 0 14px; border-radius: 9px;
+  background: rgba(255, 255, 255, .06); border: 1px solid var(--edge);
+  font-weight: 700; font-size: 13px; color: var(--text);
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  transition: background .15s, border-color .15s;
+}
+.btn:hover { background: rgba(255, 255, 255, .11); }
+.btn.sq { width: 34px; padding: 0; justify-content: center; }
+.btn.danger.armed { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+.setup {
+  display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center;
+  padding: 9px 24px; font-size: 12.5px; color: var(--muted);
+  border-bottom: 1px solid var(--edge); background: rgba(0, 0, 0, .14);
+}
+.setup b { color: var(--text); font-weight: 700; font-family: var(--mono); font-size: 12px; letter-spacing: -.01em; }
+.setup .k { color: var(--muted); }
+.setup .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--faint); }
+
+/* ---------- printers ---------- */
+.bench { flex: 1; overflow: auto; overscroll-behavior: contain; }
+.row { display: flex; gap: 20px; width: max-content; margin: 0 auto; padding: 20px 24px 48px; align-items: flex-start; }
+.col { width: calc(var(--paperw) + 24px); flex: none; }
+.col { --paperw: calc(48 * var(--chw) + 28px); }
+
+.device {
+  position: sticky; top: 0; z-index: 2;
+  background: linear-gradient(180deg, var(--device), var(--device2));
+  border: 1px solid var(--edge); border-bottom: 0;
+  border-radius: 18px 18px 6px 6px;
+  padding: 14px 14px 0;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .06);
+  container-type: inline-size;
+}
+.d1 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.port { font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.port b { color: var(--text); font-family: var(--mono); letter-spacing: 0; font-size: 12.5px; }
+.state { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.led { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px 1px rgba(34, 197, 94, .7); }
+.kitchen {
+  margin-top: 8px; font-size: 21px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 26px; line-height: 26px;
+}
+.kitchen.empty { color: var(--faint); text-transform: none; font-weight: 700; font-size: 17px; letter-spacing: 0; }
+.d2 { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 4px; font-size: 12.5px; color: var(--muted); }
+.count b { color: var(--text); font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.count .lost { color: #ff9f9f; font-weight: 700; }
+.contact { text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.contact.stale { color: var(--warn); font-weight: 700; }
+.msg {
+  margin-top: 10px; padding: 7px 10px; border-radius: 9px;
+  font-size: 12.5px; font-weight: 600; line-height: 1.38;
+  height: calc(2 * 1.38em + 14px); overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  background: rgba(34, 197, 94, .1); color: #a7e8bf;
+}
+.msg b { font-weight: 800; }
+.controls { display: flex; gap: 8px; margin-top: 12px; }
+.seg {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; padding: 3px; gap: 2px;
+  background: rgba(0, 0, 0, .3); border-radius: 10px; border: 1px solid var(--edge);
+}
+.seg .lbl { font-size: 11px; font-weight: 700; color: var(--muted); padding: 0 6px 0 7px; text-transform: uppercase; letter-spacing: .06em; }
+.seg button {
+  flex: 1 1 0; min-width: 0; height: 28px; white-space: nowrap; border-radius: 7px; font-size: 12.5px; font-weight: 700; color: var(--muted);
+  transition: background .15s, color .15s;
+}
+.seg button:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
+.seg button[aria-pressed="true"] { color: #fff; }
+.seg button[data-paper="online"][aria-pressed="true"] { background: #16803c; }
+.seg button[data-paper="paper_low"][aria-pressed="true"] { background: #b86e00; }
+.seg button[data-paper="paper_out"][aria-pressed="true"] { background: #c42525; }
+.power {
+  flex: 0 0 auto; height: 36px; padding: 0 12px; border-radius: 10px; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 800;
+  background: rgba(255, 255, 255, .07); border: 1px solid var(--edge);
+}
+.power:hover { background: rgba(255, 255, 255, .12); }
+.power svg { width: 15px; height: 15px; flex: none; }
+@container (max-width: 300px) { .seg .lbl { display: none; } .power { padding: 0 10px; } }
+.slot {
+  margin: 14px -6px 0; height: 14px; border-radius: 7px 7px 0 0;
+  background: linear-gradient(#08060a, #19141d);
+  box-shadow: inset 0 3px 5px rgba(0, 0, 0, .9), 0 1px 0 rgba(255, 255, 255, .05);
+  position: relative;
+}
+.slot::after { /* paper edge peeking out of the slot */
+  content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 3px;
+  background: var(--paper2); border-radius: 2px 2px 0 0; opacity: .9;
+}
+
+/* states */
+.col[data-paper="paper_low"] .led { background: var(--warn); box-shadow: 0 0 8px 1px rgba(245, 165, 36, .7); }
+.col[data-paper="paper_low"] .state { color: var(--warn); }
+.col[data-paper="paper_low"] .msg { background: rgba(245, 165, 36, .14); color: #ffd28a; }
+.col[data-paper="paper_out"] .led { background: var(--bad); box-shadow: 0 0 10px 2px rgba(239, 68, 68, .8); animation: blink 1.1s ease-in-out infinite; }
+.col[data-paper="paper_out"] .state { color: #ff8a8a; }
+.col[data-paper="paper_out"] .msg { background: rgba(239, 68, 68, .16); color: #ffc2c2; }
+.col[data-paper="paper_out"] .slot::after { opacity: 0; }
+.col[data-on="0"] .led { background: #3a3340; box-shadow: none; animation: none; }
+.col[data-on="0"] .state { color: var(--faint); }
+.col[data-on="0"] .msg { background: rgba(255, 255, 255, .06); color: var(--muted); }
+.col[data-on="0"] .device { background: linear-gradient(180deg, #252028, #1c181f); }
+.col[data-on="0"] .kitchen, .col[data-on="0"] .count b { color: var(--muted); }
+.col[data-on="0"] .power { background: #16803c; border-color: #16803c; color: #fff; }
+.col[data-on="0"] .feed { opacity: .5; filter: grayscale(.4); }
+@keyframes blink { 50% { opacity: .3; box-shadow: none; } }
+
+/* ---------- paper ---------- */
+.feed { position: relative; padding: 2px 12px 0; display: flex; flex-direction: column; gap: 14px; transition: opacity .3s; }
+.empty-feed {
+  margin: 10px 0; padding: 26px 18px; text-align: center; border: 1.5px dashed rgba(255, 255, 255, .12); border-radius: 12px;
+  color: var(--muted); font-size: 13px; line-height: 1.5;
+}
+.empty-feed b { color: var(--text); font-family: var(--mono); font-size: 12.5px; }
+.item { content-visibility: auto; contain-intrinsic-size: auto 420px; }
+.meta {
+  display: flex; align-items: center; gap: 8px; margin: 0 2px 6px; font-size: 12px; color: var(--muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 0;
+}
+.meta > * { flex: none; }
+.meta .t { font-weight: 600; }
+.meta .what { color: var(--text); font-weight: 800; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.meta .what.cancel { color: #ff9f9f; }
+.meta .what.test { color: #a9cdff; }
+.meta .tbl { color: var(--text); font-weight: 700; }
+.pill { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; }
+.pill.new { background: var(--marigold); color: #1b1220; }
+.pill.backup { background: rgba(245, 165, 36, .2); color: #ffd28a; }
+.meta .pill.new { margin-left: auto; }
+.item:not(.fresh) .pill.new { display: none; }
+
+.shadow { filter: drop-shadow(0 8px 12px rgba(0, 0, 0, .45)) drop-shadow(0 1px 1px rgba(0, 0, 0, .3)); }
+.slip {
+  --z: 6px;
+  width: var(--paperw);
+  background: linear-gradient(180deg, var(--paper), var(--paper2));
+  color: var(--print);
+  font-family: var(--mono);
+  font-size: var(--fs);
+  padding: calc(var(--z) + 10px) 14px calc(var(--z) + 6px);
+  overflow: hidden;
+  -webkit-mask:
+    conic-gradient(from 135deg at top, #0000, #000 1deg 89deg, #0000 90deg) top / calc(2 * var(--z)) 51% repeat-x,
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / calc(2 * var(--z)) 51% repeat-x;
+  mask:
+    conic-gradient(from 135deg at top, #0000, #000 1deg 89deg, #0000 90deg) top / calc(2 * var(--z)) 51% repeat-x,
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / calc(2 * var(--z)) 51% repeat-x;
+}
+.ln { display: flex; align-items: flex-end; height: calc(var(--lh) * var(--H, 1)); white-space: pre; }
+.ln.c { justify-content: center; }
+.ln.r { justify-content: flex-end; }
+.ln > span {
+  display: inline-block; white-space: pre;
+  font-size: calc(var(--fs) * var(--w, 1));
+  line-height: calc(var(--lh) * var(--w, 1));
+  transform: scaleY(var(--sy, 1)); transform-origin: 50% 100%;
+  letter-spacing: 0;
+}
+.ln > span.b { font-weight: 800; }
+.ln > span.rv { background: var(--print); color: var(--paper); }
+.item.fresh .shadow { animation: out .8s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes out {
+  from { opacity: 0; transform: translateY(-36px); clip-path: inset(0 0 100% 0); }
+  to   { opacity: 1; transform: none; clip-path: inset(0 0 0 0); }
+}
+.more { text-align: center; color: var(--faint); font-size: 12px; padding: 4px 0 10px; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 20px); opacity: 0;
+  background: #3a2c40; color: var(--text); border: 1px solid var(--edge); padding: 10px 16px; border-radius: 10px;
+  font-weight: 700; font-size: 13px; transition: all .25s; pointer-events: none; z-index: 10;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .4);
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.down {
+  display: none; margin: 40px auto; max-width: 460px; text-align: center; color: var(--muted); font-size: 14px; line-height: 1.6;
+}
+
+@media (max-width: 700px) {
+  .top { padding: 12px 16px 10px; gap: 10px; }
+  .brand h1 { font-size: 18px; }
+  .brand p { display: none; }
+  .setup { padding: 8px 16px; gap: 6px 12px; }
+  .setup .sep { display: none; }
+  .bench { scroll-snap-type: x mandatory; }
+  .row { padding: 14px 16px 40px; gap: 16px; }
+  .col { scroll-snap-align: center; }
+  .zoom { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#1b1220" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7l-2.5-1.5L12 21l-2.5-1.5L7 21z" fill="#fff8ea"/>
+      </svg>
+    </div>
+    <div>
+      <h1>Virtual Printers</h1>
+      <p>Janu's Smart Serve &middot; kitchen printing without a printer</p>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div class="live" id="live" title="Updates arrive by themselves"><i></i><span>Connecting&hellip;</span></div>
+  <div class="tools">
+    <span class="zoom">
+      <button class="btn sq" id="smaller" title="Smaller slips" aria-label="Smaller slips">A&minus;</button>
+      <button class="btn sq" id="bigger" title="Bigger slips" aria-label="Bigger slips">A+</button>
+    </span>
+    <button class="btn danger" id="clear" title="Remove every slip and reset the counters">Clear</button>
+  </div>
+</header>
+<div class="setup" id="setup"></div>
+<main class="bench" id="bench">
+  <div class="row" id="row"></div>
+  <div class="down" id="down">The Virtual Printers window is closed or this device lost the connection.<br>Start <b>Start Virtual Printers</b> again; this page reconnects by itself.</div>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  'use strict';
+  const MAX_SLIPS = 60;
+  const STALE_MS = 40000; // the Print Hub checks every 15 s; much longer = it is not running or the IP/port is wrong
+  const $ = (sel, el = document) => el.querySelector(sel);
+  const printers = new Map(); // port -> { data, col }
+  let order = [];
+  let live = false;
+  let clockOffset = 0; // server time - this device's time
+  let userFs = null;
+
+  try { userFs = Number(localStorage.getItem('vp.fs')) || null; } catch { userFs = null; }
+
+  // ---------- helpers ----------
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  function ago(iso) {
+    const s = Math.max(0, Math.round((Date.now() + clockOffset - Date.parse(iso)) / 1000));
+    if (s < 5) return 'just now';
+    if (s < 60) return s + ' s ago';
+    const m = Math.round(s / 60);
+    return m < 60 ? m + ' min ago' : Math.round(m / 60) + ' h ago';
+  }
+  let toastTimer;
+  function toast(text) {
+    const t = $('#toast');
+    t.textContent = text;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+  }
+  const powerIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 7.2a8 8 0 1 0 11.4 0"/></svg>';
+
+  // ---------- one slip of paper ----------
+  function renderSlip(s, fresh) {
+    const item = el('article', 'item' + (fresh ? ' fresh' : ''));
+    item.dataset.id = s.id;
+    const meta = el('div', 'meta');
+    meta.append(el('span', 't', fmtTime(s.at)));
+    const what = s.kind === 'test' ? 'Test print' : (s.kind === 'cancel' ? 'Cancelled ' : 'KOT ') + (s.kotNo || '');
+    meta.append(el('span', 'what ' + s.kind, what.trim()));
+    if (s.table) meta.append(el('span', 'tbl', 'Table ' + s.table));
+    if (s.backup) meta.append(el('span', 'pill backup', 'Backup'));
+    meta.append(el('span', 'pill new', 'New'));
+    item.append(meta);
+
+    const shadow = el('div', 'shadow');
+    const paper = el('div', 'slip');
+    paper.setAttribute('role', 'img');
+    paper.setAttribute('aria-label', 'Printed slip: ' + (s.lines || []).map((l) => (l.runs || []).map((r) => r.text).join('').trim()).filter(Boolean).join(' / '));
+    let blanks = 0;
+    for (const line of s.lines || []) {
+      const runs = line.runs || [];
+      const text = runs.map((r) => r.text).join('');
+      if (!text.trim()) { if (++blanks > 2) continue; } else blanks = 0;
+      const ln = el('div', 'ln' + (line.align === 'center' ? ' c' : line.align === 'right' ? ' r' : ''));
+      let H = 1;
+      for (const r of runs) H = Math.max(H, r.h || 1);
+      ln.style.setProperty('--H', H);
+      for (const r of runs) {
+        const w = r.w || 1;
+        const h = r.h || 1;
+        const sp = el('span', (r.bold ? 'b' : '') + (r.reverse ? ' rv' : ''), r.text);
+        sp.style.setProperty('--w', (r.small ? 0.75 : 1) * w);
+        if (h !== w) sp.style.setProperty('--sy', h / w);
+        ln.append(sp);
+      }
+      paper.append(ln);
+    }
+    shadow.append(paper);
+    item.append(shadow);
+    if (fresh) setTimeout(() => item.classList.remove('fresh'), 8000);
+    return item;
+  }
+
+  // ---------- one printer ----------
+  function buildColumn(port) {
+    const col = el('section', 'col');
+    col.dataset.port = port;
+    col.innerHTML =
+      '<div class="device">' +
+        '<div class="d1"><span class="port">Printer <b></b></span><span class="state"><i class="led"></i><span class="st"></span></span></div>' +
+        '<div class="kitchen"></div>' +
+        '<div class="d2"><span class="count"><b>0</b> <span>slips</span><span class="lost"></span></span><span class="contact"></span></div>' +
+        '<div class="msg"></div>' +
+        '<div class="controls">' +
+          '<div class="seg" role="group" aria-label="Paper"><span class="lbl">Paper</span>' +
+            '<button data-paper="online" aria-pressed="false" title="Paper loaded - prints normally">OK</button>' +
+            '<button data-paper="paper_low" aria-pressed="false" title="Roll nearly finished - still prints">Low</button>' +
+            '<button data-paper="paper_out" aria-pressed="false" title="No paper - prints nothing">Out</button>' +
+          '</div>' +
+          '<button class="power">' + powerIcon + '<span></span></button>' +
+        '</div>' +
+        '<div class="slot"></div>' +
+      '</div>' +
+      '<div class="feed"></div>';
+    $('.port b', col).textContent = ':' + port;
+    col.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => control(port, { paper: b.dataset.paper })));
+    $('.power', col).addEventListener('click', () => {
+      const p = printers.get(port);
+      control(port, { power: p && p.data.on ? 'off' : 'on' });
+    });
+    return col;
+  }
+
+  function updateColumn(port) {
+    const p = printers.get(port);
+    if (!p) return;
+    const d = p.data;
+    const col = p.col;
+    const paper = d.paper === 'silent' ? 'online' : d.paper;
+    col.dataset.paper = paper;
+    col.dataset.on = d.on ? '1' : '0';
+    const k = $('.kitchen', col);
+    k.textContent = d.kitchen || 'No slips yet';
+    k.classList.toggle('empty', !d.kitchen);
+    k.title = d.kitchen || '';
+    $('.count b', col).textContent = d.count;
+    $('.count span', col).textContent = d.count === 1 ? 'slip' : 'slips';
+    $('.st', col).textContent = !d.on ? 'Switched off' : paper === 'paper_out' ? 'Paper out' : paper === 'paper_low' ? 'Paper low' : 'Online';
+    col.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.paper === paper)));
+    $('.power span', col).textContent = d.on ? 'Turn off' : 'Turn on';
+    $('.power', col).title = d.on ? 'Cut the power: the Print Hub can no longer reach this printer' : 'Power on again';
+    const msg = $('.msg', col);
+    let html;
+    if (!d.on) html = '<b>No power.</b> The desk shows <b>OFFLINE</b>; KOTs go to the backup printer or fail.';
+    else if (paper === 'paper_out') html = '<b>No paper.</b> Nothing prints; the desk shows <b>PAPER OUT</b>. Failed KOTs reprint after OK.';
+    else if (paper === 'paper_low') html = '<b>Paper low.</b> Still printing; the desk is told to change the roll.';
+    else html = '<b>Ready.</b> Printing normally; the desk shows <b>ONLINE</b>.';
+    msg.innerHTML = html;
+    msg.title = msg.textContent;
+    const lost = $('.lost', col);
+    lost.textContent = d.refused ? ' \u00b7 ' + d.refused + ' not printed (no paper)' : '';
+    updateContact(port);
+  }
+
+  function updateContact(port) {
+    const p = printers.get(port);
+    if (!p) return;
+    const d = p.data;
+    const c = $('.contact', p.col);
+    let text;
+    let stale = false;
+    if (!d.on) text = 'Not reachable';
+    else if (!d.lastContactAt) { text = 'Print Hub not seen yet'; stale = true; }
+    else {
+      text = 'Print Hub checked ' + ago(d.lastContactAt);
+      stale = Date.now() + clockOffset - Date.parse(d.lastContactAt) > STALE_MS;
+      if (stale) text = 'Print Hub not seen ' + ago(d.lastContactAt);
+    }
+    c.textContent = text;
+    c.classList.toggle('stale', stale);
+    c.title = stale ? 'Is the Print Hub running, and does a kitchen use this port?' : '';
+  }
+
+  function renderFeed(port) {
+    const p = printers.get(port);
+    const feed = $('.feed', p.col);
+    feed.textContent = '';
+    const slips = p.data.slips || [];
+    if (!slips.length) {
+      const e = el('div', 'empty-feed');
+      e.innerHTML = 'Waiting for KOTs&hellip;<br>Kitchen printer: <b>' + hostHint() + '</b> &nbsp;port <b>' + port + '</b>';
+      feed.append(e);
+      return;
+    }
+    for (const s of slips.slice(0, MAX_SLIPS)) feed.append(renderSlip(s, false));
+    if (p.data.count > MAX_SLIPS) feed.append(el('div', 'more', 'Older slips are not shown (' + p.data.count + ' in all)'));
+  }
+
+  function hostHint() { return '127.0.0.1'; }
+
+  function renderSetup(st) {
+    const s = $('#setup');
+    s.textContent = '';
+    const add = (k, v) => {
+      if (s.childNodes.length) s.append(el('span', 'sep'));
+      const w = el('span');
+      w.append(el('span', 'k', k + ' '), el('b', '', v));
+      s.append(w);
+    };
+    const ports = order;
+    const consecutive = ports.length > 2 && ports.every((p, i) => i === 0 || p === ports[i - 1] + 1);
+    add('Control › Kitchens: printer IP', '127.0.0.1' + (st.lan && st.lan[0] ? '  or  ' + st.lan[0] : ''));
+    add('ports', consecutive ? ports[0] + ' – ' + ports[ports.length - 1] : ports.join(', '));
+    if (st.lan && st.lan.length && st.webPort) add('Watch on a phone', 'http://' + st.lan[0] + ':' + st.webPort);
+  }
+
+  // ---------- data in ----------
+  function applySnapshot(st) {
+    clockOffset = Date.parse(st.now) - Date.now();
+    const row = $('#row');
+    const ports = st.printers.map((p) => p.port);
+    if (ports.join(',') !== order.join(',')) {
+      row.textContent = '';
+      printers.clear();
+      for (const port of ports) {
+        const col = buildColumn(port);
+        printers.set(port, { data: null, col });
+        row.append(col);
+      }
+      order = ports;
+    }
+    for (const d of st.printers) {
+      const p = printers.get(d.port);
+      p.data = d;
+      updateColumn(d.port);
+      renderFeed(d.port);
+    }
+    renderSetup(st);
+    fit();
+  }
+
+  function applyPrinter(d) {
+    const p = printers.get(d.port);
+    if (!p) return;
+    p.data = Object.assign({}, p.data, d, { slips: p.data ? p.data.slips : [] });
+    updateColumn(d.port);
+  }
+
+  function applySlip(msg) {
+    const p = printers.get(msg.port);
+    if (!p || !p.data) return;
+    const slips = p.data.slips || (p.data.slips = []);
+    if (slips.some((s) => s.id === msg.slip.id)) return;
+    slips.unshift(msg.slip);
+    slips.length = Math.min(slips.length, MAX_SLIPS);
+    applyPrinter(msg.printer);
+    const feed = $('.feed', p.col);
+    const empty = $('.empty-feed', feed);
+    if (empty) empty.remove();
+    feed.prepend(renderSlip(msg.slip, true));
+    const items = feed.querySelectorAll('.item');
+    for (let i = MAX_SLIPS; i < items.length; i++) items[i].remove();
+  }
+
+  function setLive(on) {
+    live = on;
+    const l = $('#live');
+    l.classList.toggle('on', on);
+    $('span', l).textContent = on ? 'Live' : 'Reconnecting…';
+  }
+
+  // Server-Sent Events, with a 1-second poll while they are not connected.
+  function connect() {
+    if (!window.EventSource) return;
+    const es = new EventSource('/api/events');
+    es.addEventListener('snapshot', (e) => { applySnapshot(JSON.parse(e.data)); setLive(true); $('#down').style.display = 'none'; });
+    es.addEventListener('slip', (e) => applySlip(JSON.parse(e.data)));
+    es.addEventListener('printer', (e) => applyPrinter(JSON.parse(e.data)));
+    es.onopen = () => setLive(true);
+    es.onerror = () => setLive(false);
+  }
+  let failures = 0;
+  setInterval(async () => {
+    if (live) return;
+    try {
+      const r = await fetch('/api/state', { cache: 'no-store' });
+      applySnapshot(await r.json());
+      failures = 0;
+      $('#down').style.display = 'none';
+    } catch {
+      if (++failures > 3) $('#down').style.display = 'block';
+    }
+  }, 1000);
+  setInterval(() => { for (const port of order) updateContact(port); }, 1000);
+
+  // ---------- data out ----------
+  async function control(port, body) {
+    try {
+      const r = await fetch('/api/printers/' + port, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Not changed');
+      applyPrinter(d);
+      const name = (d.kitchen ? d.kitchen + ' ' : '') + 'printer :' + port;
+      if (body.power) toast(name + (body.power === 'on' ? ' switched on' : ' switched off'));
+      else toast(name + ': ' + ({ online: 'paper OK', paper_low: 'paper low', paper_out: 'paper out' })[body.paper]);
+    } catch (e) {
+      toast(e.message || 'Not changed - is the Virtual Printers window still open?');
+    }
+  }
+
+  const clearBtn = $('#clear');
+  let armTimer;
+  clearBtn.addEventListener('click', async () => {
+    if (!clearBtn.classList.contains('armed')) {
+      clearBtn.classList.add('armed');
+      clearBtn.textContent = 'Clear all slips?';
+      armTimer = setTimeout(() => { clearBtn.classList.remove('armed'); clearBtn.textContent = 'Clear'; }, 3000);
+      return;
+    }
+    clearTimeout(armTimer);
+    clearBtn.classList.remove('armed');
+    clearBtn.textContent = 'Clear';
+    try {
+      await fetch('/api/clear', { method: 'POST' });
+      toast('All slips cleared');
+    } catch {
+      toast('Not cleared - is the Virtual Printers window still open?');
+    }
+  });
+
+  // ---------- sizing: fit every printer on screen when possible ----------
+  let chRatio = 0.6;
+  (function measure() {
+    const probe = el('span', '', '0'.repeat(48));
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-size:100px;font-family:' + getComputedStyle(document.documentElement).getPropertyValue('--mono');
+    document.body.append(probe);
+    chRatio = probe.getBoundingClientRect().width / 48 / 100 || 0.6;
+    probe.remove();
+  })();
+  function setFs(fs) {
+    const root = document.documentElement.style;
+    root.setProperty('--fs', fs.toFixed(2) + 'px');
+    root.setProperty('--chw', (fs * chRatio).toFixed(3) + 'px');
+  }
+  function fit() {
+    if (userFs) return setFs(userFs);
+    const n = Math.max(1, order.length);
+    const phone = window.innerWidth <= 700;
+    const avail = window.innerWidth - (phone ? 32 : 48);
+    const perCol = phone ? avail : (avail - 20 * (n - 1)) / n;
+    // column = 48 chars + 28 px paper padding + 24 px column padding
+    const fs = (perCol - 52) / (48 * chRatio);
+    setFs(Math.max(phone ? 7 : 9, Math.min(13, fs)));
+  }
+  function zoom(step) {
+    const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fs')) || 11;
+    userFs = Math.max(7, Math.min(18, Math.round(cur + step)));
+    try { localStorage.setItem('vp.fs', String(userFs)); } catch { /* private window */ }
+    setFs(userFs);
+  }
+  $('#smaller').addEventListener('click', () => zoom(-1));
+  $('#bigger').addEventListener('click', () => zoom(1));
+  $('#bigger').addEventListener('dblclick', () => { userFs = null; try { localStorage.removeItem('vp.fs'); } catch { /* private window */ } fit(); });
+  window.addEventListener('resize', fit);
+  fit();
+
+  setLive(false);
+  connect();
+})();
+</script>
+</body>
+</html>

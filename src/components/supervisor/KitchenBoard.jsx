@@ -418,13 +418,24 @@ function derive(kots, kitchens) {
     avgMin: durN ? durSum / durN / 60000 : null }
 }
 
+// A kitchen's printer address. Several printers can share one IP on
+// different ports (the Virtual Printers on one laptop), so the port is part
+// of the address whenever it is not the standard 9100. The Print Hub and the
+// database both understand "ip:port".
+function addrOf(kitchen) {
+  const ip = kitchen && kitchen.printer_ip ? String(kitchen.printer_ip).trim() : ''
+  if (!ip) return ''
+  const port = kitchen.printer_port
+  return ip.includes(':') || !port || Number(port) === 9100 ? ip : ip + ':' + port
+}
+
 // Where a KOT will print: its redirect if one is set, else its kitchen's printer.
-function targetIp(k, kitchen) { return (k.printer_ip && String(k.printer_ip).trim()) || (kitchen && kitchen.printer_ip) || '' }
+function targetIp(k, kitchen) { return (k.printer_ip && String(k.printer_ip).trim()) || addrOf(kitchen) || '' }
 
 function printerName(ip, kitchens, own) {
   if (!ip) return ''
-  if (own && own.backup_printer_ip === ip && own.printer_ip !== ip) return 'backup printer'
-  const k = kitchens.find(x => x.printer_ip === ip)
+  if (own && own.backup_printer_ip === ip && addrOf(own) !== ip) return 'backup printer'
+  const k = kitchens.find(x => addrOf(x) === ip) || kitchens.find(x => x.printer_ip === ip)
   return k ? k.name + ' printer' : ip
 }
 
@@ -962,7 +973,7 @@ function Board({ eventId }) {
       out.push({ ip:kitchen.backup_printer_ip, label:kitchen.name + ' backup', status:'unknown', order:-1 })
     }
     for (const kt of activeKitchens) {
-      const ip = kt.printer_ip && String(kt.printer_ip).trim()
+      const ip = addrOf(kt)
       if (!ip || seen.has(ip)) continue
       seen.add(ip)
       out.push({ ip, label:kt.name, status:kt.printer_status || 'unknown', order:kt.sort_order ?? 0 })
@@ -1183,7 +1194,7 @@ function Board({ eventId }) {
                               style={{ ...btnGhost, borderColor: redirectFor === gKey ? DARK : 'var(--line)' }}>{'Redirect all ' + (redirectFor === gKey ? '▴' : '▾')}</button>
                           </div>
                           {redirectFor === gKey && (
-                            <RedirectChoices targets={targetsFor(g.kitchen, g.kitchen?.printer_ip || '')}
+                            <RedirectChoices targets={targetsFor(g.kitchen, addrOf(g.kitchen))}
                               onPick={t => sendToPrinter(realFails, t, true)} onClose={() => setRedirectFor(null)} />
                           )}
                         </div>

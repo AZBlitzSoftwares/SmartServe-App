@@ -817,7 +817,10 @@ function KitchenForm({ form, setField, setForm, kitchens, tried, saving, error, 
   const errs = validateKitchen(form, kitchens)
   // Mistakes show as soon as something is typed; "required" waits for Save
   const show = (key, val) => errs[key] && (tried || String(val ?? '').trim() !== '') ? errs[key] : null
-  const shared = form.printer_ip.trim() && kitchens.filter(k => k.id !== form.id && k.printer_ip === form.printer_ip.trim())
+  // Same printer = same IP AND same port (Virtual Printers share 127.0.0.1 on different ports)
+  const formPort = Number(form.printer_port) || 9100
+  const shared = form.printer_ip.trim() && kitchens.filter(k => k.id !== form.id && k.printer_ip === form.printer_ip.trim()
+    && (Number(k.printer_port) || 9100) === formPort)
   const lockedDefault = form.mode === 'edit' && form.wasDefault
   const firstKitchen = form.mode === 'add' && !kitchens.some(k => k.is_active)
   const nextDefault = kitchens.find(k => k.id !== form.id && k.is_active)

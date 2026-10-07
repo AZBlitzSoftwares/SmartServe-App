@@ -400,19 +400,52 @@ begin
   end if;
 end $$;
 
-create or replace function hub_printer_status(p_event_id uuid, p_printer_ip text, p_status text)
+-- Printer health, per printer = IP + port. Several printers can share one
+-- IP (Virtual Printers on one laptop, a print server with several ports),
+-- so with p_printer_port only the kitchens on that exact printer change.
+-- Read like the Print Hub reads it: an IP field written "ip:port" means
+-- that port; otherwise the kitchen's printer_port. A KOT's printer is its
+-- redirect (kots.printer_ip, may be "ip:port") or else its kitchen's IP,
+-- with the kitchen's port. p_printer_port null = old match on the IP text.
+-- (The old 3-argument version is dropped so the API never sees two.)
+drop function if exists hub_printer_status(uuid, text, text);
+create or replace function hub_printer_status(p_event_id uuid, p_printer_ip text, p_status text,
+                                              p_printer_port int default null)
 returns int language plpgsql security definer set search_path = public as $$
-declare v_requeued int := 0;
+declare
+  v_requeued int := 0;
+  v_ip       text := btrim(p_printer_ip, E' \t\r\n');
 begin
-  update kitchens set printer_status = p_status, printer_checked_at = now()
-   where event_id = p_event_id and printer_ip = p_printer_ip;
+  if p_printer_port is null then
+    update kitchens set printer_status = p_status, printer_checked_at = now()
+     where event_id = p_event_id and printer_ip = p_printer_ip;
+  else
+    update kitchens set printer_status = p_status, printer_checked_at = now()
+     where id in (
+       select kt.id
+         from kitchens kt
+        cross join lateral (select btrim(kt.printer_ip, E' \t\r\n') as s) t
+        where kt.event_id = p_event_id
+          and case when t.s ~ '^[^:\s]+:[0-9]{1,5}$' then split_part(t.s, ':', 1) else t.s end = v_ip
+          and case when t.s ~ '^[^:\s]+:[0-9]{1,5}$' then split_part(t.s, ':', 2)::int
+                   else coalesce(nullif(kt.printer_port, 0), 9100) end = p_printer_port);
+  end if;
   -- printer is back (paper low still prints): anything that failed on it goes out again by itself
   if p_status in ('online', 'paper_low') then
-    update kots k set print_status = 'queued', last_error = null
-      from kitchens kt
-     where k.event_id = p_event_id and k.kitchen_id = kt.id
-       and k.print_status = 'failed' and not (k.kind = 'order' and k.status = 'cancelled')
-       and coalesce(nullif(k.printer_ip, ''), kt.printer_ip) = p_printer_ip;
+    update kots set print_status = 'queued', last_error = null
+     where id in (
+       select k.id
+         from kots k
+         join kitchens kt on kt.id = k.kitchen_id
+        cross join lateral (select btrim(coalesce(nullif(k.printer_ip, ''), kt.printer_ip), E' \t\r\n') as s) t
+        where k.event_id = p_event_id
+          and k.print_status = 'failed' and not (k.kind = 'order' and k.status = 'cancelled')
+          and case when p_printer_port is null
+                   then coalesce(nullif(k.printer_ip, ''), kt.printer_ip) = p_printer_ip
+                   else case when t.s ~ '^[^:\s]+:[0-9]{1,5}$' then split_part(t.s, ':', 1) else t.s end = v_ip
+                    and case when t.s ~ '^[^:\s]+:[0-9]{1,5}$' then split_part(t.s, ':', 2)::int
+                             else coalesce(nullif(kt.printer_port, 0), 9100) end = p_printer_port
+              end);
     get diagnostics v_requeued = row_count;
   end if;
   return v_requeued;
@@ -424,7 +457,7 @@ grant execute on function mk_mark_delivered(uuid, uuid)                to anon, 
 grant execute on function mk_undo_delivered(uuid, uuid)                to anon, authenticated;
 grant execute on function hub_claim_kots(uuid, text, int)              to anon, authenticated;
 grant execute on function hub_report(uuid, boolean, text, text)        to anon, authenticated;
-grant execute on function hub_printer_status(uuid, text, text)         to anon, authenticated;
+grant execute on function hub_printer_status(uuid, text, text, int)    to anon, authenticated;
 
 commit;
 

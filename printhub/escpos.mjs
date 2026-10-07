@@ -363,9 +363,11 @@ export function statusByteFor(status) {
 
 /**
  * Decode the ESC/POS subset we use. Returns
- *   { lines: [{ text, align, bold, w, h, reverse, small }], cuts, statusRequests, unknown }
+ *   { lines: [{ text, align, bold, w, h, reverse, small, runs }], cuts, statusRequests, unknown }
  * `bold` / `reverse` are true if any part of the line used them; w/h are the
- * largest size used on the line.
+ * largest size used on the line. `runs` splits the line into pieces of one
+ * style each ({ text, bold, reverse, w, h, small }), for exact rendering
+ * (Virtual Printers page).
  */
 export function decodeEscPos(input) {
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(input);
@@ -376,8 +378,9 @@ export function decodeEscPos(input) {
   let statusRequests = 0;
   let unknown = 0;
 
+  const blank = () => ({ text: '', align: 'left', bold: false, w: 1, h: 1, reverse: false, small: false, runs: [] });
   const startLine = () =>
-    (cur = cur || { text: '', align: st.align, bold: false, w: 1, h: 1, reverse: false, small: st.small });
+    (cur = cur || { text: '', align: st.align, bold: false, w: 1, h: 1, reverse: false, small: st.small, runs: [] });
   const endLine = () => {
     lines.push(startLine());
     cur = null;
@@ -400,7 +403,7 @@ export function decodeEscPos(input) {
       else if (c === 0x4d) { st.small = (n & 1) === 1; i++; } // ESC M n
       else if (c === 0x64) { // ESC d n: print and feed n lines
         if (cur) endLine();
-        for (let k = 0; k < n; k++) lines.push({ text: '', align: 'left', bold: false, w: 1, h: 1, reverse: false, small: false });
+        for (let k = 0; k < n; k++) lines.push(blank());
         i++;
       } else if (c === 0x2d || c === 0x21 || c === 0x32 || c === 0x33 || c === 0x4a) {
         if (c !== 0x32) i++; // ESC - n, ESC ! n, ESC 3 n, ESC J n take one byte; ESC 2 none
@@ -423,6 +426,12 @@ export function decodeEscPos(input) {
       const ch = String.fromCharCode(b);
       if (l.text === '') l.align = st.align; // alignment is taken at the start of a line
       l.text += ch;
+      const run = l.runs[l.runs.length - 1];
+      if (run && run.bold === st.bold && run.reverse === st.reverse && run.w === st.w && run.h === st.h && run.small === st.small) {
+        run.text += ch;
+      } else {
+        l.runs.push({ text: ch, bold: st.bold, reverse: st.reverse, w: st.w, h: st.h, small: st.small });
+      }
       if (ch !== ' ') {
         l.bold = l.bold || st.bold;
         l.reverse = l.reverse || st.reverse;
