@@ -12,10 +12,76 @@ import pg from 'pg'
 import {
   P, HERE, IS_MAC, IS_WIN, UserError, loadConfig, loadLocal, saveLocal, readJson, writeJson, isPrepared, serverRunning,
   portFree, freePort, lanAddresses, localDbOptions, eventLabel, fmtTime, fmtDateTime, fmtAgo, hasCloudApi, logLine,
+  isDevSnapshot, DEV_BANNER,
 } from './common.mjs'
 import { refuseRoot, pgBins, startPostgres, stopPostgres, pgAnswers, startPostgrest, stopChild, postgrestPath, killStalePostgrest } from './runtime.mjs'
 import { countPending, describeUpload, lastUpload } from './upload.mjs'
 import { updatePrinthubConfig } from './printhub.mjs'
+import { prepareApp } from './data.mjs'
+
+// QR codes (npm package "qrcode"). Optional: without it the server works the
+// same, the panel and /qr just show the links as text.
+let QR = null
+try { QR = (await import('qrcode')).default } catch { /* not installed */ }
+
+// Width on screen of a terminal QR line: its colour codes (ESC [ ... m) take no space.
+const ESC = String.fromCharCode(27)
+function visible(s) {
+  let n = 0
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === ESC) { while (i < s.length && s[i] !== 'm') i++; continue }
+    n++
+  }
+  return n
+}
+
+// Small terminal QR codes, next to each other, with a label above each.
+async function terminalQrs(items) {
+  if (!QR) return null
+  const blocks = []
+  for (const it of items) {
+    const text = await QR.toString(it.url, { type: 'terminal', small: true })
+    const lines = text.replace(/\n+$/, '').split('\n').filter((l) => visible(l) > 0)
+    blocks.push({ label: it.label, lines, width: Math.max(it.label.length, ...lines.map(visible)) })
+  }
+  const gap = '    '
+  const out = ['   ' + blocks.map((b) => b.label.padEnd(b.width)).join(gap)]
+  const h = Math.max(...blocks.map((b) => b.lines.length))
+  for (let r = 0; r < h; r++) {
+    out.push('   ' + blocks.map((b) => { const l = b.lines[r] ?? ''; return l + ' '.repeat(Math.max(0, b.width - visible(l))) }).join(gap))
+  }
+  return out
+}
+
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+
+// GET /qr: big QR codes for the desk screen, so staff can scan the links.
+async function qrPage(base, others, note) {
+  const links = [
+    ['Captain & guest tablets', base + '/'],
+    ['Waiter phones', base + '/waiter'],
+    ['Desk (supervisor)', base + '/supervisor'],
+  ]
+  const cards = []
+  for (const [label, url] of links) {
+    const svg = QR ? await QR.toString(url, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' }) : ''
+    cards.push(`<section><h2>${esc(label)}</h2>${svg ? `<div class="qr">${svg}</div>` : ''}<p class="url">${esc(url)}</p></section>`)
+  }
+  const alt = others.length ? `<p class="note">This laptop also has ${others.map((ip) => `<a href="/qr?host=${encodeURIComponent(ip)}">${esc(ip)}</a>`).join(', ')} - use the address of the event Wi-Fi.</p>` : ''
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smart Serve - scan to open</title><style>
+:root{color-scheme:light}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff;color:#1d1d1f}
+header{padding:20px 24px 4px;text-align:center}h1{margin:0;font-size:26px}header p{margin:6px 0 0;color:#555}
+main{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px;padding:24px;max-width:1200px;margin:0 auto}
+section{border:2px solid #e5e5e5;border-radius:16px;padding:16px;text-align:center}
+h2{margin:0 0 8px;font-size:22px}.qr svg{width:100%;max-width:340px;height:auto}
+.url{font:600 18px ui-monospace,Menlo,Consolas,monospace;word-break:break-all;margin:8px 0 0}
+.note{text-align:center;color:#a33;margin:0 24px 16px}a{color:#0a58ca}
+@media print{.note{display:none}section{break-inside:avoid}}
+</style></head><body><header><h1>Janu's Smart Serve - scan to open</h1><p>Phones and tablets must be on the same Wi-Fi as this laptop.</p></header>
+${note ? `<p class="note">${esc(note)}</p>` : ''}${alt}<main>${cards.join('')}</main></body></html>`
+}
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -78,9 +144,9 @@ function insideDir(root, urlPath) {
   return f === root || f.startsWith(root + path.sep) ? f : null
 }
 
-export async function startCommand({ kotJump = 100 } = {}) {
+export async function startCommand({ kotJump = null } = {}) {
   refuseRoot()
-  const cfg = loadConfig()
+  const cfg = loadConfig({ quiet: true })
   const local = loadLocal()
   const snap = readJson(P.snapshot, null)
   if (!isPrepared() || !snap || !fs.existsSync(path.join(P.app, 'index.html')) || !fs.existsSync(postgrestPath())) {
@@ -93,7 +159,24 @@ export async function startCommand({ kotJump = 100 } = {}) {
   }
   if (killStalePostgrest(readJson(P.run, {})?.apiPid)) console.log('  Stopped an API program left over from an earlier run.')
 
-  const events = snap.events.map((e) => e.id)
+  // Test database (prepare --dev): never uploads, no KOT number jump (there
+  // is no cloud numbering to stay clear of), and the newest app build is used.
+  const dev = isDevSnapshot(snap)
+  const jumpAsked = kotJump !== null
+  if (kotJump === null) kotJump = dev ? 0 : 100
+  if (dev) {
+    console.log(DEV_BANNER)
+    console.log('Using the newest app build (../dist; rebuilt first if the code changed)...')
+    try {
+      snap.app = prepareApp()
+      writeJson(P.snapshot, { ...readJson(P.snapshot, snap), app: snap.app })
+      if (snap.app.note) console.log(`  NOTE: ${snap.app.note}`)
+    } catch (e) {
+      console.log(`  Could not refresh the app (${e.message.split('\n')[0]}) - using the copy from prepare.`)
+    }
+  }
+
+  let events = snap.events.map((e) => e.id)
   const pgb = await pgBins()
   const state = { stopping: false, startedAt: new Date().toISOString(), api: null, apiPort: 0, upload: lastUpload(), uploading: false, devices: new Map(), status: {} }
 
@@ -111,7 +194,7 @@ export async function startCommand({ kotJump = 100 } = {}) {
   pool = new pg.Pool({ ...localDbOptions(local), max: 4, idleTimeoutMillis: 30000 })
   pool.on('error', () => {}) // the database restarting must not crash the server
 
-  const jumpNote = await applyKotJump(pool, local, snap, kotJump, events).catch(failStart)
+  const jumpNote = dev && !jumpAsked ? '' : await applyKotJump(pool, local, snap, kotJump, events).catch(failStart)
 
   // ---------------------------------------------------------- API (PostgREST)
   console.log('Starting the API...')
@@ -176,6 +259,11 @@ export async function startCommand({ kotJump = 100 } = {}) {
       }
       if (/^\/(realtime|auth|storage|functions|graphql)(\/|$)/.test(p)) return sendJson(res, 404, { message: 'Not available on the local server.' })
       if (p === '/__ss/health') return sendJson(res, 200, health())
+      // For the app's "use the laptop server" check: is this a Smart Serve local server, and with which events?
+      if (p === '/ss-local.json') {
+        return sendJson(res, 200, { local: true, app: 'smartserve-local', mode: dev ? 'dev' : 'event', startedAt: state.startedAt, port: cfg.port, events: snap.events })
+      }
+      if (p === '/qr' || p === '/qr/') return sendQrPage(req, res)
       if (p.startsWith('/media/')) {
         const f = insideDir(P.media, p.slice('/media'.length))
         return f ? serveFile(req, res, f, 'public, max-age=86400') : sendJson(res, 404, { message: 'not found' })
@@ -195,6 +283,20 @@ export async function startCommand({ kotJump = 100 } = {}) {
   function sendIndex(res) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-length': Buffer.byteLength(indexHtml) })
     res.end(indexHtml)
+  }
+  // The QR codes always carry the laptop's network address (a phone cannot
+  // use "localhost"). ?host= picks another of this laptop's own addresses.
+  function sendQrPage(req, res) {
+    const ips = lanAddresses().map((a) => a.ip)
+    const want = new URL(req.url, 'http://x').searchParams.get('host')
+    const ip = ips.includes(want) ? want : ips[0]
+    const port = cfg.port === 80 ? '' : `:${cfg.port}`
+    const host = ip || String(req.headers.host || '').replace(/:\d+$/, '') || 'localhost'
+    const note = ip ? '' : 'This laptop is not connected to any network - connect it to the event Wi-Fi, then reload this page.'
+    qrPage(`http://${host}${port}`, ips.filter((x) => x !== ip), note).then((html) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-length': Buffer.byteLength(html) })
+      res.end(html)
+    }, (e) => sendJson(res, 500, { message: `QR page: ${e.message}` }))
   }
   // Realtime websockets: refused, the app falls back to polling.
   server.on('upgrade', (req, socket) => socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'))
@@ -221,6 +323,11 @@ export async function startCommand({ kotJump = 100 } = {}) {
 
   async function gather() {
     const s = {}
+    if (dev) {
+      // "demo" adds or removes test events while the server runs.
+      const fresh = readJson(P.snapshot, null)
+      if (Array.isArray(fresh?.events)) { snap.events = fresh.events; events = fresh.events.map((e) => e.id) }
+    }
     try {
       Object.assign(s, (await pool.query(STATUS_SQL, [events])).rows[0])
       s.pg = true
@@ -239,7 +346,7 @@ export async function startCommand({ kotJump = 100 } = {}) {
       const r = await fetch(`http://127.0.0.1:${state.apiPort}/events?select=id&limit=1`, { headers: { apikey: local.anonKey, Authorization: `Bearer ${local.anonKey}` }, signal: AbortSignal.timeout(3000) })
       s.api = r.ok
     } catch { s.api = false }
-    if (s.pg) { try { s.pending = (await countPending(pool, events)).total } catch { /* keep last */ } }
+    if (s.pg && !dev) { try { s.pending = (await countPending(pool, events)).total } catch { /* keep last */ } }
     const since = Date.now() - 2 * 60000
     s.devices = [...state.devices.values()].filter((t) => t > since).length
     state.status = s
@@ -248,13 +355,14 @@ export async function startCommand({ kotJump = 100 } = {}) {
 
   function health() {
     return {
-      app: 'smartserve-local', ok: !!(state.status.pg && state.status.api), startedAt: state.startedAt, port: cfg.port,
+      app: 'smartserve-local', ok: !!(state.status.pg && state.status.api), startedAt: state.startedAt, port: cfg.port, dev,
       addresses: lanAddresses().map((a) => a.ip), events: snap.events, downloadedAt: snap.downloadedAt,
       status: state.status, upload: state.upload, uploading: state.uploading,
     }
   }
 
   const uploadLine = () => {
+    if (dev) return 'TEST MODE - upload is off, nothing is ever sent to the cloud'
     if (!hasCloudApi(cfg)) return 'upload to the cloud is off (no anon key in config.json)'
     const pend = state.status.pending
     const head = pend === undefined ? '' : pend ? `${pend} change(s) not in the cloud yet. ` : 'cloud has everything. '
@@ -265,31 +373,46 @@ export async function startCommand({ kotJump = 100 } = {}) {
 
   let lastPrinted = ''
   let lastPrintedAt = 0
-  function render() {
+  const qrCache = { key: '', lines: null }
+  async function qrLines(base) {
+    if (qrCache.key !== base) {
+      qrCache.key = base
+      qrCache.lines = await terminalQrs([{ label: 'Captain / guest tablets', url: `${base}/` }, { label: 'Waiter phones', url: `${base}/waiter` }]).catch(() => null)
+    }
+    return qrCache.lines
+  }
+
+  async function render() {
     const s = state.status
     const ips = lanAddresses()
     const port = cfg.port === 80 ? '' : `:${cfg.port}`
     const L = []
     const bar = '='.repeat(74)
-    L.push(bar, ` JANU'S SMART SERVE - LOCAL SERVER (offline standby)            ${fmtTime(new Date())}`, bar)
+    L.push(bar, ` JANU'S SMART SERVE - LOCAL SERVER (${dev ? 'TEST MODE' : 'offline standby'})${' '.repeat(dev ? 18 : 12)}${fmtTime(new Date())}`, bar)
+    if (dev) L.push(` ${DEV_BANNER}`)
     for (const e of snap.events) L.push(` Event: ${eventLabel(e)}`)
-    L.push(` Data from the cloud: ${fmtDateTime(snap.downloadedAt)}`)
+    if (!snap.events.length) L.push(dev ? ' No events yet - run "node ss-local.mjs demo" in another window.' : ' No events.')
+    if (!dev) L.push(` Data from the cloud: ${fmtDateTime(snap.downloadedAt)}`)
+    else if (snap.standin) L.push(' Database: STAND-IN structure (not copied from the cloud) + ../db/*.sql')
     if (jumpNote) L.push(` ${jumpNote}`)
     L.push('')
+    let qr = null
     if (ips.length) {
       const base = `http://${ips[0].ip}${port}`
-      L.push(' OPEN THESE LINKS ON THE DEVICES (connected to the event Wi-Fi):')
+      L.push(` OPEN THESE LINKS ON THE DEVICES (connected to the ${dev ? 'same Wi-Fi as this laptop' : 'event Wi-Fi'}):`)
       L.push(`   Captain / guest tablets :  ${base}/`)
       L.push(`   Waiter phones           :  ${base}/waiter`)
       L.push(`   Desk (supervisor)       :  ${base}/supervisor`)
-      if (ips.length > 1) L.push(`   (this laptop also has ${ips.slice(1).map((a) => a.ip).join(', ')} - use the event router's one)`)
+      L.push(`   QR codes for staff      :  http://localhost${port}/qr  (open on this laptop's screen)`)
+      if (ips.length > 1) L.push(`   (this laptop also has ${ips.slice(1).map((a) => a.ip).join(', ')} - use the ${dev ? 'Wi-Fi' : "event router's"} one)`)
+      qr = await qrLines(base)
     } else {
       L.push(' !! This laptop is not connected to any network. Connect it to the event router')
       L.push('    (Wi-Fi or cable) - the links for the devices will then appear here.')
     }
     L.push('')
     L.push(' PRINT HUB: close its window, then double-click "Start Print Hub (Local)"')
-    L.push('   in the localmode folder (or: node printhub.mjs --server local).')
+    L.push('   in the localmode folder (or: node ss-local.mjs printhub).')
     if (phNote) L.push(`   ${phNote}`)
     L.push('')
     const k = s.kots === undefined ? '' : `   KOTs ${s.kots}   waiting to print ${s.to_print}   print failed ${s.print_failed}`
@@ -298,6 +421,13 @@ export async function startCommand({ kotJump = 100 } = {}) {
     L.push(` CLOUD   ${uploadLine()}`)
     L.push('')
     L.push(' Keep this window open and the laptop awake (lid open). Ctrl+C stops the server.')
+    // The QR codes only when the window is tall enough to show them with
+    // everything else (the panel is redrawn every 5 seconds).
+    if (qr) {
+      const rows = process.stdout.isTTY ? process.stdout.rows || 24 : Infinity
+      if (L.length + qr.length + 2 <= rows) L.push('', ...qr)
+      else L.push(` (Make this window taller to see QR codes here - or open http://localhost${port}/qr)`)
+    }
     const text = L.join('\n')
     if (process.stdout.isTTY) {
       process.stdout.write('\x1b[2J\x1b[H' + text + '\n')
@@ -315,6 +445,7 @@ export async function startCommand({ kotJump = 100 } = {}) {
   // ---------------------------------------------------------- background upload
   // Runs as a separate process so a problem there can never touch the service.
   function backgroundUpload() {
+    if (dev) return // test database: nothing ever goes to the cloud
     if (state.stopping || state.uploading || !hasCloudApi(cfg)) return
     state.uploading = true
     let out = ''
@@ -361,8 +492,8 @@ export async function startCommand({ kotJump = 100 } = {}) {
 
   logLine('server', `started on port ${cfg.port}, api ${state.apiPort}, db ${local.pgPort}`)
   await gather()
-  render()
-  statusTimer = setInterval(() => { gather().then(render, (e) => logLine('server', `status: ${e.message}`)) }, 5000)
+  await render()
+  statusTimer = setInterval(() => { gather().then(render).catch((e) => logLine('server', `status: ${e.message}`)) }, 5000)
   firstUpload = setTimeout(backgroundUpload, 20000)
   uploadTimer = setInterval(backgroundUpload, 60000)
   return new Promise(() => {}) // runs until Ctrl+C

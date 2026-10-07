@@ -18,18 +18,20 @@ const EVENT_COLS = `e.id::text as id, e.name, e.date::text as date, to_jsonb(e)-
 
 // One reader for the whole question loop (a new one per question would lose
 // lines that were already typed ahead).
-function lineReader() {
+// onClose: the answer when the input ends (none = stop with an error).
+function lineReader(onClose) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
   const queue = []
   let waiting = null
   let closed = false
+  const ended = () => (onClose !== undefined ? Promise.resolve(onClose) : Promise.reject(new UserError('No event was chosen.')))
   rl.on('line', (l) => { if (waiting) { const w = waiting; waiting = null; w.resolve(l) } else queue.push(l) })
-  rl.on('close', () => { closed = true; if (waiting) waiting.reject(new UserError('No event was chosen.')) })
+  rl.on('close', () => { closed = true; if (waiting) { const w = waiting; waiting = null; ended().then(w.resolve, w.reject) } })
   return {
     ask(question) {
       process.stdout.write(question)
       if (queue.length) return Promise.resolve(queue.shift())
-      if (closed) return Promise.reject(new UserError('No event was chosen.'))
+      if (closed) return ended()
       return new Promise((resolve, reject) => { waiting = { resolve, reject } })
     },
     close() { rl.close() },
@@ -44,13 +46,38 @@ export async function eventsById(cloud, ids) {
 // The operator picks the event(s) from the list of the coming days. The
 // choice is remembered in config.json and offered again (Enter keeps it), so
 // back-to-back events never download the wrong one by accident.
-export async function chooseEvents(cloud, cfg) {
+// Test mode (optional = true): real events are an extra, Enter = none (the
+// demo events come from "ss-local.mjs demo"), and the choice is not remembered.
+export async function chooseEvents(cloud, cfg, { optional = false } = {}) {
   const from = localDate(addDays(-1))
   const to = localDate(addDays(10))
   const { rows } = await cloud.query(`select ${EVENT_COLS} from public.events e where e.date between $1 and $2 order by e.date, e.name`, [from, to])
+  if (!rows.length && optional) {
+    console.log(`  No real events dated ${fmtDay(from)} to ${fmtDay(to)} in the cloud - fine for testing ("demo" makes test events).`)
+    return []
+  }
   if (!rows.length) {
     throw new UserError(`No events are dated between ${fmtDay(from)} and ${fmtDay(to)} in the cloud.\n` +
       'Check the event date in Event Manager, then run Prepare Event again.')
+  }
+  if (optional) {
+    console.log(`\nReal events from ${fmtDay(from)} to ${fmtDay(to)} (copied READ-ONLY, only if you want them):\n`)
+    rows.forEach((e, i) => {
+      const mode = e.service_mode === 'captain' ? 'captain service' : 'guest self-service'
+      console.log(`   ${String(i + 1).padStart(2)})  ${fmtDay(e.date)}   ${e.name.padEnd(28)}  ${mode.padEnd(18)}  ${e.multi_kitchen ? 'multi-kitchen' : ''}`)
+    })
+    const reader = lineReader('')
+    try {
+      for (;;) {
+        const a = (await reader.ask('\nType the number(s) of real events to copy as well (several: 1,2), or just press Enter for none: ')).trim()
+        if (!a) return []
+        const nums = a.split(/[\s,;]+/).filter(Boolean).map(Number)
+        if (nums.every((n) => Number.isInteger(n) && n >= 1 && n <= rows.length)) return [...new Set(nums)].map((n) => rows[n - 1])
+        console.log(`Please type a number from 1 to ${rows.length}, or press Enter for none.`)
+      }
+    } finally {
+      reader.close()
+    }
   }
   const remembered = rows.map((e, i) => (cfg.events.includes(e.id) ? i + 1 : 0)).filter(Boolean)
   console.log(`\nEvents from ${fmtDay(from)} to ${fmtDay(to)}:\n`)
@@ -120,6 +147,9 @@ function copyPlan(tables) {
 // Read everything from the cloud in one consistent snapshot (nothing local changes yet).
 export async function downloadEventData(cloud, eventIds, cloudTables) {
   const plan = copyPlan(cloudTables)
+  // Columns the cloud has, per table. A column that exists only on the laptop
+  // (test mode adds ../db/*.sql) keeps its default instead of getting NULL.
+  plan.cloudCols = Object.fromEntries([...cloudTables].map(([t, cols]) => [t, cols.map((c) => c.name)]))
   await cloud.query('begin isolation level repeatable read read only')
   try {
     for (const p of plan.copy) {
@@ -215,7 +245,8 @@ export async function applyData(db, plan, mediaMap, eventIds) {
     if (apply.length) await db.query(`truncate ${apply.map((p) => 'public.' + qi(p.table)).join(', ')} cascade`)
     for (const p of apply) {
       if (!p.n) continue
-      const cols = local.get(p.table).filter((c) => !c.generated).map((c) => qi(c.name)).join(', ')
+      const sent = plan.cloudCols?.[p.table] ? new Set(plan.cloudCols[p.table]) : null
+      const cols = local.get(p.table).filter((c) => !c.generated && (!sent || sent.has(c.name))).map((c) => qi(c.name)).join(', ')
       await db.query(`insert into public.${qi(p.table)} (${cols}) overriding system value
                       select ${cols} from json_populate_recordset(null::public.${qi(p.table)}, $1::json)`, [p.json])
     }

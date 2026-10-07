@@ -8,6 +8,11 @@
 //   node ss-local.mjs status                       what is prepared, is the server running
 //   node ss-local.mjs printhub [options]           Print Hub against the local server
 //
+// Testing before anything goes to the cloud (TEST MODE - never writes to the cloud):
+//   node ss-local.mjs prepare --dev [--force]      cloud structure (read only) + ../db/*.sql on the laptop
+//   node ss-local.mjs prepare --dev --standin      no cloud at all: dev/standin-schema.sql + ../db/*.sql
+//   node ss-local.mjs demo [--remove]              three demo events dated today (guest, captain, multi-kitchen)
+//
 // Exit codes (used by the launchers): 0 done/stopped, 2 something to fix by
 // the operator (do not restart), anything else an unexpected stop.
 
@@ -35,21 +40,27 @@ function numberFlag(name, def) {
   return n
 }
 
-const USAGE = 'Use: node ss-local.mjs prepare [--refresh] | start [--kot-jump N] | upload | status | printhub'
+const USAGE = 'Use: node ss-local.mjs prepare [--refresh] | prepare --dev [--standin] | demo [--remove] | start [--kot-jump N] | upload | status | printhub'
 
 try {
   let code = 0
   switch (cmd) {
     case 'prepare': {
-      only(['--refresh', '--force'])
+      only(['--refresh', '--force', '--dev', '--standin'])
       const { prepareCommand } = await import('./lib/prepare.mjs')
-      await prepareCommand({ refresh: flags.has('--refresh'), force: flags.has('--force') })
+      await prepareCommand({ refresh: flags.has('--refresh'), force: flags.has('--force'), dev: flags.has('--dev'), standin: flags.has('--standin') })
+      break
+    }
+    case 'demo': {
+      only(['--remove'])
+      const { demoCommand } = await import('./lib/demo.mjs')
+      await demoCommand({ remove: flags.has('--remove') })
       break
     }
     case 'start': {
       only(['--kot-jump'])
       const { startCommand } = await import('./lib/server.mjs')
-      await startCommand({ kotJump: numberFlag('--kot-jump', 100) })
+      await startCommand({ kotJump: numberFlag('--kot-jump', null) })
       break
     }
     case 'upload': {

@@ -65,10 +65,13 @@ export function logLine(name, text) {
 
 // ---------------------------------------------------------------- config.json
 
-export function loadConfig({ create = true } = {}) {
+// quiet: create config.json from the example and carry on (test database
+// from the stand-in schema needs no cloud settings at all).
+export function loadConfig({ create = true, quiet = false } = {}) {
   if (!fs.existsSync(P.config)) {
     if (!create) return null
     fs.copyFileSync(P.configExample, P.config)
+    if (quiet) return loadConfig({ create: false })
     throw new UserError(
       `A settings file was created:\n  ${P.config}\n\n` +
       'Open it (Mac: TextEdit, Windows: Notepad) and paste:\n' +
@@ -275,3 +278,9 @@ export function serverRunning(cfg) {
 export function isPrepared() {
   return fs.existsSync(P.local) && fs.existsSync(P.snapshot) && fs.existsSync(path.join(P.pgData, 'PG_VERSION'))
 }
+
+// "prepare --dev" makes a TEST database: test orders must never reach the
+// cloud, so upload, refresh and the server's background upload check this.
+export const isDevSnapshot = (snap) => snap?.mode === 'dev'
+
+export const DEV_BANNER = 'TEST MODE (prepare --dev): this laptop holds a test database. Nothing is ever sent to the cloud.'

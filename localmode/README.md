@@ -80,6 +80,7 @@ You need a Mac (Apple Silicon or Intel) or a Windows 10/11 laptop, with its char
 3. Test: double-click **Start Local Server**, open the captain link on one tablet that is on the same
    Wi-Fi, check the menu and pictures, then press **Ctrl+C** in the server window.
    **Do not place test orders** - the laptop would later send them to the cloud as real orders.
+   (To practise with orders, use test mode instead: `docs/TEST_ON_MAC.md`.)
 
 ---
 
@@ -99,6 +100,7 @@ Decide once, then switch **all** devices. Stay on Plan B until the event ends.
    orders taken so far and any last changes to the laptop. No internet at all? Skip this step - the
    laptop still has everything from Prepare Event (just not the orders taken on the cloud since).
 2. Double-click **Start Local Server**. Wait for the panel with the links and *Database OK API OK*.
+   For staff to scan the links: open `http://localhost:8080/qr` on the laptop screen.
 3. On **every** tablet and phone, open the browser and type the link from the panel (or your card):
    captains and guest tablets `http://192.168.1.10:8080/`, waiters `.../waiter`.
    **Captains and waiters sign in again** (same names and PINs). Guest tablets choose their table again.
@@ -172,18 +174,49 @@ Sync is **one way**: laptop -> cloud. Two-way sync is a later phase.
 
 ## For the technical team
 
-`ss-local.mjs` (Node 20+) with two npm packages: `embedded-postgres` (real Postgres 17 binaries:
-initdb, pg_ctl, postgres) and `pg`. PostgREST 13.0.5 is downloaded from GitHub into `bin/` by prepare.
+`ss-local.mjs` (Node 20+) with three npm packages: `embedded-postgres` (real Postgres 17 binaries:
+initdb, pg_ctl, postgres), `pg` and `qrcode`. PostgREST 13.0.5 is downloaded from GitHub into `bin/` by prepare.
 No Docker, no Supabase CLI.
 
 ```
 node ss-local.mjs prepare [--force]              full download (schema rebuilt, data, media, app)
 node ss-local.mjs prepare --refresh              data only, schema kept (guards unsent local changes)
-node ss-local.mjs start [--kot-jump N]           N defaults to 100, 0 = off
+node ss-local.mjs start [--kot-jump N]           N defaults to 100 (0 in test mode), 0 = off
 node ss-local.mjs upload [--all]                 --all re-sends every row (idempotent)
 node ss-local.mjs status
 node ss-local.mjs printhub [Print Hub options]   ../printhub/printhub.mjs --server local
+
+Test mode (try changes before they reach the cloud - step by step: ../docs/TEST_ON_MAC.md):
+node ss-local.mjs prepare --dev [--force]        cloud structure (read only) + ../db/*.sql on the laptop
+node ss-local.mjs prepare --dev --standin        no cloud at all: dev/standin-schema.sql + ../db/*.sql
+node ss-local.mjs demo [--remove]                three demo events dated today (logins: data/demo-logins.txt)
 ```
+
+- **Test mode** (`prepare --dev`): the cloud database connection is opened read-only
+  (`default_transaction_read_only`), only the anon key is optional, and you may copy real events or
+  none. After the cloud structure is built, every `../db/*.sql` file runs in name order on the
+  **laptop's** database: first as written (one transaction), and if that fails, statement by
+  statement with `begin`/`commit` left out, so Supabase-only lines (realtime publication, `notify
+  pgrst`, `auth.*`) are reported as skipped and the rest still applies. Results are in
+  `data/prepare-report.txt`. `snapshot.json` gets `"mode": "dev"`: `upload` and `prepare --refresh`
+  refuse, the server never uploads and shows TEST MODE, `start` re-copies the newest `../dist`
+  (rebuilding if the code changed) and does no KOT jump. A normal `prepare` replaces a test database
+  without uploading anything from it; `prepare --dev` stops if the laptop holds real orders not yet
+  in the cloud (unless `--force`).
+- `--standin` builds the database from `dev/standin-schema.sql` (an approximation of the live tables
+  before the multi-kitchen update) + `../db/*.sql`, with no cloud connection and no `config.json`
+  needed. It warns that the real structure must be tested with `prepare --dev` before an event.
+- `demo` (test mode only) deletes and recreates, in one transaction, three events dated today with
+  fixed ids (`...de301` guest self-service, `...de302` captain service, `...de303` captain
+  multi-kitchen with six kitchens on the Virtual Printers `127.0.0.1:9101-9106`), their menus,
+  tables, captains, waiters, supervisor `Demo Supervisor`/9090 and help items; child rows get ids
+  derived from the event, so cached sessions on tablets stay valid. Only columns that exist are
+  written. It adds `admin`/9999 if there is no `admin` login. `demo --remove` deletes them, children
+  first.
+- The server also answers `GET /ss-local.json` (`{ local: true, mode, startedAt, port, events }`,
+  CORS open: the app's "use the laptop server" check) and `GET /qr` (big QR codes of the tablet,
+  waiter and desk links, for the desk screen). The panel shows the two main links as terminal QR
+  codes when the window is tall enough (npm package `qrcode`; without it everything still works).
 
 - **Schema** without pg_dump: catalog introspection of `public` (enums, domains, composite types,
   sequences, tables with defaults/identity/generated columns, constraints, indexes, views, functions,
@@ -209,7 +242,7 @@ node ss-local.mjs printhub [Print Hub options]   ../printhub/printhub.mjs --serv
   (`DYLD_FALLBACK_LIBRARY_PATH` on macOS, DLLs copied next to `postgrest.exe` on Windows). Windows also
   needs the Visual C++ runtime for Postgres itself (prepare checks and opens Microsoft's installer).
 - **Files**: `data/` (database `data/pg`, media, logs, snapshot.json, local.json, last-upload.json,
-  prepare-report.txt, schema.sql), `bin/` (PostgREST), `app/` (copy of `dist/`). All git-ignored.
+  prepare-report.txt, schema.sql, demo-logins.txt), `bin/` (PostgREST), `app/` (copy of `dist/`). All git-ignored.
   To start from scratch: stop the server, delete `data/`, run Prepare Event.
 - `--force` on prepare discards local changes that could not be uploaded. Use only when sure.
 - Crash recovery: on start, a leftover Postgres from an earlier run is stopped cleanly, a stale lock

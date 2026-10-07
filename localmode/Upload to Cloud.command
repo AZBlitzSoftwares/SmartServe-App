@@ -15,7 +15,7 @@ if ! command -v node >/dev/null 2>&1; then
   read -r -p "Press Enter to close this window..."
   exit 1
 fi
-if [ ! -d node_modules/embedded-postgres ] || [ ! -d node_modules/pg ]; then
+if [ ! -d node_modules/embedded-postgres ] || [ ! -d node_modules/pg ] || [ ! -d node_modules/qrcode ]; then
   echo "First run: installing the local server's parts (needs internet, about a minute)..."
   if ! npm install --omit=dev --no-audit --no-fund; then
     echo

@@ -202,7 +202,7 @@ const rolesSql = (apiPassword) => [
   'grant anon, authenticated, service_role to authenticator',
 ]
 
-const setupStatements = () => [
+export const setupStatements = () => [
   { kind: 'setup', name: 'schema extensions', sql: 'create schema if not exists extensions' },
   { kind: 'setup', name: 'extension uuid-ossp', sql: 'create extension if not exists "uuid-ossp" schema extensions' },
   { kind: 'setup', name: 'extension pgcrypto', sql: 'create extension if not exists pgcrypto schema extensions' },
@@ -211,7 +211,7 @@ const setupStatements = () => [
   { kind: 'setup', name: 'table ss_local.uploaded', sql: 'create table if not exists ss_local.uploaded (tbl text not null, id text not null, hash text not null, primary key (tbl, id))' },
 ]
 
-const grantStatements = () => [
+export const grantStatements = () => [
   'grant usage on schema public, extensions to anon, authenticated, service_role',
   'grant all on all tables in schema public to anon, authenticated, service_role',
   'grant all on all sequences in schema public to anon, authenticated, service_role',
@@ -221,7 +221,7 @@ const grantStatements = () => [
 // Run statements; whatever fails is tried again after the others, until
 // nothing more succeeds. That settles dependencies without sorting them
 // (a view that uses a function, a default that calls a function...).
-async function runUntilSettled(db, list) {
+export async function runUntilSettled(db, list) {
   let pending = list
   let relaxed = false
   for (;;) {
@@ -243,8 +243,8 @@ async function runUntilSettled(db, list) {
   }
 }
 
-// Recreate the local database "smartserve" from scratch and build the schema.
-export async function buildLocalDatabase(local, schema, cloudLabel) {
+// Drop and recreate the local database "smartserve" (empty) and the API roles.
+export async function freshDatabase(local) {
   const admin = await connectLocal(local, 'postgres')
   try {
     await admin.query(`drop database if exists ${DB_NAME} with (force)`)
@@ -253,10 +253,25 @@ export async function buildLocalDatabase(local, schema, cloudLabel) {
   } finally {
     await admin.end().catch(() => {})
   }
-
   const db = await connectLocal(local)
   try {
     await db.query(`alter database ${DB_NAME} set search_path = "$user", public, extensions`)
+  } finally {
+    await db.end().catch(() => {})
+  }
+}
+
+// Every table/function made later (../db/*.sql in test mode) is open to the app too.
+export async function grantAll(db) {
+  for (const s of grantStatements()) await db.query(s.sql)
+}
+
+// Recreate the local database "smartserve" from scratch and build the schema.
+export async function buildLocalDatabase(local, schema, cloudLabel) {
+  await freshDatabase(local)
+
+  const db = await connectLocal(local)
+  try {
     await db.query('set search_path = "$user", public, extensions')
     const all = [...setupStatements(), ...schema.statements]
     const failed = await runUntilSettled(db, all)

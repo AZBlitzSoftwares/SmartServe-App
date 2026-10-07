@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   P, UserError, loadConfig, loadLocal, readJson, writeJson, isPrepared, serverRunning, requireCloudApi,
-  eventLabel, fmtDateTime, fmtAgo,
+  eventLabel, fmtDateTime, fmtAgo, isDevSnapshot, DEV_BANNER,
 } from './common.mjs'
 import { refuseRoot, pgBins, withPostgres, pgAnswers, connectLocal, postgrestPath, PGRST_VERSION } from './runtime.mjs'
 import { uploadAll, cloudAnswers, describeUpload, lastUpload } from './upload.mjs'
@@ -16,8 +16,13 @@ export async function statusCommand() {
   if (!snap || !isPrepared()) {
     console.log('Nothing has been prepared on this laptop yet (run "Prepare Event").')
   } else {
+    if (isDevSnapshot(snap)) {
+      console.log(DEV_BANNER)
+      console.log(`Test database: ${snap.standin ? 'STAND-IN structure' : `cloud structure (read only, ${fmtDateTime(snap.downloadedAt)})`} + ${(snap.dbFiles || []).map((f) => `${f.file} ${f.ok ? 'OK' : 'WITH ERRORS'}`).join(', ') || 'no ../db files'}`)
+    }
     for (const e of snap.events) console.log(`Event:       ${eventLabel(e)}`)
-    console.log(`Downloaded:  ${fmtDateTime(snap.downloadedAt)} (${fmtAgo(Date.now() - Date.parse(snap.downloadedAt))}, ${snap.kind === 'refresh' ? 'refresh' : 'full prepare'})`)
+    if (!snap.events.length) console.log('Event:       none' + (isDevSnapshot(snap) ? ' (node ss-local.mjs demo makes three demo events)' : ''))
+    if (!isDevSnapshot(snap)) console.log(`Downloaded:  ${fmtDateTime(snap.downloadedAt)} (${fmtAgo(Date.now() - Date.parse(snap.downloadedAt))}, ${snap.kind === 'refresh' ? 'refresh' : 'full prepare'})`)
     const c = snap.rowCounts || {}
     console.log(`Downloaded rows: ${Object.entries(c).filter(([, n]) => n).map(([t, n]) => `${t} ${n}`).join(', ')}`)
     if (snap.kitchens?.length) console.log(`Kitchens:    ${snap.kitchens.map((k) => `${k.name} ${k.prefix}-${String(k.kot_seq).padStart(3, '0')}`).join(', ')} (last KOT at download)`)
@@ -35,7 +40,7 @@ export async function statusCommand() {
     console.log(`Local server: RUNNING since ${fmtDateTime(h.startedAt)}`)
     for (const ip of h.addresses) console.log(`              http://${ip}${port}/   /waiter   /supervisor`)
     console.log(`              database ${s.pg ? 'OK' : 'DOWN'}, API ${s.api ? 'OK' : 'DOWN'}, orders ${s.orders ?? '-'}, KOTs ${s.kots ?? '-'}, waiting to print ${s.to_print ?? '-'}, print failed ${s.print_failed ?? '-'}`)
-    console.log(`              not yet in the cloud: ${s.pending ?? '?'} change(s)`)
+    console.log(h.dev ? '              TEST MODE: nothing is sent to the cloud' : `              not yet in the cloud: ${s.pending ?? '?'} change(s)`)
   } else {
     console.log('Local server: not running')
   }
@@ -47,10 +52,16 @@ export async function statusCommand() {
 export async function uploadCommand({ background = false, all = false } = {}) {
   refuseRoot()
   const cfg = loadConfig()
-  requireCloudApi(cfg)
   const local = loadLocal()
   const snap = readJson(P.snapshot, null)
   if (!isPrepared() || !snap) throw new UserError('Nothing has been prepared on this laptop, so there is nothing to upload.')
+  if (!isDevSnapshot(snap)) requireCloudApi(cfg)
+  if (isDevSnapshot(snap)) {
+    // Test orders must never reach the cloud.
+    if (background) { console.log('@@RESULT ' + JSON.stringify({ at: new Date().toISOString(), ok: true, offline: false, sent: {}, total: 0, failedCount: 0, dev: true })); return 0 }
+    throw new UserError('This laptop holds a TEST database (prepare --dev). Upload is switched off, so test orders never reach the cloud.\n' +
+      'For a real event run "Prepare Event" (without --dev) first.')
+  }
   const events = snap.events.map((e) => e.id)
   const result = (r) => { if (background) console.log('@@RESULT ' + JSON.stringify(r)); return r }
 

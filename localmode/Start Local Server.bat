@@ -7,6 +7,7 @@ where node >nul 2>nul
 if errorlevel 1 goto nonode
 if not exist "node_modules\embedded-postgres\" goto install
 if not exist "node_modules\pg\" goto install
+if not exist "node_modules\qrcode\" goto install
 goto run
 
 :install
