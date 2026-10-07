@@ -28,6 +28,8 @@ function lazyPage(load, name) {
 
 const SupervisorApp = lazyPage(() => import('./pages/SupervisorApp'), 'supervisor')
 const WaiterApp = lazyPage(() => import('./pages/WaiterApp'), 'waiter')
+// Smart Serve Maestro: the kitchen barker's big screen.
+const KitchenDisplay = lazyPage(() => import('./maestro/KitchenDisplay'), 'kitchen')
 
 function PageLoading() {
   return (
@@ -48,6 +50,8 @@ function App() {
             <Route path="/supervisor" element={<SupervisorApp />} />
             {/* Kitchen waiters, on their own phones. Multi-kitchen events only. */}
             <Route path="/waiter" element={<WaiterApp />} />
+            {/* Kitchen barkers, on the big screen at the pass. Maestro events only. */}
+            <Route path="/kitchen" element={<KitchenDisplay />} />
             <Route path="/*" element={<GuestApp />} />
           </Routes>
         </Suspense>

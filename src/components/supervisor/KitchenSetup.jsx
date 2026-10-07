@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import MaestroSetup, { MaestroPreService } from '../../maestro/MaestroSetup'
 import { supabase } from '../../lib/supabase'
 
 /* Kitchens set-up for a Captain + Multi-Kitchen event.
@@ -222,6 +223,7 @@ export default function KitchenSetup({ eventData, onEventChange }) {
   const [waiters, setWaiters]   = useState([])
   const [now, setNow]           = useState(() => Date.now())
   const loadSeq = useRef(0)
+  const [maestroNonce, setMaestroNonce] = useState(0)
 
   useEffect(() => { load() }, [eventId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -355,15 +357,24 @@ export default function KitchenSetup({ eventData, onEventChange }) {
     // Keyed on the event so open forms and running test prints never carry over to another event
     <div key={eventId}>
       <style>{CSS}</style>
-      <Readiness checks={checks} onReload={load} />
+      {/* ss-maestro: Maestro events have their own pre-service check (barkers
+          instead of waiters, courses, printers confirmed by the Print Hub) */}
+      {eventData?.maestro
+        ? <MaestroPreService eventData={eventData} nonce={maestroNonce} />
+        : <Readiness checks={checks} onReload={load} />}
       <ChairsCard eventData={eventData} onEventChange={onEventChange} />
-      <KitchensSection eventId={eventId} kitchens={sortedKitchens} setKitchens={setKitchens}
+      <KitchensSection eventId={eventId} maestro={!!eventData?.maestro} kitchens={sortedKitchens} setKitchens={setKitchens}
         cats={cats} setCats={setCats} waiters={waiters} setWaiters={setWaiters}
         defaultKitchen={defaultKitchen} now={now} />
       <RoutingSection cats={cats} setCats={setCats} kitchens={sortedKitchens}
         itemCounts={itemCounts} defaultKitchen={defaultKitchen} />
+      {eventData?.maestro && (
+        <MaestroSetup eventData={eventData} onEventChange={onEventChange} onChanged={() => setMaestroNonce(n => n + 1)}
+          refreshKey={sortedKitchens.map(k => [k.id, k.name, k.prefix, k.is_active, k.is_default].join(':')).join('|')
+            + '#' + cats.map(c => c.id + ':' + (c.kitchen_id || '')).join('|')} />
+      )}
       <CaptainsSection captains={captains} setCaptains={setCaptains} tableCount={tableCount} />
-      <WaitersSection waiters={waiters} setWaiters={setWaiters} kitchens={sortedKitchens} />
+      {!eventData?.maestro && <WaitersSection waiters={waiters} setWaiters={setWaiters} kitchens={sortedKitchens} />}
     </div>
   )
 }
@@ -485,8 +496,10 @@ function ChairsCard({ eventData, onEventChange }) {
     <div style={card} id="ks-chairs">
       <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
         <div style={{ flex:'1 1 280px', minWidth:0 }}>
-          <SectionHead step={1} title="Chairs per table"
-            sub={'Captains pick chairs 1 to ' + (valid ? v : current) + ' when they take an order. '
+          <SectionHead step={1} title={eventData?.maestro ? 'Covers per table' : 'Chairs per table'}
+            sub={(eventData?.maestro
+                ? 'Captains take the order cover by cover, C1 to C' + (valid ? v : current) + '. '
+                : 'Captains pick chairs 1 to ' + (valid ? v : current) + ' when they take an order. ')
               + (eventData?.number_of_tables ? 'Tables at this event: ' + eventData.number_of_tables + ' (change under Control › Tables).' : '')} />
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, marginBottom:12 }}>
@@ -543,7 +556,7 @@ function validateKitchen(f, kitchens) {
   return e
 }
 
-function KitchensSection({ eventId, kitchens, setKitchens, setCats, waiters, setWaiters, cats, defaultKitchen, now }) {
+function KitchensSection({ eventId, maestro, kitchens, setKitchens, setCats, waiters, setWaiters, cats, defaultKitchen, now }) {
   const [form, setForm]       = useState(null)
   const [tried, setTried]     = useState(false)
   const [saving, setSaving]   = useState(false)
@@ -763,7 +776,9 @@ function KitchensSection({ eventId, kitchens, setKitchens, setCats, waiters, set
   return (
     <div style={card} id="ks-kitchens">
       <SectionHead step={2} title="Kitchens & printers"
-        sub="One kitchen per cuisine. Each order is split into one KOT per kitchen and printed on that kitchen's printer by the Print Hub on the desk laptop."
+        sub={maestro
+          ? "One kitchen per cuisine, plus a First Course and a Desserts kitchen if you like. Every firing prints one KOT per cover, per kitchen and per barker, on that kitchen's printer, through the Print Hub on the desk laptop."
+          : "One kitchen per cuisine. Each order is split into one KOT per kitchen and printed on that kitchen's printer by the Print Hub on the desk laptop."}
         right={!form && <button onClick={() => openAdd('')} style={btn}>+ Add kitchen</button>} />
 
       {msg && <Banner tone={msg.tone} onClose={() => setMsg(null)}>{msg.text}</Banner>}
@@ -799,7 +814,7 @@ function KitchensSection({ eventId, kitchens, setKitchens, setCats, waiters, set
             tried={tried} saving={saving} error={formErr} onSave={saveForm} onCancel={() => setForm(null)}
             defaultKitchen={defaultKitchen} />
         ) : (
-          <KitchenRow key={k.id} k={k} first={idx === 0} last={idx === kitchens.length - 1}
+          <KitchenRow key={k.id} k={k} maestro={maestro} first={idx === 0} last={idx === kitchens.length - 1}
             isDefault={defaultKitchen?.id === k.id} now={now} test={tests[k.id]}
             sharedWith={k.printer_ip ? kitchens.filter(o => o.id !== k.id && o.printer_ip === k.printer_ip) : []}
             confirm={confirm?.id === k.id ? confirm : null} counts={ownCounts(k.id)}
@@ -916,7 +931,7 @@ function KitchenForm({ form, setField, setForm, kitchens, tried, saving, error, 
   )
 }
 
-function KitchenRow({ k, first, last, isDefault, now, test, sharedWith, confirm, counts,
+function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith, confirm, counts,
   onMove, onEdit, onTest, onMakeDefault, onAskDelete, onCancelDelete, onDelete, onActive }) {
   const hasIp = IPV4.test(String(k.printer_ip || '').trim())
   const st = k.printer_status ? (PRINTER[k.printer_status] || PRINTER.unknown) : null
@@ -947,14 +962,16 @@ function KitchenRow({ k, first, last, isDefault, now, test, sharedWith, confirm,
             <div style={{ display:'flex', alignItems:'center', gap:7, flexWrap:'wrap' }}>
               <span style={{ fontSize:16, fontWeight:900, color: k.is_active ? 'var(--ink)' : '#9CA3AF' }}>{k.name}</span>
               <span title="KOT prefix and the next KOT number" style={{ fontSize:11, fontWeight:900, letterSpacing:'1px', borderRadius:6,
-                padding:'2px 7px', background:'#F3EEF8', color:'var(--ink2)' }}>{k.prefix}-{String((k.kot_seq || 0) + 1).padStart(3, '0')}</span>
+                padding:'2px 7px', background:'#F3EEF8', color:'var(--ink2)' }}>{maestro
+                  ? `${k.prefix}-A ${String((k.kot_seq || 0) + 1).padStart(3, '0')}`
+                  : `${k.prefix}-${String((k.kot_seq || 0) + 1).padStart(3, '0')}`}</span>
               {isDefault && <span style={{ fontSize:10, fontWeight:900, letterSpacing:'0.4px', borderRadius:999,
                 padding:'2px 8px', background:'#FFF7ED', color:'#C2410C', border:'1px solid #FED7AA' }}>DEFAULT</span>}
               {!k.is_active && <span style={{ fontSize:10, fontWeight:900, letterSpacing:'0.4px', borderRadius:999,
                 padding:'2px 8px', background:'#F3F4F6', color:'#6B7280', border:'1px solid #E5E7EB' }}>OFF</span>}
             </div>
             <div style={{ fontSize:11.5, color:'var(--ink2)', fontWeight:600, marginTop:2 }}>
-              {plural(counts.cats, 'category', 'categories')} · {plural(counts.waiters, 'waiter')}
+              {plural(counts.cats, 'category', 'categories')}{maestro ? '' : ' · ' + plural(counts.waiters, 'waiter')}
             </div>
           </div>
 

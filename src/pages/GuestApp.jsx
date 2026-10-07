@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { supabase } from '../lib/supabase'
 import { getPendingOrders, clearOrder } from '../lib/offlineQueue'
 import SetupScreen from '../components/guest/SetupScreen'
@@ -25,6 +25,11 @@ import {
   clearGuestKeys, clearCaptainKeys, rememberMode, rememberedMode,
 } from '../components/guest/deviceEntry'
 
+
+// Smart Serve Maestro (course-paced multi-kitchen events): the captain's
+// own screens. Loaded only when a captain signs in to a Maestro event, so
+// guest tablets and other captain events never download it.
+const MaestroCaptain = lazy(() => import('../maestro/MaestroCaptain'))
 
 // Two back presses within this window on the Welcome screen open the exit dialog.
 const EXIT_DOUBLE_PRESS_MS = 3000
@@ -1023,6 +1028,42 @@ export default function GuestApp() {
     <SetupScreen onSetupComplete={handleSetupComplete}
       currentTableNumber={tableNumber} currentEventId={eventData?.id}
       onSwitchToCaptain={toCaptainSignIn} />
+  )
+
+  // ss-maestro: a captain at a Maestro event works only on the Maestro
+  // screens (Take order + Course board); the grid, menu and Genie of the
+  // other captain modes are never shown.
+  if (captain && eventData?.maestro && ['captaintable', 'menu', 'genie', 'status'].includes(appState)) return (
+    <>
+      <Suspense fallback={<div style={{ minHeight:'100vh', background:'#F6F4EF' }} />}>
+        <MaestroCaptain eventData={eventData} captain={captain} onSwitchCaptain={switchCaptain}
+          onChat={() => setChatOpen(true)} chatUnread={chatUnread} />
+      </Suspense>
+      {/* The same chat with the control desk as every captain event. The
+          launcher is the Desk button in the top bar, so nothing floats over
+          the Fire bar at the bottom. */}
+      <CaptainChat eventData={eventData} captain={captain}
+        minimized={!chatOpen} unread={chatUnread} hidePill bottomOffset={16}
+        onToggle={() => setChatOpen(o => !o)} />
+      {chatToast && (
+        <div onClick={() => { setChatToast(null); setChatOpen(true) }}
+          style={{ position:'fixed', top:0, left:0, right:0, zIndex:300,
+            background:'#1A0A0A', borderBottom:'3px solid #E8890C',
+            padding:'12px 16px', display:'flex', alignItems:'center', gap:12,
+            cursor:'pointer', boxShadow:'0 6px 24px rgba(0,0,0,0.5)' }}>
+          <span style={{ fontSize:26 }}>💬</span>
+          <span style={{ flex:1, minWidth:0 }}>
+            <span style={{ display:'block', color:'#E8890C', fontSize:11,
+              fontWeight:900, letterSpacing:'0.5px' }}>CONTROL DESK</span>
+            <span style={{ display:'block', color:'#fff', fontSize:14, fontWeight:700,
+              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {chatToast.body}
+            </span>
+          </span>
+          <span style={{ flexShrink:0, color:'rgba(255,255,255,0.55)', fontSize:11, fontWeight:700 }}>Tap to reply</span>
+        </div>
+      )}
+    </>
   )
 
   if (appState === 'captaintable' && captain) return (

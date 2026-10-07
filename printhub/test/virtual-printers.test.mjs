@@ -285,6 +285,7 @@ test('reading a slip back, and the one-line terminal summary', () => {
     kotNo: 'IT-014',
     table: '8',
     chairs: '2, 3',
+    cover: null,
     backup: false,
   });
   const long = read(order('Slow Food Live Counter and Grill Station'));
@@ -306,6 +307,16 @@ test('reading a slip back, and the one-line terminal summary', () => {
   assert.equal(slipLine(9101, job), '07:42:05 PM  :9101  ITALIAN           KOT IT-014      T8  chairs 2, 3');
   const cancel = { at, decoded: decodeEscPos(buildKot(order('Arabic', { kind: 'cancel', kot_no: 'AR-002' }), { backup: true })) };
   assert.match(slipLine(9102, cancel), /:9102 {2}ARABIC +CANCEL AR-002 +T8 {2}chairs 2, 3 {2}\(BACKUP PRINTER\)$/);
+
+  // Smart Serve Maestro: one cover per KOT, "KOT AS-A 014" on its own line
+  const ms = { kind: 'order', kitchen_name: 'Asian', kot_no: 'AS-A 014', table_number: 7, chairs: [3], cover_no: 3,
+    barker: 'A', barker_name: 'Rohit', course: 'Starters', firing_no: 2, items: [{ name: 'Dim Sum', qty: 1 }] };
+  const mr = read(ms);
+  assert.equal(mr.kitchen, 'ASIAN');
+  assert.equal(mr.kotNo, 'AS-A 014');
+  assert.equal(mr.table, '7');
+  assert.equal(mr.cover, '3');
+  assert.match(slipLine(9103, { at, decoded: decodeEscPos(buildKot(ms)) }), /:9103 {2}ASIAN +KOT AS-A 014 +T7 {2}C3$/);
 });
 
 test('command line: --kitchens, --ports, old positional ports, --web', () => {

@@ -29,7 +29,7 @@ create table table_carts (id uuid primary key default gen_random_uuid(), event_i
 create table chat_messages (id uuid primary key default gen_random_uuid(), event_id uuid references events(id) on delete cascade, captain_id uuid references captains(id), sender text, sender_name text, body text,
   read_by_captain boolean default false, read_by_supervisor boolean default false, created_at timestamptz default now());
 create table sos_requests (id uuid primary key default gen_random_uuid(), event_id uuid references events(id) on delete cascade, table_id uuid references tables(id), captain_id uuid references captains(id), waiter_id uuid references waiters(id),
-  type text, status text default 'open', assigned_at timestamptz, acknowledged_at timestamptz, resolved_at timestamptz, created_at timestamptz default now());
+  type text, request_type text, table_number int, status text default 'open', assigned_at timestamptz, acknowledged_at timestamptz, resolved_at timestamptz, created_at timestamptz default now());
 create table sos_request_items (id uuid primary key default gen_random_uuid(), sos_request_id uuid references sos_requests(id) on delete cascade, item_name text, quantity int);
 create table help_items (id uuid primary key default gen_random_uuid(), event_id uuid, name text, has_quantity boolean, is_active boolean default true, sort_order int);
 create table feedback (id uuid primary key default gen_random_uuid(), event_id uuid, order_id uuid, table_number int, rating int, food_rating int, service_rating int, guest_name text, guest_mobile text, comment text, created_at timestamptz default now());

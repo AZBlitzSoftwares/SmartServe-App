@@ -37,7 +37,8 @@ const STATUS = {
 
 export default function TableManager({ eventData, onEventChange }) {
   // Waiters first: the list that changes during an event
-  const [view, setView] = useState('waiters')
+  // ss-maestro: no waiter phones on a Maestro event (stewards need no device), so it opens on its set-up
+  const [view, setView] = useState(eventData?.maestro ? 'kitchens' : 'waiters')
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(null)
@@ -159,12 +160,12 @@ export default function TableManager({ eventData, onEventChange }) {
       </div>
 
       <div style={{ display:'flex', gap:8, marginBottom:14 }}>
-        {[['waiters','Waiters'],
+        {[...(eventData?.maestro ? [] : [['waiters','Waiters']]),
           // Only on captain events. On a self-service event there are no
           // captains, and an always-visible empty tab invites someone to fill it.
           ...(eventData?.service_mode === 'captain' ? [['captains','Captains']] : []),
           // Multi-kitchen set-up: kitchens, printers, menu routing, captain tables, waiter kitchens.
-          ...(eventData?.multi_kitchen ? [['kitchens','Kitchens']] : []),
+          ...(eventData?.multi_kitchen ? [['kitchens', eventData?.maestro ? 'Maestro set-up' : 'Kitchens']] : []),
           ['tables','Tables'],['help','Help'],['settings','Settings']].map(([v,label]) => (
           <button key={v} onClick={() => setView(v)}
             style={{ flex:1, padding:'9px 4px', borderRadius:10, fontSize:13, fontWeight:700,

@@ -321,6 +321,62 @@ function buildTest(job, { printer, now }) {
   return r.toBuffer();
 }
 
+// ---------------------------------------------------------------------------
+// Smart Serve Maestro: one KOT per cover, per kitchen, per barker
+// ---------------------------------------------------------------------------
+
+const isMaestro = (job) => job && job.cover_no != null && job.cover_no !== '';
+
+// KITCHEN / KOT AS-A 014 / Barker A - Rohit, then T7 - C3 big, course, firing.
+function maestroHead(r, job, backup, now) {
+  r.init();
+  r.align('center').bold(true).size(2);
+  const kname = String(job.kitchen_name || 'KITCHEN').toUpperCase();
+  for (const l of wrap(kname, WIDTH / 2)) r.line(l);
+  r.size(1).bold(false);
+  if (backup) r.bold(true).reverse(true).line('PRINTED ON BACKUP PRINTER (main printer down)').reverse(false).bold(false);
+  if (job.is_reprint) r.bold(true).reverse(true).line('  REPRINT - CHECK BEFORE COOKING  ').reverse(false).bold(false);
+  if (job.is_remake || job.priority) r.bold(true).size(2).reverse(true).line(' REMAKE - PRIORITY ').reverse(false).size(1).bold(false);
+  r.bold(true).size(2).line(job.kot_no ? `KOT ${job.kot_no}` : 'KOT').size(1).bold(false);
+  if (job.barker) r.line(`Barker ${String(job.barker).toUpperCase()}${job.barker_name ? ' - ' + job.barker_name : ''}`);
+  r.align('left').dashes();
+  const tc = `T${job.table_number ?? '?'} - C${job.cover_no}`;
+  r.align('center').bold(true).size(tc.length <= WIDTH / 4 ? 4 : 3).line(tc).size(1);
+  if (job.course) r.size(2).line(`COURSE: ${String(job.course).toUpperCase()}`).size(1);
+  r.bold(false).align('left');
+  r.line(leftRight(`Fired ${formatTime(toDate(job.fired_at || job.created_at, now))}`, job.firing_no ? `Firing #${job.firing_no}` : ''));
+  if (job.captain_name) r.line(leftRight('Table captain', String(job.captain_name)));
+  r.dashes();
+}
+
+function buildMaestro(job, { backup, now }) {
+  const r = new Receipt();
+  const items = parseItems(job.items);
+  maestroHead(r, job, backup, now);
+  itemLines(r, items, { big: true });
+  r.dashes();
+  r.bold(true).size(1, 2).line(leftRight(`Plates: ${totalQty(items)}`, `Cover: T${job.table_number ?? '?'}-C${job.cover_no}`)).size(1).bold(false);
+  footer(r, job, now);
+  return r.toBuffer();
+}
+
+function buildMaestroCancel(job, { backup, now }) {
+  const r = new Receipt();
+  const items = parseItems(job.items);
+  const banner = () => r.align('center').bold(true).size(2).reverse(true).line('*** CANCELLED ***').reverse(false);
+  maestroHead(r, { ...job, is_remake: false, priority: false }, backup, now);
+  banner();
+  r.line('DO NOT PREPARE / DISPATCH').size(1).bold(false).align('left');
+  r.dashes();
+  itemLines(r, items, { big: false });
+  r.dashes();
+  r.line(leftRight(`Plates cancelled: ${totalQty(items)}`, `Cover: T${job.table_number ?? '?'}-C${job.cover_no}`));
+  banner();
+  r.size(1).bold(false).align('left');
+  footer(r, job, now);
+  return r.toBuffer();
+}
+
 /**
  * Build the printer bytes for one KOT.
  * @param job      a row from hub_claim_kots (kind: order | cancel | test)
@@ -330,8 +386,8 @@ function buildTest(job, { printer, now }) {
 export function buildKot(job, { printer = '', backup = false, now = new Date() } = {}) {
   const kind = job?.kind || 'order';
   if (kind === 'test') return buildTest(job, { printer, now });
-  if (kind === 'cancel') return buildCancel(job, { backup, now });
-  return buildOrder(job, { backup, now });
+  if (kind === 'cancel') return isMaestro(job) ? buildMaestroCancel(job, { backup, now }) : buildCancel(job, { backup, now });
+  return isMaestro(job) ? buildMaestro(job, { backup, now }) : buildOrder(job, { backup, now });
 }
 
 // ---------------------------------------------------------------------------

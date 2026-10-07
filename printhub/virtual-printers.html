@@ -341,7 +341,7 @@ button:focus-visible { outline: 2px solid var(--marigold); outline-offset: 2px; 
     meta.append(el('span', 't', fmtTime(s.at)));
     const what = s.kind === 'test' ? 'Test print' : (s.kind === 'cancel' ? 'Cancelled ' : 'KOT ') + (s.kotNo || '');
     meta.append(el('span', 'what ' + s.kind, what.trim()));
-    if (s.table) meta.append(el('span', 'tbl', 'Table ' + s.table));
+    if (s.table) meta.append(el('span', 'tbl', 'Table ' + s.table + (s.cover ? ' · C' + s.cover : '')));
     if (s.backup) meta.append(el('span', 'pill backup', 'Backup'));
     meta.append(el('span', 'pill new', 'New'));
     item.append(meta);

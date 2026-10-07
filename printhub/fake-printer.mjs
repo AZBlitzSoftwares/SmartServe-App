@@ -204,7 +204,7 @@ export function describeSlip(decoded) {
       if (started) break;
       continue;
     }
-    if (l.w >= 2 && l.align === 'center' && !l.reverse) {
+    if (l.w >= 2 && l.align === 'center' && !l.reverse && !/^KOT\b/.test(t)) {
       started = true;
       if (t !== 'TEST PRINT') head.push(t);
     } else break;
@@ -216,13 +216,15 @@ export function describeSlip(decoded) {
     }
     return null;
   };
-  const kot = find(/^KOT\s+(\S+)\s+\d\d:\d\d [AP]M$/);
+  // multi-kitchen: "KOT IT-014   08:42 PM"; Smart Serve Maestro: "KOT AS-A 014" on its own line
+  const kot = find(/^KOT\s+(\S+)\s+\d\d:\d\d [AP]M$/) || find(/^KOT\s+(\S+(?: \d+)?)$/);
   return {
     kind,
     kitchen: head.join(' ') || null,
     kotNo: kot,
-    table: find(/^TABLE\s+(.+)$/),
+    table: find(/^TABLE\s+(.+)$/) || find(/^T(\d+) - C\d+$/),
     chairs: find(/^CHAIRS?\s+(.+)$/),
+    cover: find(/^T\d+ - C(\d+)$/),
     backup: texts.some((t) => t.startsWith('PRINTED ON BACKUP PRINTER')),
   };
 }
@@ -243,6 +245,7 @@ export function slipLine(port, job, info = describeSlip(job.decoded)) {
     what.padEnd(14),
     info.table ? `T${info.table}` : '',
     info.chairs ? `chairs ${info.chairs}` : '',
+    info.cover ? `C${info.cover}` : '',
     info.backup ? '(BACKUP PRINTER)' : '',
   ];
   return parts.filter(Boolean).join('  ');

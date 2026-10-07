@@ -17,6 +17,10 @@ export const UPLOAD_TABLES = [
   ['orders', EVENT],
   ['order_items', 'order_id in (select id from public.orders where event_id::text = any($1::text[]))'],
   ['kots', EVENT],
+  // Smart Serve Maestro (absent on events without it; skipped when missing)
+  ['ms_covers', EVENT],
+  ['ms_firings', EVENT],
+  ['ms_items', EVENT],
   ['sos_requests', EVENT],
   ['sos_request_items', 'sos_request_id in (select id from public.sos_requests where event_id::text = any($1::text[]))'],
   ['chat_messages', EVENT],
@@ -203,7 +207,10 @@ export async function uploadAll(db, cloud, events, { all = false } = {}) {
     const orders = await rowsOf('orders')
     await send('orders', orders, 'ignore')
     await send('order_items', await rowsOf('order_items'))
+    await send('ms_covers', await rowsOf('ms_covers'))
+    await send('ms_firings', await rowsOf('ms_firings'))
     await send('kots', await rowsOf('kots'))
+    await send('ms_items', await rowsOf('ms_items'))
     await send('orders', orders, 'merge')
     for (const t of ['sos_requests', 'sos_request_items', 'chat_messages', 'feedback', 'table_carts']) await send(t, await rowsOf(t))
 
@@ -219,15 +226,20 @@ export async function uploadAll(db, cloud, events, { all = false } = {}) {
       }
     }
 
-    // Kitchens: the cloud's next KOT number must come after the laptop's.
+    // Kitchens: the cloud's next KOT number must come after the laptop's
+    // (kot_seq_b is Barker B's series on Smart Serve Maestro events).
     if ((await db.query("select to_regclass('public.kitchens') as r")).rows[0].r) {
-      const local = (await db.query('select id::text as id, kot_seq from public.kitchens where event_id::text = any($1::text[])', [events])).rows
+      const hasB = (await db.query("select 1 from information_schema.columns where table_schema = 'public' and table_name = 'kitchens' and column_name = 'kot_seq_b'")).rowCount > 0
+      const local = (await db.query(`select id::text as id, kot_seq${hasB ? ', kot_seq_b' : ''} from public.kitchens where event_id::text = any($1::text[])`, [events])).rows
       if (local.length) {
-        const remote = await api.call('GET', `kitchens?select=id,kot_seq&event_id=in.(${events.join(',')})`)
+        const remote = await api.call('GET', `kitchens?select=id,kot_seq${hasB ? ',kot_seq_b' : ''}&event_id=in.(${events.join(',')})`)
         for (const k of local) {
           const c = remote.find((x) => x.id === k.id)
-          if (c && Number(k.kot_seq) > Number(c.kot_seq)) {
-            await api.call('PATCH', `kitchens?id=eq.${k.id}`, JSON.stringify({ kot_seq: Number(k.kot_seq) }), 'return=minimal')
+          const patch = {}
+          if (c && Number(k.kot_seq) > Number(c.kot_seq)) patch.kot_seq = Number(k.kot_seq)
+          if (c && hasB && Number(k.kot_seq_b) > Number(c.kot_seq_b)) patch.kot_seq_b = Number(k.kot_seq_b)
+          if (Object.keys(patch).length) {
+            await api.call('PATCH', `kitchens?id=eq.${k.id}`, JSON.stringify(patch), 'return=minimal')
             result.kotSeqRaised++
           }
         }

@@ -195,3 +195,64 @@ test('printer status byte (DLE EOT 4)', () => {
   assert.equal(parseStatusByte(undefined), null);
   for (const s of ['online', 'paper_low', 'paper_out']) assert.equal(parseStatusByte(statusByteFor(s)), s);
 });
+
+// ---------------------------------------------------------------------------
+// Smart Serve Maestro: cover-wise KOT
+// ---------------------------------------------------------------------------
+
+const maestroJob = {
+  id: 'm1',
+  kind: 'order',
+  kitchen_name: 'Asian',
+  kot_no: 'AS-A 014',
+  table_number: 7,
+  chairs: [3],
+  cover_no: 3,
+  barker: 'A',
+  barker_name: 'Rohit',
+  course: 'Starters',
+  firing_no: 2,
+  fired_at: '2026-10-13T15:13:00.000Z',
+  captain_name: 'Neha',
+  event_name: 'Demo',
+  items: [
+    { name: 'Crystal Veg Dim Sum', qty: 1, note: '' },
+    { name: 'Szechuan Eggplant', qty: 1, note: 'Jain' },
+  ],
+};
+
+test('maestro KOT: kitchen, KOT number, barker, cover, course, firing, plates', () => {
+  const lines = textLines(buildKot(maestroJob)).map((l) => l.trim());
+  const all = lines.join('\n');
+  assert.ok(lines.includes('ASIAN'));
+  assert.ok(lines.includes('KOT AS-A 014'));
+  assert.ok(lines.includes('Barker A - Rohit'));
+  assert.ok(lines.includes('T7 - C3'));
+  assert.ok(lines.includes('COURSE: STARTERS'));
+  assert.match(all, /Fired .*Firing #2/);
+  assert.match(all, /Table captain\s+Neha/);
+  assert.match(all, /1 x Crystal Veg Dim Sum/);
+  assert.match(all, />> JAIN <</);
+  assert.match(all, /Plates: 2\s+Cover: T7-C3/);
+  assert.doesNotMatch(all, /REMAKE|REPRINT|CHAIR/);
+});
+
+test('maestro KOT: remake and reprint banners', () => {
+  const all = textLines(buildKot({ ...maestroJob, is_remake: true, priority: true, is_reprint: true })).join('\n');
+  assert.match(all, /REMAKE - PRIORITY/);
+  assert.match(all, /REPRINT/);
+});
+
+test('maestro cancel slip keeps the cover and says do not dispatch', () => {
+  const all = textLines(buildKot({ ...maestroJob, kind: 'cancel', items: [{ name: 'Szechuan Eggplant', qty: 1 }] })).join('\n');
+  assert.match(all, /CANCELLED/);
+  assert.match(all, /DO NOT PREPARE \/ DISPATCH/);
+  assert.match(all, /T7 - C3/);
+  assert.match(all, /Plates cancelled: 1/);
+});
+
+test('a KOT without a cover still prints the multi-kitchen layout', () => {
+  const all = textLines(buildKot(orderJob)).join('\n');
+  assert.match(all, /CHAIRS 2, 3/);
+  assert.doesNotMatch(all, /Barker/);
+});

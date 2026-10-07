@@ -19,6 +19,7 @@ export const DEMO_IDS = {
   self: '00000000-0000-4000-8000-0000000de301',
   captain: '00000000-0000-4000-8000-0000000de302',
   multi: '00000000-0000-4000-8000-0000000de303',
+  maestro: '00000000-0000-4000-8000-0000000de304',
 }
 const ALL_IDS = Object.values(DEMO_IDS)
 
@@ -183,6 +184,56 @@ const MENU_MULTI = [
   ]],
 ]
 
+// Smart Serve Maestro: kitchens by cuisine and by course, two barkers each.
+// [key, name, port, courses (course rule), barkers, default]
+const KITCHENS_MAESTRO = [
+  { key: 'FC', name: 'First Course', port: 9101, courses: ['First Course'], barkers: 1 },
+  { key: 'IT', name: 'Italian', port: 9102 },
+  { key: 'AS', name: 'Asian', port: 9103, isDefault: true },
+  { key: 'MI', name: 'Modern Indian', port: 9104 },
+  { key: 'DS', name: 'Desserts', port: 9105, courses: ['Dessert'] },
+]
+// [category (cuisine), kitchen, dishes: [name, description, veg, course, barker]]
+// Desserts of every cuisine go to the Desserts kitchen by the course rule.
+const MENU_MAESTRO = [
+  ["Chef's Welcome", 'FC', [
+    ['Amuse trio', 'Three bites to begin, served to every guest', V, 'First Course', 'A'],
+  ]],
+  ['Italian', 'IT', [
+    ['Minestrone', 'Vegetable and bean soup, basil oil', V, 'Soup', 'A'],
+    ['Burrata', 'Heirloom tomato, pesto, sourdough', V, 'Starters', 'A'],
+    ['Bruschetta', 'Tomato, garlic, olive oil', V, 'Starters', 'B'],
+    ['Truffle Risotto', 'Arborio rice, parmesan, truffle', V, 'Mains', 'A'],
+    ['Penne Arrabbiata', 'Spicy tomato, garlic', V, 'Mains', 'B'],
+    ['Wild Mushroom Ravioli', 'Sage butter, parmesan', V, 'Mains', 'B'],
+    ['Tiramisu', 'Coffee, mascarpone', V, 'Dessert', 'A'],
+    ['Panna Cotta', 'Vanilla, berry compote', V, 'Dessert', 'B'],
+  ]],
+  ['Asian', 'AS', [
+    ['Hot & Sour Soup', 'Tofu, mushroom, pepper', V, 'Soup', 'A'],
+    ['Crystal Veg Dim Sum', 'Water chestnut, greens, chilli oil', V, 'Starters', 'A'],
+    ['Szechuan Eggplant', 'Crisp aubergine, Szechuan pepper glaze', V, 'Starters', 'A'],
+    ['Thai Green Curry', 'Coconut, basil, jasmine rice', V, 'Mains', 'A'],
+    ['Kimchi Bao', 'Steamed bao, house kimchi, sesame', V, 'Starters', 'B'],
+    ['Tofu Satay', 'Charred tofu, peanut sauce', V, 'Starters', 'B'],
+    ['Burnt Garlic Fried Rice', 'Wok-tossed, spring onion', V, 'Mains', 'B'],
+    ['Hakka Noodles', 'Wok-tossed noodles, vegetables', V, 'Mains', 'B'],
+  ]],
+  ['Modern Indian', 'MI', [
+    ['Tomato Shorba', 'Spiced tomato broth', V, 'Soup', 'A'],
+    ['Paneer Tikka', 'Clay-oven cottage cheese, mint chutney', V, 'Starters', 'A'],
+    ['Galouti Kebab', 'Melt-in-the-mouth lamb, saffron', N, 'Starters', 'B'],
+    ['Dal Makhani', 'Slow-cooked black lentils, butter', V, 'Mains', 'A'],
+    ['Veg Dum Biryani', 'Layered basmati, vegetables, saffron', V, 'Mains', 'B'],
+    ['Butter Chicken', 'Tandoori chicken in makhani gravy', N, 'Mains', 'B'],
+    ['Rasmalai', 'Cottage cheese discs in saffron milk', V, 'Dessert', 'A'],
+  ]],
+  ['Desserts', 'DS', [
+    ['Baked Cheesecake', 'New York style, berry coulis', V, 'Dessert', 'A'],
+    ['Chocolate Fondant', 'Warm centre, vanilla ice cream', V, 'Dessert', 'B'],
+  ]],
+]
+
 const EVENTS = [
   {
     key: 'self', id: DEMO_IDS.self, name: 'Demo · Guest Self-Service', service_mode: 'self', multi: false, tables: 6, venue: 'Demo Hall A',
@@ -203,6 +254,20 @@ const EVENTS = [
     // [number, name, kitchen, pin]: waiter 0N works for kitchen N, printer 910N, PIN 510N
     waiters: [['01', 'Arjun', 'IN', '5101'], ['02', 'Salim', 'AR', '5102'], ['03', 'Kiran', 'CH', '5103'],
       ['04', 'Ravi', 'IT', '5104'], ['05', 'Manoj', 'MX', '5105'], ['06', 'Tariq', 'TR', '5106']],
+  },
+  {
+    key: 'maestro', id: DEMO_IDS.maestro, name: 'Demo · Smart Serve Maestro', service_mode: 'captain', multi: true, maestro: true,
+    tables: 15, chairs: 10, venue: 'Demo Banquet Hall',
+    welcome: 'Demo event: Smart Serve Maestro, course-paced multi-kitchen service.',
+    menu: MENU_MAESTRO, kitchens: KITCHENS_MAESTRO,
+    // [name, pin, table]
+    captains: [['Neha', '7071', 7], ['Arjun', '7072', 7], ['Rahul', '1111', 1], ['Imran', '2222', 1],
+      ['Sameer', '3333', 2], ['Ayesha', '4444', 2], ['Faiz', '8081', 8], ['Priya', '3131', 3]],
+    waiters: [],
+    // [name, kitchen, side, pin]
+    barkers: [['Sanjay', 'FC', 'A', '6100'], ['Ajay', 'IT', 'A', '6201'], ['Vijay', 'IT', 'B', '6202'],
+      ['Rohit', 'AS', 'A', '6301'], ['Kunal', 'AS', 'B', '6302'], ['Farhan', 'MI', 'A', '6401'], ['Sunil', 'MI', 'B', '6402'],
+      ['Pooja', 'DS', 'A', '6501'], ['Meena', 'DS', 'B', '6502']],
   },
 ]
 
@@ -296,6 +361,7 @@ async function createDemo(db, cols, today) {
       id: ev.id, name: ev.name, date: today, venue: ev.venue, catering_company: CATERER, number_of_tables: ev.tables,
       max_orders_per_table: 5, call_waiter_enabled: true, service_mode: ev.service_mode, welcome_note: ev.welcome,
       is_closed: false, ai_enabled: false, multi_kitchen: ev.multi, ...(ev.chairs ? { chairs_per_table: ev.chairs } : {}),
+      ...(ev.maestro ? { maestro: true } : {}),
     }, st)
     const k = (s) => demoId(`${ev.key}/${s}`)
 
@@ -307,10 +373,11 @@ async function createDemo(db, cols, today) {
 
     const kitchenIds = {}
     if (ev.multi) {
-      for (const [i, kt] of KITCHENS.entries()) {
+      for (const [i, kt] of (ev.kitchens || KITCHENS).entries()) {
         kitchenIds[kt.key] = await insert(db, cols, 'kitchens', {
           id: k(`kitchen/${kt.key}`), event_id: evId, name: kt.name, prefix: kt.key, printer_ip: PRINTER_IP, printer_port: kt.port,
           kot_seq: 0, sort_order: i + 1, is_default: !!kt.isDefault, is_active: true,
+          ...(kt.courses ? { courses: kt.courses } : {}), ...(kt.barkers ? { barkers: kt.barkers } : {}),
         }, st)
       }
     }
@@ -320,16 +387,20 @@ async function createDemo(db, cols, today) {
         id: k(`cat/${ci}`), event_id: evId, name: cat, sort_order: ci + 1, is_visible: true,
         ...(kitchen && kitchenIds[kitchen] ? { kitchen_id: kitchenIds[kitchen] } : {}),
       }, st)
-      for (const [di, [name, description, veg]] of dishes.entries()) {
+      for (const [di, [name, description, veg, course, barker]] of dishes.entries()) {
         await insert(db, cols, 'menu_items', {
           id: k(`dish/${ci}/${di}`), category_id: catId, event_id: evId, name, description, is_veg: veg,
           is_available: true, is_live_counter: false, sort_order: di + 1,
+          ...(course ? { course } : {}), ...(barker ? { barker } : {}),
         }, st)
       }
     }
 
     for (const [name, pin, table] of ev.captains) {
       await insert(db, cols, 'captains', { id: k(`captain/${name}`), event_id: evId, name, pin, is_active: true, ...(table ? { table_number: table } : {}) }, st)
+    }
+    for (const [name, kitchen, side, pin] of ev.barkers || []) {
+      await insert(db, cols, 'barkers', { id: k(`barker/${name}`), event_id: evId, kitchen_id: kitchenIds[kitchen], side, name, pin, is_active: true }, st)
     }
     for (const [num, name, kitchen, pin] of ev.waiters) {
       await insert(db, cols, 'waiters', {
@@ -345,7 +416,7 @@ async function createDemo(db, cols, today) {
 // so the server's status panel and /ss-local.json show them.
 function updateSnapshot(snap, today, remove) {
   const others = (snap.events || []).filter((e) => !ALL_IDS.includes(e.id))
-  snap.events = remove ? others : [...others, ...EVENTS.map((e) => ({ id: e.id, name: e.name, date: today, service_mode: e.service_mode, multi_kitchen: e.multi }))]
+  snap.events = remove ? others : [...others, ...EVENTS.map((e) => ({ id: e.id, name: e.name, date: today, service_mode: e.service_mode, multi_kitchen: e.multi, maestro: !!e.maestro }))]
   writeJson(P.snapshot, snap)
 }
 
@@ -372,7 +443,7 @@ function summary({ today, port, st, running }) {
   L.push(`  ${SUPERVISOR.name} / ${SUPERVISOR.pin}   then pick the event`)
   L.push('  The first screen of a tablet asks "How is this tablet being used?" (guest and captain events both run today).')
   L.push('')
-  const [self, cap, multi] = EVENTS
+  const [self, cap, multi, maestro] = EVENTS
   L.push(`1) ${self.name}   ${self.tables} tables`)
   L.push(`   Tablet link -> "Guest tablet" -> set-up PIN ${SUPERVISOR.pin} (or the admin PIN) -> "${self.name}" -> a table`)
   L.push(`   Waiters (assigned at the desk): ${self.waiters.map(([n, w]) => `${w} (${n})`).join(', ')}`)
@@ -391,6 +462,15 @@ function summary({ today, port, st, running }) {
   L.push('   * default kitchen: Desserts and Beverages have no kitchen, so their KOTs print here.')
   L.push('   Waiters sign in with the name ("Ravi") or the number ("04") and the PIN.')
   L.push(`   Printers: the Virtual Printers on this laptop, ports ${KITCHENS[0].port}-${KITCHENS[KITCHENS.length - 1].port}.`)
+  L.push('')
+  L.push(`4) ${maestro.name}   ${maestro.tables} tables x ${maestro.chairs} covers`)
+  L.push(`   Tablet link -> "Captain" -> ${maestro.captains.map(([n, p, t]) => `${n} ${p} (table ${t})`).join(', ')}`)
+  L.push(`   Kitchen Display ${base}/kitchen  (barker name + PIN):`)
+  for (const kt of maestro.kitchens) {
+    const bs = maestro.barkers.filter((b) => b[1] === kt.key).map(([n, , side, pin]) => `Barker ${side} ${n} ${pin}`).join(', ')
+    L.push(`   ${pad(kt.name + (kt.isDefault ? ' *' : ''), 15)}${pad(kt.key, 5)}${pad(`${PRINTER_IP}:${kt.port}`, 17)}${bs}`)
+  }
+  L.push('   Stewards need no device: the KOT tells them the table and cover.')
   L.push('')
   L.push('Reset the test data: node ss-local.mjs demo      Remove: node ss-local.mjs demo --remove')
   return L.join('\n')
