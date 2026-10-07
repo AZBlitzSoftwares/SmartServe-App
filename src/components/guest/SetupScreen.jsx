@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { getDeviceId, isClaimLive } from '../../lib/deviceId'
 import janusLogo from '../../assets/janus_logo.jpg'
+import { useDeviceTools } from './useDeviceTools'
+import { isCaptainEvent } from './deviceEntry'
 
 function eventStatus(dateStr) {
   if (!dateStr) return 'planned'
@@ -12,7 +14,7 @@ function eventStatus(dateStr) {
   return 'completed'
 }
 
-export default function SetupScreen({ onSetupComplete, currentTableNumber, currentEventId }) {
+export default function SetupScreen({ onSetupComplete, currentTableNumber, currentEventId, onSwitchToCaptain }) {
   const [step, setStep] = useState('pin')      // 'pin' | 'event' | 'table'
   const [pin, setPin] = useState('')
   const [pinError, setPinError] = useState('')
@@ -24,6 +26,10 @@ export default function SetupScreen({ onSetupComplete, currentTableNumber, curre
   const [selectedTable, setSelectedTable] = useState(null)
   const [confirming, setConfirming] = useState(false)
   const [loadingEvents, setLoadingEvents] = useState(false)
+  // A Captain Service event is also running today: offer the way across.
+  const [captainEventToday, setCaptainEventToday] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const dev = useDeviceTools()
 
   // Load active events on mount
   useEffect(() => {
@@ -32,9 +38,18 @@ export default function SetupScreen({ onSetupComplete, currentTableNumber, curre
 
   async function loadActiveEvents() {
     setLoadingEvents(true)
-    const { data } = await supabase.from('events')
-      .select('*').order('date', { ascending: false }).limit(50)
-    const active = (data||[]).filter(e => eventStatus(e.date) === 'active')
+    let res
+    try {
+      res = await supabase.from('events')
+        .select('*').order('date', { ascending: false }).limit(50)
+    } catch (e) { res = { data: null, error: e } }
+    const { data, error } = res
+    setLoadError(!!error)
+    const today = (data||[]).filter(e => eventStatus(e.date) === 'active')
+    setCaptainEventToday(today.some(isCaptainEvent))
+    // A guest tablet is never set up on a Captain Service event - those
+    // tablets sign in as captains instead.
+    const active = today.filter(e => !isCaptainEvent(e))
     setActiveEvents(active)
     // If only 1 active event, auto-select it
     if (active.length === 1) setSelectedEvent(active[0])
@@ -177,11 +192,11 @@ export default function SetupScreen({ onSetupComplete, currentTableNumber, curre
       alignItems: 'center', justifyContent: 'center',
       padding: '24px', fontFamily: 'Manrope, sans-serif'
     }}>
-      {/* Logo */}
-      <img src={janusLogo} alt="Janu's Smart Serve"
+      {/* Logo - hold for 2 seconds for the device tools */}
+      <img src={janusLogo} alt="Janu's Smart Serve" {...dev.logoProps}
         style={{ width: 90, height: 90, borderRadius: 20, objectFit: 'contain',
           marginBottom: 16, border: '2px solid rgba(232,137,12,0.4)',
-          background: 'rgba(232,137,12,0.1)' }} />
+          background: 'rgba(232,137,12,0.1)', ...dev.logoHoldStyle }} />
       <div style={{ color: '#fff', fontSize: 22, fontWeight: 900, marginBottom: 4 }}>
         Janu's <span style={{ color: '#E8890C' }}>Smart Serve</span>
       </div>
@@ -210,9 +225,15 @@ export default function SetupScreen({ onSetupComplete, currentTableNumber, curre
               </div>
             ) : activeEvents.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 20 }}>
-                <div style={{ fontSize: 36, marginBottom: 12 }}>📅</div>
-                <div style={{ color: '#FC8181', fontWeight: 700, marginBottom: 8 }}>No active events today</div>
-                <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>Please ask admin to create today's event</div>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>{loadError ? '📡' : '📅'}</div>
+                <div style={{ color: '#FC8181', fontWeight: 700, marginBottom: 8 }}>
+                  {loadError ? "Can't reach the server" : captainEventToday ? 'No self-service event today' : 'No active events today'}
+                </div>
+                <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, lineHeight: 1.6 }}>
+                  {loadError ? 'Check the Wi-Fi or internet and try again'
+                    : captainEventToday ? "Today's event is Captain Service - use Captain sign in below"
+                    : "Please ask admin to create today's event"}
+                </div>
                 <button onClick={loadActiveEvents}
                   style={{ marginTop: 16, background: '#E8890C', color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
                   Retry
@@ -384,9 +405,19 @@ export default function SetupScreen({ onSetupComplete, currentTableNumber, curre
         )}
       </div>
 
+      {captainEventToday && onSwitchToCaptain && (
+        <button onClick={onSwitchToCaptain} data-testid="to-captain"
+          style={{ marginTop: 18, background: 'transparent', border: '1px solid rgba(232,137,12,0.5)',
+            borderRadius: 12, padding: '12px 20px', color: '#E8890C', fontSize: 15, fontWeight: 800,
+            cursor: 'pointer', fontFamily: 'inherit' }}>
+          Captain? Sign in here →
+        </button>
+      )}
+
       <div style={{ color: 'rgba(255,255,255,0.2)', fontSize: 11, marginTop: 24 }}>
         Powered by Blitz Softwares
       </div>
+      {dev.element}
     </div>
   )
 }

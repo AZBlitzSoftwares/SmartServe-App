@@ -1,12 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import janusLogo from '../../assets/janus_logo.jpg'
-
-function todayStr() {
-  const d = new Date()
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
-    '-' + String(d.getDate()).padStart(2, '0')
-}
+import { useDeviceTools } from './useDeviceTools'
+import { todayISO as todayStr, isCaptainEvent } from './deviceEntry'
 
 const shell = {
   minHeight: '100vh',
@@ -21,13 +17,14 @@ const card = {
   border: '1px solid rgba(255,255,255,0.1)'
 }
 
-function Brand() {
+// The logo doubles as the way into the device tools: hold it 2 seconds.
+function Brand({ dev }) {
   return (
     <>
-      <img src={janusLogo} alt="Janu's Smart Serve"
+      <img src={janusLogo} alt="Janu's Smart Serve" {...dev.logoProps}
         style={{ width: 90, height: 90, borderRadius: 20, objectFit: 'contain',
           marginBottom: 16, border: '2px solid rgba(232,137,12,0.4)',
-          background: 'rgba(232,137,12,0.1)' }} />
+          background: 'rgba(232,137,12,0.1)', ...dev.logoHoldStyle }} />
       <div style={{ color: '#fff', fontSize: 22, fontWeight: 900, marginBottom: 4 }}>
         Janu's <span style={{ color: '#E8890C' }}>Smart Serve</span>
       </div>
@@ -38,15 +35,30 @@ function Brand() {
   )
 }
 
-/* Shown only when both kinds of event are running today.
+/* Shown when both kinds of event are running today - every time, until
+   this tablet is set up. With one kind running the tablet picks by itself
+   and nobody sees this screen.
 
-   With one kind running the tablet picks by itself and nobody sees this
-   screen. Asking every time would put a question in front of the common
-   case for the sake of a rare one. */
-export function EntryChooser({ onGuest, onCaptain }) {
+   remembered is the choice last made on this tablet ('guest' | 'captain').
+   It is only highlighted; it never answers the question by itself. */
+export function EntryChooser({ onGuest, onCaptain, remembered, captainEvents = [], selfEvents = [] }) {
+  const dev = useDeviceTools()
+  const names = list => list.map(e => e.name).filter(Boolean).join(', ')
+  const option = (on) => ({
+    width: '100%', background: on ? 'rgba(232,137,12,0.14)' : 'rgba(255,255,255,0.06)',
+    border: on ? '2px solid #E8890C' : '1.5px solid rgba(255,255,255,0.15)', borderRadius: 14,
+    padding: '18px', textAlign: 'left', cursor: 'pointer', position: 'relative',
+    fontFamily: 'inherit',
+  })
+  const lastUsed = (
+    <span style={{ position: 'absolute', top: 10, right: 12, background: '#E8890C', color: '#fff',
+      borderRadius: 999, padding: '2px 8px', fontSize: 10, fontWeight: 900, letterSpacing: '0.4px' }}>
+      LAST USED
+    </span>
+  )
   return (
-    <div style={shell}>
-      <Brand />
+    <div style={shell} data-testid="entry-chooser">
+      <Brand dev={dev} />
       <div style={card}>
         <div style={{ color: '#fff', fontSize: 18, fontWeight: 800, marginBottom: 6, textAlign: 'center' }}>
           How is this tablet being used?
@@ -54,28 +66,35 @@ export function EntryChooser({ onGuest, onCaptain }) {
         <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, textAlign: 'center', marginBottom: 24 }}>
           Both kinds of event are running today
         </div>
-        <button onClick={onGuest}
-          style={{ width: '100%', background: 'rgba(255,255,255,0.06)',
-            border: '1.5px solid rgba(255,255,255,0.15)', borderRadius: 14,
-            padding: '18px', marginBottom: 12, textAlign: 'left', cursor: 'pointer' }}>
+        <button onClick={onGuest} style={{ ...option(remembered === 'guest'), marginBottom: 12 }}>
+          {remembered === 'guest' && lastUsed}
           <div style={{ color: '#fff', fontWeight: 800, fontSize: 16 }}>📱 Guest tablet</div>
           <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 4 }}>
             It sits on a table. Guests order for themselves.
           </div>
+          {selfEvents.length > 0 && (
+            <div style={{ color: '#E8890C', fontSize: 12, fontWeight: 700, marginTop: 6 }}>
+              {names(selfEvents)}
+            </div>
+          )}
         </button>
-        <button onClick={onCaptain}
-          style={{ width: '100%', background: 'rgba(255,255,255,0.06)',
-            border: '1.5px solid rgba(255,255,255,0.15)', borderRadius: 14,
-            padding: '18px', textAlign: 'left', cursor: 'pointer' }}>
+        <button onClick={onCaptain} style={option(remembered === 'captain')}>
+          {remembered === 'captain' && lastUsed}
           <div style={{ color: '#fff', fontWeight: 800, fontSize: 16 }}>🧑‍💼 Captain</div>
           <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 4 }}>
             A captain carries it and takes orders at the tables.
           </div>
+          {captainEvents.length > 0 && (
+            <div style={{ color: '#E8890C', fontSize: 12, fontWeight: 700, marginTop: 6 }}>
+              {names(captainEvents)}
+            </div>
+          )}
         </button>
       </div>
       <div style={{ color: 'rgba(255,255,255,0.2)', fontSize: 11, marginTop: 24 }}>
         Powered by Blitz Softwares
       </div>
+      {dev.element}
     </div>
   )
 }
@@ -89,7 +108,7 @@ export function EntryChooser({ onGuest, onCaptain }) {
    Two captains with the same name at one event are blocked by the database.
    The same name at two different events running the same day is not, so if
    the PIN matches in both places the event is asked for rather than guessed. */
-export default function CaptainLogin({ onLogin, onBack }) {
+export default function CaptainLogin({ onLogin, onBack, onGuest }) {
   const [name, setName] = useState('')
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
@@ -97,15 +116,21 @@ export default function CaptainLogin({ onLogin, onBack }) {
   const [events, setEvents] = useState([])       // today's captain-mode events
   const [loading, setLoading] = useState(true)
   const [choices, setChoices] = useState(null)   // [{ captain, event }] when ambiguous
+  // A self-service event is also running today: offer the way across.
+  const [selfEventToday, setSelfEventToday] = useState(false)
+  const dev = useDeviceTools()
 
   useEffect(() => { loadEvents() }, [])
 
   async function loadEvents() {
     setLoading(true)
     try {
-      const { data } = await supabase.from('events')
-        .select('*').eq('date', todayStr()).eq('service_mode', 'captain')
-      setEvents(data || [])
+      const { data, error: err } = await supabase.from('events')
+        .select('*').eq('date', todayStr())
+      if (err) throw err
+      setEvents((data || []).filter(isCaptainEvent))
+      setSelfEventToday((data || []).some(e => !isCaptainEvent(e)))
+      setError('')
     } catch (e) {
       setError('Could not reach the server. Check the connection and try again.')
     }
@@ -160,8 +185,8 @@ export default function CaptainLogin({ onLogin, onBack }) {
   }
 
   return (
-    <div style={shell}>
-      <Brand />
+    <div style={shell} data-testid="captain-signin">
+      <Brand dev={dev} />
       <div style={card}>
 
         {choices ? (
@@ -206,13 +231,13 @@ export default function CaptainLogin({ onLogin, onBack }) {
               </div>
             ) : events.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 20 }}>
-                <div style={{ fontSize: 36, marginBottom: 12 }}>📅</div>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>{error ? '📡' : '📅'}</div>
                 <div style={{ color: '#FC8181', fontWeight: 700, marginBottom: 8 }}>
-                  No captain event today
+                  {error ? "Can't reach the server" : 'No captain event today'}
                 </div>
                 <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, lineHeight: 1.6 }}>
-                  Ask the admin to check the event date and that its Service Mode
-                  is set to Captain Service.
+                  {error ? 'Check the Wi-Fi or internet and try again.'
+                    : 'Ask the admin to check the event date and that its Service Mode is set to Captain Service.'}
                 </div>
                 <button onClick={loadEvents}
                   style={{ marginTop: 16, background: '#E8890C', color: '#fff', border: 'none',
@@ -279,9 +304,19 @@ export default function CaptainLogin({ onLogin, onBack }) {
         )}
       </div>
 
+      {selfEventToday && onGuest && !choices && (
+        <button onClick={onGuest} data-testid="to-guest"
+          style={{ marginTop: 18, background: 'transparent', border: '1px solid rgba(232,137,12,0.5)',
+            borderRadius: 12, padding: '12px 20px', color: '#E8890C', fontSize: 15, fontWeight: 800,
+            cursor: 'pointer', fontFamily: 'inherit' }}>
+          Guest tablet? Set up a table →
+        </button>
+      )}
+
       <div style={{ color: 'rgba(255,255,255,0.2)', fontSize: 11, marginTop: 24 }}>
         Powered by Blitz Softwares
       </div>
+      {dev.element}
     </div>
   )
 }
