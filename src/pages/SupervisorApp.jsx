@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { supabase } from '../lib/supabase'
 import SupervisorLogin from '../components/supervisor/SupervisorLogin'
 import KOTDashboard from '../components/supervisor/KOTDashboard'
@@ -11,9 +11,10 @@ import TableManager from '../components/supervisor/TableManager'
 import FeedbackReport from '../components/supervisor/FeedbackReport'
 import SupervisorChat from '../components/supervisor/SupervisorChat'
 import { playChatChime, unlockChime } from '../lib/chime'
+import { lazyPage } from '../lib/lazyPage'
 // ss-maestro: course-firing events get their own desk and reports, loaded only when used
-const ControlDesk = lazy(() => import('../maestro/ControlDesk'))
-const MaestroReports = lazy(() => import('../maestro/MaestroReports'))
+const ControlDesk = lazyPage(() => import('../maestro/ControlDesk'), 'controldesk')
+const MaestroReports = lazyPage(() => import('../maestro/MaestroReports'), 'msreports')
 
 
 // ─── Event Status Helper ───────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { supabase } from '../lib/supabase'
 import { getPendingOrders, clearOrder } from '../lib/offlineQueue'
 import SetupScreen from '../components/guest/SetupScreen'
@@ -20,6 +20,8 @@ import OrderHistory from '../components/guest/OrderHistory'
 import FeedbackModal from '../components/guest/FeedbackModal'
 import ExitGate from '../components/guest/ExitGate'
 import NoEventScreen from '../components/guest/NoEventScreen'
+import { lazyPage } from '../lib/lazyPage'
+import { setUnsavedCheck, setSignOutReason } from '../lib/appUpdate'
 import {
   entryFor, loadTodaysEvents, sessionStillCurrent, isCaptainEvent,
   clearGuestKeys, clearCaptainKeys, rememberMode, rememberedMode,
@@ -29,7 +31,7 @@ import {
 // Smart Serve Maestro (course-paced multi-kitchen events): the captain's
 // own screens. Loaded only when a captain signs in to a Maestro event, so
 // guest tablets and other captain events never download it.
-const MaestroCaptain = lazy(() => import('../maestro/MaestroCaptain'))
+const MaestroCaptain = lazyPage(() => import('../maestro/MaestroCaptain'), 'mscaptain')
 
 // Two back presses within this window on the Welcome screen open the exit dialog.
 const EXIT_DOUBLE_PRESS_MS = 3000
@@ -498,14 +500,17 @@ export default function GuestApp() {
         if (data) {
           setCaptain(prev => {
             if (!prev || prev.id !== data.id) return prev
-            const next = { ...prev, ...data }
+            // The PIN is left as signed in with, so the guard below notices a new one
+            const { pin: _newPin, ...rest } = data
+            const next = { ...prev, ...rest }
             return JSON.stringify(next) === JSON.stringify(prev) ? prev : next
           })
           try {
             const raw = localStorage.getItem('ss_captain_session')
             const cur = raw ? JSON.parse(raw) : null
             if (cur && cur.id === data.id) {
-              localStorage.setItem('ss_captain_session', JSON.stringify({ ...cur, ...data }))
+              const { pin: _p, ...fresh } = data
+              localStorage.setItem('ss_captain_session', JSON.stringify({ ...cur, ...fresh }))
             }
           } catch (e) { /* storage full or blocked - the in-memory copy is current */ }
         }
@@ -516,6 +521,38 @@ export default function GuestApp() {
     const t = onGrid ? setInterval(sync, 15000) : null
     return () => { stop = true; if (t) clearInterval(t) }
   }, [captain?.id, eventData?.id, eventData?.multi_kitchen, onGrid])
+
+  /* A saved sign-in the desk has since ended - the captain was removed, or
+     given a new PIN - must not carry on from the tablet's memory. Checked
+     at start, every minute, and whenever the screen wakes. Offline: the
+     tablet carries on as it is. */
+  useEffect(() => {
+    if (!captain?.id) return
+    let stop = false
+    const id = captain.id
+    const pin = String(captain.pin ?? '')
+    async function check() {
+      try {
+        const { data, error } = await supabase.from('captains').select('id, is_active, pin').eq('id', id).maybeSingle()
+        if (stop || error) return
+        const reason = !data || data.is_active === false ? 'You were signed out: this captain was removed at the desk.'
+          : pin && data.pin != null && String(data.pin) !== pin ? 'Your PIN was changed at the desk. Sign in with the new PIN.'
+          : null
+        if (!reason) return
+        setSignOutReason(reason)
+        dropCaptainSession()
+        goTo('captain')
+      } catch (e) { /* offline */ }
+    }
+    check()
+    const t = setInterval(check, 60000)
+    const vis = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', vis)
+    return () => { stop = true; clearInterval(t); document.removeEventListener('visibilitychange', vis) }
+  }, [captain?.id])
+
+  // A guest's cart lives only in memory: no automatic update while it has dishes
+  useEffect(() => { setUnsavedCheck(() => (cartRef.current?.length || 0) > 0) ; return () => setUnsavedCheck(null) }, [])
 
   // ss-multi-kitchen: a linked captain lands straight on their table's menu
   // after sign-in or restore. Once only - back from the menu goes to the

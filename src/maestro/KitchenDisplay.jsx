@@ -11,7 +11,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { unlockChime, playChatChime } from '../lib/chime'
-import { todayISO } from '../components/guest/deviceEntry'
+import { todayISO, sessionStillCurrent } from '../components/guest/deviceEntry'
+import { setSignOutReason, takeSignOutReason } from '../lib/appUpdate'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
 import { NEXT_ACTION, lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, loadMenu, shortName } from './msData'
@@ -25,7 +26,8 @@ function readSession() {
 export default function KitchenDisplay() {
   const [session, setSession] = useState(() => {
     const s = readSession()
-    return s && s.event?.date === todayISO() ? s : null
+    // receptions run past midnight: yesterday's session holds until 5 am
+    return s && sessionStillCurrent(s.event?.date) ? s : null
   })
   useEffect(() => { document.title = "Kitchen Display · Smart Serve Maestro" }, [])
   if (!session) return <BarkerLogin onLogin={s => { localStorage.setItem(SESSION, JSON.stringify(s)); setSession(s) }} />
@@ -34,6 +36,7 @@ export default function KitchenDisplay() {
 
 // ------------------------------------------------------------------ sign-in
 function BarkerLogin({ onLogin }) {
+  const [notice] = useState(() => takeSignOutReason())
   const [events, setEvents] = useState(null)
   const [evId, setEvId] = useState('')
   const [name, setName] = useState('')
@@ -62,7 +65,7 @@ function BarkerLogin({ onLogin }) {
       if (!b) { setErr('Name or PIN not recognised. Ask the control desk.'); setBusy(false); return }
       if (!b.kitchen_id) { setErr('You are not linked to a kitchen yet. Ask the control desk.'); setBusy(false); return }
       unlockChime()
-      onLogin({ barker: b, event: { id: ev.id, name: ev.name, date: ev.date, late_minutes: ev.late_minutes } })
+      onLogin({ barker: { ...b, pin: pin.trim() }, event: { id: ev.id, name: ev.name, date: ev.date, late_minutes: ev.late_minutes } })
     } catch (e2) { setErr(errText(e2)) }
     setBusy(false)
   }
@@ -88,6 +91,7 @@ function BarkerLogin({ onLogin }) {
               {events.length === 1 && <div style={{ color: '#AEB8D0', fontWeight: 700 }}>{events[0].name}</div>}
               <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="off" style={inp} />
               <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="PIN" inputMode="numeric" type="password" style={inp} />
+              {notice && !err && <div style={{ color: '#FFD27A', fontWeight: 700, fontSize: 14 }}>{notice}</div>}
               {err && <div style={{ color: '#FF8A8A', fontWeight: 700, fontSize: 14 }}>{err}</div>}
               <button className="kbtn b2" disabled={busy} style={{ padding: 12, fontSize: 16 }}>{busy ? 'Signing in…' : 'Sign in'}</button>
             </>
@@ -110,6 +114,28 @@ function KitchenScreen({ session, onSignOut }) {
   const [sheet, setSheet] = useState(null)
   const now = useNow(1000)
   const seenNew = useRef(null)
+
+  /* A sign-in the desk has ended - barker removed, new PIN, moved to another
+     kitchen or side - must not carry on from this screen's memory. */
+  useEffect(() => {
+    let stop = false
+    async function check() {
+      try {
+        const { data, error } = await supabase.from('barkers').select('id, is_active, pin, kitchen_id, side').eq('id', barker.id).maybeSingle()
+        if (stop || error) return
+        const reason = !data || data.is_active === false ? 'You were signed out: you were removed at the control desk.'
+          : barker.pin && data.pin != null && String(data.pin) !== String(barker.pin) ? 'Your PIN was changed at the control desk. Sign in with the new PIN.'
+          : data.kitchen_id !== barker.kitchen_id || (data.side && barker.side && data.side !== barker.side) ? 'You were moved to another kitchen or side. Sign in again.'
+          : null
+        if (reason) { setSignOutReason(reason); onSignOut() }
+      } catch { /* offline: carry on */ }
+    }
+    check()
+    const t = setInterval(check, 60000)
+    const vis = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', vis)
+    return () => { stop = true; clearInterval(t); document.removeEventListener('visibilitychange', vis) }
+  }, [barker.id])
 
   // Check in every 30 seconds, so the Control Desk can show this screen as on.
   useEffect(() => {

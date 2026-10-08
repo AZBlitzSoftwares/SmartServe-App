@@ -6,6 +6,7 @@ import {
   switchToCloud, getSavedLaptop, appBuildLabel, DEFAULT_LAPTOP_BASE,
 } from '../../lib/serverSwitch'
 import { clearAllDeviceKeys, todayISO } from './deviceEntry'
+import { clearAppCaches } from '../../lib/appUpdate'
 
 /* Staff tools for one tablet: what it is set up as, a clean reset, and
    which server it uses. Opened from the "⚙ Device" button in the bottom
@@ -186,6 +187,8 @@ export default function DeviceTools({ onClose }) {
       ])
     } catch { /* offline: the claim expires by itself */ }
     clearAllDeviceKeys()
+    // and the app's saved files, so the tablet opens the latest version from the server
+    await Promise.race([clearAppCaches(), new Promise(res => setTimeout(res, 3000))])
     window.location.reload()
   }
 

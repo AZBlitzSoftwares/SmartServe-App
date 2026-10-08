@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import janusLogo from '../../assets/janus_logo.jpg'
 import { useDeviceTools } from './useDeviceTools'
 import { todayISO as todayStr, isCaptainEvent } from './deviceEntry'
+import { takeSignOutReason } from '../../lib/appUpdate'
 
 const shell = {
   minHeight: '100vh',
@@ -109,6 +110,8 @@ export function EntryChooser({ onGuest, onCaptain, remembered, captainEvents = [
    The same name at two different events running the same day is not, so if
    the PIN matches in both places the event is asked for rather than guessed. */
 export default function CaptainLogin({ onLogin, onBack, onGuest }) {
+  // Why the last sign-in on this tablet ended, if the desk ended it
+  const [notice] = useState(() => takeSignOutReason())
   const [name, setName] = useState('')
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
@@ -275,6 +278,12 @@ export default function CaptainLogin({ onLogin, onBack, onGuest }) {
                   placeholder="PIN"
                   style={{ ...inputStyle, letterSpacing: 12, fontSize: 24 }} />
 
+                {notice && !error && (
+                  <div data-testid="signout-notice" style={{ background: 'rgba(232,137,12,0.16)', border: '1px solid rgba(232,137,12,0.5)', color: '#FBD38D',
+                    borderRadius: 10, padding: '9px 12px', fontSize: 13, fontWeight: 700, textAlign: 'center', marginBottom: 12, lineHeight: 1.5 }}>
+                    {notice}
+                  </div>
+                )}
                 {error && (
                   <div style={{ color: '#FC8181', fontSize: 13, textAlign: 'center',
                     marginBottom: 12, lineHeight: 1.5 }}>

@@ -44,13 +44,13 @@ export function rememberedMode() {
   try { return localStorage.getItem(MODE_KEY) } catch { return null }
 }
 
-/** Every ss_* key this app keeps on this device - "Reset this tablet". */
+/** Every ss_* and ms_* (Maestro) key this app keeps on this device - "Reset this tablet". */
 export function clearAllDeviceKeys() {
   try {
     const keys = []
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)
-      if (k && k.startsWith('ss_')) keys.push(k)
+      if (k && (k.startsWith('ss_') || k.startsWith('ms_'))) keys.push(k)
     }
     removeKeys(keys)
   } catch { /* blocked */ }

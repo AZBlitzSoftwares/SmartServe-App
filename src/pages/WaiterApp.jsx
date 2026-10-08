@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { unlockChime, playChatChime } from '../lib/chime'
 import janusLogo from '../assets/janus_logo.jpg'
+import { setSignOutReason, takeSignOutReason } from '../lib/appUpdate'
 
 /* Kitchen waiter phone - /waiter. Multi-kitchen events only.
 
@@ -301,6 +302,7 @@ function Brand() {
 }
 
 function SignIn({ onSignedIn }) {
+  const [notice] = useState(() => takeSignOutReason())   // why the last sign-in ended, if the desk ended it
   const [phase, setPhase] = useState('loading')   // loading | error | none | choose | form
   const [events, setEvents] = useState([])
   const [event, setEvent] = useState(null)
@@ -359,7 +361,7 @@ function SignIn({ onSignedIn }) {
     writeStr(LAST_NAME_KEY, n)
     onSignedIn({
       waiter: { id: w.id, name: w.name, waiter_number: w.waiter_number,
-        kitchen_id: w.kitchen_id, kitchen_name: w.kitchen_name },
+        kitchen_id: w.kitchen_id, kitchen_name: w.kitchen_name, pin: p },
       event: { id: event.id, name: event.name, date: event.date,
         catering_company: event.catering_company || null, venue: event.venue || null },
     })
@@ -392,6 +394,12 @@ function SignIn({ onSignedIn }) {
           </div>
         )}
 
+        {notice && !error && (
+          <div style={{ color: '#FBD38D', background: 'rgba(232,137,12,0.15)', border: '1px solid rgba(232,137,12,0.4)',
+            borderRadius: 12, padding: '10px 12px', fontSize: 14, fontWeight: 700, textAlign: 'center', marginBottom: 14, lineHeight: 1.5 }}>
+            {notice}
+          </div>
+        )}
         {phase === 'error' && (
           <div style={{ textAlign: 'center', padding: '8px 4px' }}>
             <div style={{ fontSize: 38, marginBottom: 10 }}>📶</div>
@@ -523,6 +531,28 @@ function Spinner({ color = 'currentColor', size = 16 }) {
 function Board({ session, onSignOut }) {
   const { waiter, event } = session
   const kid = waiter.kitchen_id
+
+  /* A sign-in the supervisor has ended - waiter removed, new PIN, moved to
+     another kitchen - must not carry on from the phone's memory. */
+  useEffect(() => {
+    let stop = false
+    async function check() {
+      try {
+        const { data, error } = await supabase.from('waiters').select('id, is_active, pin, kitchen_id').eq('id', waiter.id).maybeSingle()
+        if (stop || error) return
+        const reason = !data || data.is_active === false ? 'You were signed out: you were removed at the desk.'
+          : waiter.pin && data.pin != null && String(data.pin) !== String(waiter.pin) ? 'Your PIN was changed at the desk. Sign in with the new PIN.'
+          : data.kitchen_id !== waiter.kitchen_id ? 'You were moved to another kitchen. Sign in again to see its orders.'
+          : null
+        if (reason) { setSignOutReason(reason); onSignOut() }
+      } catch (e) { /* offline: carry on */ }
+    }
+    check()
+    const t = setInterval(check, 60000)
+    const vis = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', vis)
+    return () => { stop = true; clearInterval(t); document.removeEventListener('visibilitychange', vis) }
+  }, [waiter.id])
   const kitchenName = waiter.kitchen_name || 'Kitchen'
 
   // The live picture is kept in refs so async callbacks never act on a
