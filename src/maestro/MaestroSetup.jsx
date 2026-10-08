@@ -94,7 +94,7 @@ export default function MaestroSetup({ eventData, onEventChange, onChanged, refr
   if (!d) return <div className="ms"><div className="card">Loading Maestro set-up…</div></div>
   return (
     <div className="ms">
-      <ServiceSettings ev={ev} onEventChange={ev2 => { onEventChange && onEventChange(ev2); changed() }} />
+      <ServiceSettings ev={ev} dishes={d.dishes} onEventChange={ev2 => { onEventChange && onEventChange(ev2); changed() }} />
       <KitchenRules ev={ev} d={d} setD={setD} onChanged={changed} />
       <DishSplit ev={ev} d={d} setD={setD} onChanged={changed} />
       <Barkers ev={ev} d={d} setD={setD} onChanged={changed} />
@@ -108,7 +108,7 @@ function Saved({ at }) {
 }
 
 // ------------------------------------------------------------- settings
-function ServiceSettings({ ev, onEventChange }) {
+function ServiceSettings({ ev, dishes = [], onEventChange }) {
   const [courses, setCourses] = useState(coursesOf(ev))
   const [late, setLate] = useState(ev.late_minutes ?? 5)
   const [pacing, setPacing] = useState(ev.pacing_minutes ?? 25)
@@ -121,6 +121,9 @@ function ServiceSettings({ ev, onEventChange }) {
     setMsg('')
     const list = courses.map(s => s.trim()).filter(Boolean)
     if (list.length < 2) { setMsg('Keep at least two courses.'); return }
+    const dropped = coursesOf(ev).filter(c => !list.includes(c) && dishes.some(x => x.course === c))
+    if (dropped.length && !window.confirm(dropped.map(c => `${c} (${dishes.filter(x => x.course === c).length} dishes)`).join(', ')
+      + ' will be removed. Those dishes will have no course, so captains cannot order them, until you give them one under Menu. Save anyway?')) return
     const patch = { courses: list, late_minutes: Math.max(1, Number(late) || 5), pacing_minutes: Math.max(5, Number(pacing) || 25), first_course_auto: auto }
     const { data, error } = await supabase.from('events').update(patch).eq('id', ev.id).select('*').maybeSingle()
     if (error) { setMsg(errText(error)); return }
@@ -130,12 +133,12 @@ function ServiceSettings({ ev, onEventChange }) {
   return (
     <div className="card" id="ms-courses">
       <h3>Service settings <Saved at={saved} /></h3>
-      <p className="sub">The courses in the order they are served. The first course is served to every guest as soon as they are seated, if switched on.</p>
+      <p className="sub">The courses in the order they are served, with the number of dishes in each. The first course is served to every guest as soon as they are seated, if switched on. The dishes themselves (23 soups, if that is the menu) are added under <b>Menu</b>: one by one, or the caterer's whole Excel menu in one go with a Course column.</p>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
         {courses.map((c, i) => (
           <span key={c + i} className="cc" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', background: i === 0 ? 'var(--goldl)' : '#fff' }}>
             <button className="x" style={{ border: 0, background: 'transparent', fontWeight: 800 }} onClick={() => move(i, -1)} title="Earlier">‹</button>
-            <b>{i + 1}. {c}</b>
+            <b>{i + 1}. {c}</b><span style={{ opacity: .6, fontWeight: 700 }}>{dishes.filter(x => x.course === c).length}</span>
             <button className="x" style={{ border: 0, background: 'transparent', fontWeight: 800 }} onClick={() => move(i, 1)} title="Later">›</button>
             <button className="x" style={{ border: 0, background: 'transparent', color: 'var(--red)', fontWeight: 800 }} onClick={() => setCourses(cs => cs.filter((_, j) => j !== i))} title="Remove">✕</button>
           </span>

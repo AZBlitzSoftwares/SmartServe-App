@@ -1,8 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import FoodMaster from './FoodMaster'
+import MenuImport from './MenuImport'
 import { supabase } from '../../lib/supabase'
+import { readSheetFile, menuTemplateCsv } from '../../lib/sheetImport'
+import { coursesOf } from '../../maestro/msData'
 
-export default function MenuManager({ eventData }) {
+export default function MenuManager({ eventData, onEventChange }) {
+  // Maestro dishes also need a course: the captain takes the order by course
+  // and the kitchen fires course by course
+  const isMs = !!eventData?.maestro
+  const courses = coursesOf(eventData)
+  const [courseFilter, setCourseFilter] = useState('all')
+  const [importing2, setImporting2] = useState(null)   // { rows, fileName } or { paste:true }
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [activeCategory, setActiveCategory] = useState('all')
@@ -12,11 +21,10 @@ export default function MenuManager({ eventData }) {
   const [showAddCat, setShowAddCat] = useState(false)
   const [editItem, setEditItem] = useState(null)
   const [newCatName, setNewCatName] = useState('')
-  const [newItem, setNewItem] = useState({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'' })
+  const [newItem, setNewItem] = useState({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course:'' })
   const [saving, setSaving] = useState(false)
   const [uploadingImg, setUploadingImg] = useState(false)
   const imgFileRef = useRef()
-  const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
   const [showFoodMaster, setShowFoodMaster] = useState(false)
   const [showCopyEvent, setShowCopyEvent] = useState(false)
@@ -71,13 +79,14 @@ export default function MenuManager({ eventData }) {
     if (!newItem.name.trim() || !catId) { alert('Dish name and category required'); return }
     setSaving(true)
     if (editItem) {
-      await supabase.from('menu_items').update({ name:newItem.name.trim(), description:newItem.description.trim(), category_id:catId, is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null }).eq('id', editItem.id)
+      const { error } = await supabase.from('menu_items').update({ name:newItem.name.trim(), description:newItem.description.trim(), category_id:catId, is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, ...(isMs ? { course:newItem.course||null } : {}) }).eq('id', editItem.id)
+      if (error) { alert('Could not save the dish: ' + error.message); setSaving(false); return }
     } else {
-      const { error } = await supabase.from('menu_items').insert({ category_id:catId, name:newItem.name.trim(), description:newItem.description.trim(), is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, is_available:true })
+      const { error } = await supabase.from('menu_items').insert({ category_id:catId, name:newItem.name.trim(), description:newItem.description.trim(), is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, is_available:true, ...(isMs ? { course:newItem.course||null } : {}) })
       if (!error) await syncToFoodMaster({ name:newItem.name.trim(), description:newItem.description.trim(), category:categories.find(c=>c.id===catId)?.name, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null })
       if (error) { alert('Error adding dish: ' + error.message); setSaving(false); return }
     }
-    setNewItem({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'' })
+    setNewItem(p => ({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course: editItem ? '' : p.course }))
     setEditItem(null); setShowAdd(false); setSaving(false)
     loadMenu()
   }
@@ -100,7 +109,7 @@ export default function MenuManager({ eventData }) {
   }
 
   function startEdit(item) {
-    setNewItem({ name:item.name, description:item.description||'', is_live_counter:item.is_live_counter||false, is_veg:item.is_veg!==false, photo_url:item.photo_url||'', category_id:item.category_id })
+    setNewItem({ name:item.name, description:item.description||'', is_live_counter:item.is_live_counter||false, is_veg:item.is_veg!==false, photo_url:item.photo_url||'', category_id:item.category_id, course:item.course||'' })
     setEditItem(item); setShowAdd(true)
   }
 
@@ -110,68 +119,34 @@ export default function MenuManager({ eventData }) {
     loadMenu()
   }
 
-  async function handleCSVImport(e) {
+  // Excel (.xlsx), CSV or text: read here, checked and written by MenuImport
+  async function handleFileImport(e) {
     const file = e.target.files[0]; if (!file) return
-    setImporting(true); setImportResult(null)
-    let text = await file.text()
-    text = text.replace(/^\uFEFF/, '').replace(/\r\n/g,'\n').replace(/\r/g,'\n')
-    const lines = text.split('\n').map(l=>l.trim()).filter(Boolean)
-    if (lines.length < 2) { setImportResult({ error:'File is empty or has no data rows.' }); setImporting(false); e.target.value=''; return }
+    setImportResult(null)
+    try {
+      const rows = await readSheetFile(file)
+      setImporting2({ rows, fileName: file.name })
+    } catch (err) { setImportResult({ error: err.message }) }
+    e.target.value = ''
+  }
 
-    const rawHeaders = lines[0].split(',').map(h=>h.trim().replace(/^"|"$/g,'').toLowerCase().replace(/[^a-z_]/g,'_'))
-    const find = (...terms) => rawHeaders.findIndex(h => terms.some(t => h.includes(t)))
-    const nameIdx = find('name','dish','item')
-    const descIdx = find('desc')
-    const catIdx  = find('cat')
-    const liveIdx = find('live')
-    const vegIdx  = find('veg')
-    const imgIdx  = find('image','photo','url','img')
+  function downloadTemplate() {
+    const blob = new Blob(['\uFEFF' + menuTemplateCsv(isMs ? courses : [])], { type:'text/csv;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob); a.download = 'menu-template.csv'
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000)
+  }
 
-    if (nameIdx === -1) { setImportResult({ error:'No "name" column found. Headers: ' + rawHeaders.join(', ') }); setImporting(false); e.target.value=''; return }
-
-    const { data: freshCats } = await supabase.from('menu_categories').select('*').eq('event_id', eventData.id)
-    const catCache = {}; (freshCats||[]).forEach(c => { catCache[c.name.toLowerCase()] = c.id })
-
-    // Load ALL existing item names for this event upfront for fast dedup check
-    const { data: freshCatsFull } = await supabase.from('menu_categories').select('id').eq('event_id', eventData.id)
-    const allCatIds = (freshCatsFull||[]).map(c=>c.id)
-    const { data: existingItemsFull } = allCatIds.length
-      ? await supabase.from('menu_items').select('name').in('category_id', allCatIds)
-      : { data: [] }
-    const existingNames = new Set((existingItemsFull||[]).map(i=>i.name.toLowerCase().trim()))
-
-    let added=0, skipped=0, errors=[]
-    function splitLine(line) { const r=[]; let cur=''; let q=false; for(let i=0;i<line.length;i++){if(line[i]==='"'){q=!q}else if(line[i]===','&&!q){r.push(cur.trim());cur=''}else{cur+=line[i]}} r.push(cur.trim()); return r }
-
-    for (let i=1; i<lines.length; i++) {
-      try {
-        const cols = splitLine(lines[i])
-        const itemName = cols[nameIdx]?.replace(/^"|"$/g,'').trim(); if (!itemName) { skipped++; continue }
-
-        // DEDUP CHECK — skip if item already exists in this event (case-insensitive)
-        if (existingNames.has(itemName.toLowerCase().trim())) { skipped++; continue }
-
-        const desc    = descIdx>=0 ? cols[descIdx]?.replace(/^"|"$/g,'').trim()||'' : ''
-        const catName = catIdx>=0  ? cols[catIdx]?.replace(/^"|"$/g,'').trim()||'General' : 'General'
-        const isLive  = liveIdx>=0 ? ['yes','true','1','y'].includes((cols[liveIdx]?.replace(/^"|"$/g,'')||'').toLowerCase().trim()) : false
-        const vegVal  = vegIdx>=0  ? (cols[vegIdx]?.replace(/^"|"$/g,'')||'yes').toLowerCase().trim() : 'yes'
-        const isVeg   = !['no','false','0','nonveg','non-veg','n'].includes(vegVal)
-        const imgUrl  = imgIdx>=0  ? cols[imgIdx]?.replace(/^"|"$/g,'').trim()||'' : ''
-
-        const catKey = catName.toLowerCase()
-        if (!catCache[catKey]) {
-          const { data: nc, error: ce } = await supabase.from('menu_categories').insert({ event_id:eventData.id, name:catName, sort_order:Object.keys(catCache).length+1, is_visible:true }).select().single()
-          if (ce) { errors.push('Category "'+catName+'": '+ce.message); skipped++; continue }
-          catCache[catKey] = nc.id
-        }
-        const { error: ie } = await supabase.from('menu_items').insert({ category_id:catCache[catKey], name:itemName, description:desc, is_live_counter:isLive, is_veg:isVeg, photo_url:imgUrl||null, is_available:true })
-        if (!ie) await syncToFoodMaster({ name:itemName, description:desc, category:catName, is_veg:isVeg, photo_url:imgUrl||null })
-        if (ie) { errors.push(itemName+': '+ie.message); skipped++ }
-        else { added++; existingNames.add(itemName.toLowerCase().trim()) } // track newly added too
-      } catch(err) { errors.push('Row '+(i+1)+': '+err.message); skipped++ }
+  // Course of one dish, from the list (Maestro). In place, like availability.
+  async function setCourse(item, course) {
+    const prev = item.course || null
+    setItems(p => p.map(i => i.id === item.id ? { ...i, course: course || null } : i))
+    const { error } = await supabase.from('menu_items').update({ course: course || null }).eq('id', item.id)
+    if (error) {
+      setItems(p => p.map(i => i.id === item.id ? { ...i, course: prev } : i))
+      alert('Could not change the course of ' + item.name + ': ' + error.message)
     }
-    setImportResult({ added, skipped, errors:errors.slice(0,5) })
-    setImporting(false); loadMenu(); e.target.value=''
   }
 
   // Show or hide an entire category (guest tablets update live via Realtime)
@@ -240,7 +215,10 @@ export default function MenuManager({ eventData }) {
   // Category and search stack, so a supervisor can narrow to Starters and
   // then type. Description is searched too - dishes are often remembered by
   // an ingredient rather than by their menu name.
-  const byCategory = activeCategory === 'all' ? items : items.filter(i => i.category_id === activeCategory)
+  const byCourse = !isMs || courseFilter === 'all' ? items
+    : courseFilter === '__none' ? items.filter(i => !i.course || !courses.includes(i.course))
+    : items.filter(i => i.course === courseFilter)
+  const byCategory = activeCategory === 'all' ? byCourse : byCourse.filter(i => i.category_id === activeCategory)
   const q = search.trim().toLowerCase()
   const filtered = !q ? byCategory : byCategory.filter(i =>
     (i.name || '').toLowerCase().includes(q) ||
@@ -249,17 +227,20 @@ export default function MenuManager({ eventData }) {
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, gap:10, flexWrap:'wrap' }}>
         <h2 style={{ fontSize:20, fontWeight:800 }}>Menu Manager</h2>
-        <div style={{ display:'flex', gap:8 }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
           <button onClick={()=>setShowFoodMaster(true)} style={{ background:'#F5F3FF', border:'1px solid #DDD6FE', color:'#7C3AED', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>📚 Food Master</button>
           <button onClick={()=>setShowCopyEvent(true)} style={{ background:'#EFF6FF', border:'1px solid #BFDBFE', color:'#2563EB', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>📋 Copy from Event</button>
-          <button onClick={()=>fileRef.current?.click()} disabled={importing} style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#16A34A', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
-            {importing?'⏳ Importing...':'📥 Import CSV'}
+          <button onClick={()=>fileRef.current?.click()} style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#16A34A', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+            📥 Import Excel / CSV
+          </button>
+          <button onClick={()=>{ setImportResult(null); setImporting2({ paste:true }) }} style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#16A34A', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+            📋 Paste from Excel
           </button>
           <button onClick={()=>{ setEditItem(null); setNewItem({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'' }); setShowAdd(true) }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Add Dish</button>
         </div>
-        <input ref={fileRef} type="file" accept=".csv,.txt" onChange={handleCSVImport} style={{ display:'none' }} />
+        <input ref={fileRef} type="file" accept=".xlsx,.xlsm,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={handleFileImport} style={{ display:'none' }} />
       </div>
 
       {importResult && (
@@ -267,9 +248,16 @@ export default function MenuManager({ eventData }) {
           <div style={{ display:'flex', justifyContent:'space-between' }}>
             <div>
               <div style={{ fontWeight:700, fontSize:13, color:importResult.error?'#DC2626':'#16A34A' }}>
-                {importResult.error ? '❌ '+importResult.error : '✅ Imported '+importResult.added+' dishes, skipped '+importResult.skipped}
+                {importResult.error ? '❌ '+importResult.error
+                  : '✅ ' + importResult.added + ' dishes added' + (importResult.updated ? ', ' + importResult.updated + ' updated' : '')
+                    + (importResult.skipped ? ', ' + importResult.skipped + ' left as they were' : '')
+                    + (importResult.newCats ? ' · ' + importResult.newCats + ' new cuisine' + (importResult.newCats === 1 ? '' : 's') : '')
+                    + (importResult.newCourses?.length ? ' · courses added: ' + importResult.newCourses.join(', ') : '')}
               </div>
               {importResult.errors?.map((err,i)=><div key={i} style={{ color:'#DC2626', fontSize:12, marginTop:4 }}>{err}</div>)}
+              {importResult.newCats > 0 && eventData?.multi_kitchen && (
+                <div style={{ color:'#15803D', fontSize:12, marginTop:4 }}>New cuisines cook in the default kitchen until you choose their kitchen under Control › Menu routing.</div>
+              )}
             </div>
             <button onClick={()=>setImportResult(null)} style={{ background:'none', border:'none', fontSize:18, cursor:'pointer', color:'#999' }}>✕</button>
           </div>
@@ -284,7 +272,8 @@ export default function MenuManager({ eventData }) {
       )}
 
       <div style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', borderRadius:12, padding:'10px 14px', marginBottom:14, fontSize:12, color:'#15803D' }}>
-        📋 CSV: <strong>name, description, category, is_live_counter, is_veg, image_url</strong> — only name required. Save as .csv not .xlsx
+        📋 Import a whole menu from Excel (.xlsx), CSV, or rows pasted from Excel. Columns: <strong>Dish, Cuisine{isMs ? ', Course' : ''}, Description, Veg</strong>{isMs ? <> (and <strong>Barker</strong> A/B if you want to fix it)</> : null} — only Dish is required; a title row above the header is fine.{' '}
+        <button onClick={downloadTemplate} style={{ background:'none', border:'none', padding:0, color:'#15803D', fontWeight:800, textDecoration:'underline', cursor:'pointer', fontSize:12 }}>Download the template</button>
       </div>
 
       {sessionGroups.length > 1 && (
@@ -336,15 +325,33 @@ export default function MenuManager({ eventData }) {
         </div>
       )}
 
+      {isMs && (
+        <div style={{ display:'flex', gap:6, marginBottom:10, flexWrap:'wrap', alignItems:'center' }}>
+          <span style={{ fontSize:11, fontWeight:800, color:'var(--ink2)', textTransform:'uppercase', letterSpacing:'.4px', marginRight:4 }}>Course</span>
+          {[['all', 'All courses', items.length], ...courses.map(c => [c, c, items.filter(i => i.course === c).length]),
+            ['__none', 'No course', items.filter(i => !i.course || !courses.includes(i.course)).length]]
+            .filter(([k, , n]) => k !== '__none' || n > 0)
+            .map(([k, label, n]) => {
+              const on = courseFilter === k, warn = k === '__none'
+              return (
+                <button key={k} onClick={() => setCourseFilter(k)} style={{ borderRadius:999, padding:'6px 13px', fontSize:12.5, fontWeight:800, cursor:'pointer',
+                  border:'1.5px solid ' + (on ? (warn ? '#B45309' : '#B8862B') : warn ? '#FED7AA' : 'var(--line)'),
+                  background: on ? (warn ? '#B45309' : '#F6E7C8') : warn ? '#FFF7ED' : '#fff', color: on && warn ? '#fff' : warn ? '#B45309' : 'var(--ink)' }}>
+                  {label} <span style={{ opacity:.65 }}>{n}</span></button>
+              )
+            })}
+        </div>
+      )}
+
       {/* Category tabs */}
       <div style={{ display:'flex', gap:8, marginBottom:12, overflowX:'auto', flexWrap:'nowrap', paddingBottom:4 }}>
 
         <button onClick={()=>setActiveCategory('all')} style={{ flexShrink:0, background:activeCategory==='all'?'var(--ink)':'#fff', color:activeCategory==='all'?'#fff':'var(--ink)', border:'1.5px solid', borderColor:activeCategory==='all'?'var(--ink)':'var(--line)', borderRadius:999, padding:'8px 18px', fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
-          All ({items.length})
+          All ({byCourse.length})
         </button>
         {categories.map(cat => (
           <button key={cat.id} onClick={()=>setActiveCategory(cat.id)} style={{ flexShrink:0, background:activeCategory===cat.id?'var(--ink)':'#fff', color:activeCategory===cat.id?'#fff':'var(--ink)', border:'1.5px solid', borderColor:activeCategory===cat.id?'var(--ink)':'var(--line)', borderRadius:999, padding:'8px 18px', fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
-            {cat.name} ({items.filter(i=>i.category_id===cat.id).length})
+            {cat.name} ({byCourse.filter(i=>i.category_id===cat.id).length})
             <span onClick={e=>{ e.stopPropagation(); toggleCategoryVisible(cat) }}
               style={{ marginLeft:8, fontSize:11, fontWeight:800, padding:'2px 8px', borderRadius:999,
                 background: cat.is_visible===false ? '#FEF2F2' : '#F0FDF4',
@@ -376,6 +383,20 @@ export default function MenuManager({ eventData }) {
             <option value="">Select category *</option>
             {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+          {isMs && (
+            <div style={{ marginBottom:10 }}>
+              <label style={{ fontSize:13, fontWeight:600, color:'var(--ink2)', display:'block', marginBottom:6 }}>Course *</label>
+              <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                {courses.map(c => (
+                  <button key={c} type="button" onClick={()=>setNewItem(p=>({...p, course:c}))}
+                    style={{ borderRadius:999, padding:'7px 14px', fontSize:13, fontWeight:800, cursor:'pointer',
+                      border:'1.5px solid ' + (newItem.course===c ? '#B8862B' : 'var(--line)'),
+                      background: newItem.course===c ? '#F6E7C8' : '#fff', color:'var(--ink)' }}>{c}</button>
+                ))}
+              </div>
+              {!newItem.course && <div style={{ fontSize:11.5, color:'#B45309', fontWeight:700, marginTop:5 }}>Pick the course: captains find the dish under it and the kitchen fires it with that course.</div>}
+            </div>
+          )}
           {/* Image — URL or Upload */}
           <div style={{ marginBottom:10 }}>
             <label style={{ fontSize:13, fontWeight:600, color:'var(--ink2)', display:'block', marginBottom:6 }}>Food Image (optional)</label>
@@ -414,8 +435,8 @@ export default function MenuManager({ eventData }) {
         <div style={{ textAlign:'center', padding:40 }}>
           <div style={{ fontSize:40, marginBottom:12 }}>📋</div>
           <div style={{ fontWeight:700, fontSize:16, marginBottom:8 }}>No menu yet</div>
-          <div style={{ color:'var(--ink2)', fontSize:14, marginBottom:20 }}>Import a CSV or click "+ Category" to start</div>
-          <button onClick={()=>fileRef.current?.click()} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:12, padding:'12px 24px', fontSize:14, fontWeight:800, cursor:'pointer' }}>📥 Import Menu CSV</button>
+          <div style={{ color:'var(--ink2)', fontSize:14, marginBottom:20 }}>Import the menu from Excel, paste it, or click "+ Category" to start</div>
+          <button onClick={()=>fileRef.current?.click()} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:12, padding:'12px 24px', fontSize:14, fontWeight:800, cursor:'pointer' }}>📥 Import Excel / CSV</button>
         </div>
       ) : filtered.length === 0 ? (
         <div style={{ textAlign:'center', padding:40, color:'var(--ink2)' }}>No dishes here yet.</div>
@@ -431,6 +452,15 @@ export default function MenuManager({ eventData }) {
               {item.is_live_counter && <span style={{ fontSize:11, color:'#D97706', background:'#FEF3C7', padding:'1px 6px', borderRadius:999, fontWeight:600 }}>Live</span>}
             </div>
             {item.description && <div style={{ fontSize:12, color:'var(--ink2)', marginTop:2 }}>{item.description}</div>}
+            {isMs && (
+              <select value={courses.includes(item.course) ? item.course : ''} onChange={e => setCourse(item, e.target.value)} title="Course"
+                style={{ marginTop:5, marginRight:6, border:'1.5px solid ' + (courses.includes(item.course) ? '#E7D3A6' : '#FED7AA'), borderRadius:999,
+                  padding:'2px 8px', fontSize:11.5, fontWeight:800, background: courses.includes(item.course) ? '#FBF3E2' : '#FFF7ED',
+                  color: courses.includes(item.course) ? '#7A561A' : '#B45309', fontFamily:'Manrope', cursor:'pointer' }}>
+                <option value="">{item.course && !courses.includes(item.course) ? item.course + ' (not a course here)' : 'No course'}</option>
+                {courses.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            )}
             <span style={{ fontSize:11, fontWeight:600, background:item.is_available?'#F0FDF4':'#FEF2F2', color:item.is_available?'#16A34A':'#DC2626', padding:'1px 7px', borderRadius:999, marginTop:4, display:'inline-block' }}>{item.is_available?'Available':'Hidden'}</span>
           </div>
           <div style={{ display:'flex', gap:6, marginLeft:8 }}>
@@ -441,6 +471,12 @@ export default function MenuManager({ eventData }) {
         </div>
       ))}
       {showFoodMaster && <FoodMaster eventData={eventData} onClose={()=>{ setShowFoodMaster(false); loadMenu() }} />}
+      {importing2 && (
+        <MenuImport eventData={eventData} rows={importing2.rows} fileName={importing2.fileName}
+          onEventChange={onEventChange}
+          onClose={() => setImporting2(null)}
+          onDone={r => { setImporting2(null); setImportResult(r); loadMenu() }} />
+      )}
 
       {showCopyEvent && (
         <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center',padding:24 }}>
@@ -475,7 +511,8 @@ export default function MenuManager({ eventData }) {
                   const { data: nc } = await supabase.from('menu_categories').insert({ event_id:eventData.id, name:srcCat?.name||'General', sort_order:Object.keys(catCache).length+1, is_visible:true }).select().single()
                   if (nc) catCache[catKey] = nc.id
                 }
-                await supabase.from('menu_items').insert({ category_id:catCache[catKey], name:item.name, description:item.description, is_veg:item.is_veg, is_live_counter:item.is_live_counter, photo_url:item.photo_url, is_available:true })
+                await supabase.from('menu_items').insert({ category_id:catCache[catKey], name:item.name, description:item.description, is_veg:item.is_veg, is_live_counter:item.is_live_counter, photo_url:item.photo_url, is_available:true,
+                  ...(isMs ? { course: courses.includes(item.course) ? item.course : null, barker: item.barker || null } : {}) })
                 await syncToFoodMaster({ name:item.name, description:item.description, category:catKey, is_veg:item.is_veg, photo_url:item.photo_url })
                 destNames.add(item.name.toLowerCase().trim())
                 copyAdded++

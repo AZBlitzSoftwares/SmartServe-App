@@ -63,6 +63,13 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const [cover, setCover] = useState(1)
   const [catId, setCatId] = useState(null)
   const [courseF, setCourseF] = useState(null)
+  // The menu is browsed course first (Soup, Starters, ...) with cuisines as filters, or
+  // cuisine first with courses as filters. Long menus are searched instead.
+  const [browse, setBrowseRaw] = useState(() => { try { return localStorage.getItem('ms_browse') || 'course' } catch { return 'course' } })
+  const setBrowse = b => { setBrowseRaw(b); try { localStorage.setItem('ms_browse', b) } catch { /* private mode */ } }
+  const [courseTab, setCourseTab] = useState(null)
+  const [cuisineF, setCuisineF] = useState(null)
+  const [q, setQ] = useState('')
   const [drafts, setDrafts] = useState({})          // cover -> { menu_item_id: {qty, note} }
   const [sel, setSel] = useState(() => new Set())    // ms_items ids picked on the board
   const [busy, setBusy] = useState(false)
@@ -277,12 +284,26 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   // ----------------------------------------------------------- Take order
   const cats = (menu?.cats || []).filter(c => c.is_visible !== false)
   const autoFirst = ev.first_course_auto !== false
-  const dishesShown = (menu?.dishes || []).filter(d => !(autoFirst && d.course === firstCourse))
+  const visibleCat = new Set(cats.map(c => c.id))
+  const dishesShown = (menu?.dishes || []).filter(d => visibleCat.has(d.category_id) && !(autoFirst && d.course === firstCourse))
   const catsWithDishes = cats.filter(c => dishesShown.some(d => d.category_id === c.id))
   const activeCat = catsWithDishes.find(c => c.id === catId) || catsWithDishes[0]
   const catDishes = dishesShown.filter(d => d.category_id === activeCat?.id)
   const catCourses = courses.filter(c => catDishes.some(d => d.course === c))
-  const shown = catDishes.filter(d => !courseF || d.course === courseF)
+  // course first
+  const courseOf = d => courses.includes(d.course) ? d.course : 'Other'
+  const courseTabs = [...courses, 'Other'].filter(c => dishesShown.some(d => courseOf(d) === c))
+  const activeCourse = courseTabs.includes(courseTab) ? courseTab : courseTabs[0]
+  const courseDishes = dishesShown.filter(d => courseOf(d) === activeCourse)
+  const courseCats = cats.filter(c => courseDishes.some(d => d.category_id === c.id))
+  const catName = id => menu?.catsById?.[id]?.name || ''
+  const query = q.trim().toLowerCase()
+  const shown = query
+    ? dishesShown.filter(d => `${d.name} ${d.description || ''} ${catName(d.category_id)} ${d.course || ''}`.toLowerCase().includes(query))
+    : browse === 'course'
+      ? courseDishes.filter(d => !cuisineF || d.category_id === cuisineF)
+      : catDishes.filter(d => !courseF || d.course === courseF)
+  const countIn = (list, f) => list.filter(f).length
 
   const coverItems = itemsOf(cover)
   const draftRows = Object.entries(draft).map(([id, v]) => ({ id, ...v, dish: dishById[id] })).filter(r => r.dish)
@@ -300,17 +321,53 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
       <div className="menu">
         {!menu ? <div className="empty">Loading the menu…</div> : (
           <>
-            <div className="tabs">
-              {catsWithDishes.map(c => (
-                <button key={c.id} className={'tab' + (c.id === activeCat?.id ? ' a' : '')} onClick={() => { setCatId(c.id); setCourseF(null) }}>{c.name}</button>
-              ))}
-            </div>
-            {catCourses.length > 1 && (
-              <div className="courses">
-                {catCourses.map(c => (
-                  <button key={c} className={'cc' + (courseF === c ? ' a' : '')} onClick={() => setCourseF(courseF === c ? null : c)}>{c}</button>
-                ))}
+            <div className="msearch">
+              <div className="sbox">
+                <input value={q} onChange={e => setQ(e.target.value)} placeholder={`Search ${dishesShown.length} dishes…`} aria-label="Search dishes" />
+                {q && <button className="clr" onClick={() => setQ('')} title="Clear">✕</button>}
               </div>
+              <div className="seg" role="group" aria-label="Browse the menu by">
+                <button className={browse === 'course' ? 'a' : ''} onClick={() => setBrowse('course')}>By course</button>
+                <button className={browse === 'cuisine' ? 'a' : ''} onClick={() => setBrowse('cuisine')}>By cuisine</button>
+              </div>
+            </div>
+            {query ? (
+              <div className="courses"><span className="cc a">{shown.length} {shown.length === 1 ? 'dish' : 'dishes'} matching “{q.trim()}”</span></div>
+            ) : browse === 'course' ? (
+              <>
+                <div className="tabs">
+                  {courseTabs.map(c => (
+                    <button key={c} className={'tab' + (c === activeCourse ? ' a' : '')} onClick={() => { setCourseTab(c); setCuisineF(null) }}>
+                      {c} <span className="n">{countIn(dishesShown, d => courseOf(d) === c)}</span></button>
+                  ))}
+                </div>
+                {courseCats.length > 1 && (
+                  <div className="courses">
+                    <button className={'cc' + (!cuisineF ? ' a' : '')} onClick={() => setCuisineF(null)}>All {courseDishes.length}</button>
+                    {courseCats.map(c => (
+                      <button key={c.id} className={'cc' + (cuisineF === c.id ? ' a' : '')} onClick={() => setCuisineF(cuisineF === c.id ? null : c.id)}>
+                        {c.name} {countIn(courseDishes, d => d.category_id === c.id)}</button>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="tabs">
+                  {catsWithDishes.map(c => (
+                    <button key={c.id} className={'tab' + (c.id === activeCat?.id ? ' a' : '')} onClick={() => { setCatId(c.id); setCourseF(null) }}>
+                      {c.name} <span className="n">{countIn(dishesShown, d => d.category_id === c.id)}</span></button>
+                  ))}
+                </div>
+                {catCourses.length > 1 && (
+                  <div className="courses">
+                    {catCourses.map(c => (
+                      <button key={c} className={'cc' + (courseF === c ? ' a' : '')} onClick={() => setCourseF(courseF === c ? null : c)}>
+                        {c} {countIn(catDishes, d => d.course === c)}</button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
             <div className="grid">
               {shown.map(d => {
@@ -321,7 +378,8 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
                     <DishPhoto dish={d} />
                     <div className="di">
                       <div className="dn"><Veg veg={d.is_veg} />{d.name}</div>
-                      <div className="dd">{d.description || d.course || ''}</div>
+                      <div className="dd">{d.description || (browse === 'course' && !query ? catName(d.category_id) : d.course) || ''}</div>
+                      {query && <div className="dq">{d.course} · {catName(d.category_id)}</div>}
                       <div className="add">
                         <span className="k">{off ? 'Sold out' : `${d.kitchenName} kitchen`}</span>
                         {off ? null : q ? (
@@ -332,7 +390,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
                   </div>
                 )
               })}
-              {!shown.length && <div className="empty">No dishes here.</div>}
+              {!shown.length && <div className="empty">{query ? 'No dish matches that search.' : 'No dishes here.'}</div>}
             </div>
           </>
         )}

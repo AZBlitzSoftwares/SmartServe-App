@@ -437,7 +437,7 @@ export default function SupervisorApp() {
         )}
         {activeTab==='kot'     && eventData?.multi_kitchen && !eventData?.maestro && <KitchenBoard eventData={eventData} />}
         {activeTab==='kot'     && !eventData?.multi_kitchen && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={(order) => { setNewOrderAlert(order); setOrderCount(c=>c+1) }} />}
-        {activeTab==='menu'    && <MenuManager eventData={eventData} />}
+        {activeTab==='menu'    && <MenuManager eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='reports' && eventData?.maestro && (
           <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'#888' }}>Loading…</div>}>
             <MaestroReports eventData={eventData} />
