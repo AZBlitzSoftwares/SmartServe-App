@@ -316,6 +316,28 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const ncKitchens = [...new Set(ncDishes.map(d => d.kitchen))].filter(Boolean)
   const heldCount = coverItems.filter(i => i.state === 'held').length + draftRows.length
 
+  const grouped = !query && browse === 'course' && !cuisineF && courseCats.length > 1
+  const dishCard = d => {
+    const q = draft[d.id]?.qty || 0
+    const off = d.is_available === false
+    return (
+      <div key={d.id} className={'dish' + (off ? ' off' : '')}>
+        <DishPhoto dish={d} />
+        <div className="di">
+          <div className="dn"><Veg veg={d.is_veg} />{d.name}</div>
+          <div className="dd">{d.description || (browse === 'course' && !query ? catName(d.category_id) : d.course) || ''}</div>
+          {query && <div className="dq">{d.course} · {catName(d.category_id)}</div>}
+          <div className="add">
+            <span className="k">{off ? 'Sold out' : `${d.kitchenName} kitchen`}</span>
+            {off ? null : q ? (
+              <div className="st"><button className="m" onClick={() => addDish(d.id, -1)}>−</button><span>{q}</span><button className="m" onClick={() => addDish(d.id, 1)}>+</button></div>
+            ) : <button className="btn btn-amber" style={{ padding: '5px 12px' }} onClick={() => addDish(d.id, 1)}>ADD +</button>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const takeOrder = (
     <div className="body">
       <div className="menu">
@@ -369,27 +391,14 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
                 )}
               </>
             )}
+            {grouped && <div className="mixhint">Guests can mix cuisines in every course: one from each is fine, and every dish goes to its own kitchen on its own KOT.</div>}
             <div className="grid">
-              {shown.map(d => {
-                const q = draft[d.id]?.qty || 0
-                const off = d.is_available === false
-                return (
-                  <div key={d.id} className={'dish' + (off ? ' off' : '')}>
-                    <DishPhoto dish={d} />
-                    <div className="di">
-                      <div className="dn"><Veg veg={d.is_veg} />{d.name}</div>
-                      <div className="dd">{d.description || (browse === 'course' && !query ? catName(d.category_id) : d.course) || ''}</div>
-                      {query && <div className="dq">{d.course} · {catName(d.category_id)}</div>}
-                      <div className="add">
-                        <span className="k">{off ? 'Sold out' : `${d.kitchenName} kitchen`}</span>
-                        {off ? null : q ? (
-                          <div className="st"><button className="m" onClick={() => addDish(d.id, -1)}>−</button><span>{q}</span><button className="m" onClick={() => addDish(d.id, 1)}>+</button></div>
-                        ) : <button className="btn btn-amber" style={{ padding: '5px 12px' }} onClick={() => addDish(d.id, 1)}>ADD +</button>}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
+              {grouped
+                ? courseCats.flatMap(c => {
+                    const list = shown.filter(d => d.category_id === c.id)
+                    return list.length ? [<div key={'h' + c.id} className="ghead">{c.name}<span>{list.length} · {list[0].kitchenName} kitchen</span></div>, ...list.map(dishCard)] : []
+                  })
+                : shown.map(dishCard)}
               {!shown.length && <div className="empty">{query ? 'No dish matches that search.' : 'No dishes here.'}</div>}
             </div>
           </>
