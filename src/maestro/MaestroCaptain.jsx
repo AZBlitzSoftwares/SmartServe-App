@@ -90,7 +90,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
       supabase.from('kots').select('id,kot_no,kitchen_id,kitchen_name,cover_no,barker,stage,fired_at,ready_at,dispatched_at,served_at,status,kind,is_remake,print_status')
         .eq('event_id', ev.id).eq('table_number', table).eq('kind', 'order'),
       supabase.from('ms_covers').select('*').eq('event_id', ev.id).eq('table_number', table),
-      supabase.from('captains').select('id,name,table_number').eq('event_id', ev.id).eq('table_number', table).order('created_at'),
+      supabase.from('captains').select('id,name,table_number').eq('event_id', ev.id).eq('table_number', table).eq('is_active', true).order('created_at'),
     ])
     for (const r of [items, kots, covers]) if (r.error) throw r.error
     return { items: items.data || [], kots: kots.data || [], covers: covers.data || [], captains: caps.data || [] }

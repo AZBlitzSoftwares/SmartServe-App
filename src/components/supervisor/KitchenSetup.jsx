@@ -256,7 +256,7 @@ export default function KitchenSetup({ eventData, onEventChange }) {
       supabase.from('kitchens').select('*').eq('event_id', eventId).order('sort_order'),
       supabase.from('menu_categories').select('id, event_id, name, sort_order, is_visible, kitchen_id')
         .eq('event_id', eventId).order('sort_order'),
-      supabase.from('captains').select('id, name, is_active, table_number')
+      supabase.from('captains').select('id, name, pin, mobile, is_active, table_number')
         .eq('event_id', eventId).eq('is_active', true),
       supabase.from('waiters').select('id, waiter_number, name, is_active, kitchen_id, pin')
         .eq('event_id', eventId).eq('is_active', true),
@@ -317,7 +317,7 @@ export default function KitchenSetup({ eventData, onEventChange }) {
 
     const noTable = captains.filter(x => !x.table_number)
     out.push({ key:'captains', target:'ks-captains', title:'Captains', ok: captains.length > 0 && noTable.length === 0,
-      detail: !captains.length ? 'No captains yet — add them under Control › Captains'
+      detail: !captains.length ? 'No captains yet — add them in Captains below'
         : !noTable.length ? 'All ' + plural(captains.length, 'captain') + ' linked to a table'
         : noTable.length <= 2 ? listNames(noTable) + (noTable.length === 1 ? ' has' : ' have') + ' no table'
         : plural(noTable.length, 'captain') + ' have no table' })
@@ -328,7 +328,7 @@ export default function KitchenSetup({ eventData, onEventChange }) {
     if (noKitchen.length) bits.push(noKitchen.length + ' without a kitchen')
     if (noPin.length) bits.push(noPin.length + ' without a PIN')
     out.push({ key:'waiters', target:'ks-waiters', title:'Waiters', ok: waiters.length > 0 && !bits.length,
-      detail: !waiters.length ? 'No waiters yet — add them under Control › Waiters'
+      detail: !waiters.length ? 'No waiters yet — add them in Waiters below'
         : bits.length ? bits.join(' · ')
         : 'All ' + plural(waiters.length, 'waiter') + ' have a kitchen and a PIN' })
     return out
@@ -373,8 +373,8 @@ export default function KitchenSetup({ eventData, onEventChange }) {
           refreshKey={sortedKitchens.map(k => [k.id, k.name, k.prefix, k.is_active, k.is_default].join(':')).join('|')
             + '#' + cats.map(c => c.id + ':' + (c.kitchen_id || '')).join('|')} />
       )}
-      <CaptainsSection captains={captains} setCaptains={setCaptains} tableCount={tableCount} />
-      {!eventData?.maestro && <WaitersSection waiters={waiters} setWaiters={setWaiters} kitchens={sortedKitchens} />}
+      <CaptainsSection eventId={eventId} step={4} captains={captains} setCaptains={setCaptains} tableCount={tableCount} />
+      {!eventData?.maestro && <WaitersSection eventId={eventId} waiters={waiters} setWaiters={setWaiters} kitchens={sortedKitchens} />}
     </div>
   )
 }
@@ -392,7 +392,7 @@ const CSS = `
   .ks-f-name { grid-area:name } .ks-f-prefix { grid-area:prefix } .ks-f-ip { grid-area:ip }
   .ks-f-port { grid-area:port } .ks-f-backup { grid-area:backup }
   .ks-cats   { display:grid; grid-template-columns:repeat(auto-fill, minmax(400px, 1fr)); gap:8px; }
-  .ks-caps   { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:8px; }
+  .ks-caps   { display:grid; grid-template-columns:repeat(auto-fill, minmax(310px, 1fr)); gap:8px; }
   .ks-wtrs   { display:grid; grid-template-columns:repeat(auto-fill, minmax(400px, 1fr)); gap:8px; }
   .ks-row:focus-within { border-color: var(--ink2) !important; }
   @media (max-width: 1279px) {
@@ -419,7 +419,7 @@ function Readiness({ checks, onReload }) {
   const ready = failing === 0
   const jump = id => document.getElementById(id)?.scrollIntoView({ behavior:'smooth', block:'start' })
   return (
-    <div style={{ ...card, borderTop:'4px solid ' + (ready ? GREEN : MARI) }}>
+    <div id="ks-ready" style={{ ...card, borderTop:'4px solid ' + (ready ? GREEN : MARI) }}>
       <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:12, flexWrap:'wrap' }}>
         <div style={{ flex:'1 1 240px', minWidth:0 }}>
           <div style={label}>Before service</div>
@@ -500,7 +500,7 @@ function ChairsCard({ eventData, onEventChange }) {
             sub={(eventData?.maestro
                 ? 'Captains take the order cover by cover, C1 to C' + (valid ? v : current) + '. '
                 : 'Captains pick chairs 1 to ' + (valid ? v : current) + ' when they take an order. ')
-              + (eventData?.number_of_tables ? 'Tables at this event: ' + eventData.number_of_tables + ' (change under Control › Tables).' : '')} />
+              + (eventData?.number_of_tables ? 'Tables at this event: ' + eventData.number_of_tables + ' (change under Tables, at the bottom of this page).' : '')} />
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, marginBottom:12 }}>
           <button onClick={() => step(-1)} disabled={saving} style={sq} title="One fewer">−</button>
@@ -1208,80 +1208,145 @@ function RoutingSection({ cats, setCats, kitchens, itemCounts, defaultKitchen })
 
 /* ------------------------------------------------------ captains → tables */
 
-function CaptainsSection({ captains, setCaptains, tableCount }) {
+function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount }) {
   const [ticks, tick] = useTicks()
   const [msg, setMsg] = useState(null)
+  const [add, setAdd] = useState({ name:'', pin:'', table:'' })
+  const [adding, setAdding] = useState(false)
 
   const perTable = {}
   captains.forEach(c => { if (c.table_number) perTable[c.table_number] = (perTable[c.table_number] || 0) + 1 })
   const covered = Object.keys(perTable).map(Number)
   const uncovered = tableCount ? Array.from({ length: tableCount }, (_, i) => i + 1).filter(n => !perTable[n]) : []
 
-  async function saveTable(c, value) {
-    const before = c.table_number ?? null
-    if (value === before) return true
-    setCaptains(prev => prev.map(x => x.id === c.id ? { ...x, table_number:value } : x))
-    const { error } = await supabase.from('captains').update({ table_number:value }).eq('id', c.id)
+  // One write for any field of one captain, with the old value put back if it fails
+  async function save(c, fields) {
+    const before = Object.fromEntries(Object.keys(fields).map(k => [k, c[k] ?? null]))
+    if (Object.keys(fields).every(k => (fields[k] ?? null) === before[k])) return true
+    setCaptains(prev => prev.map(x => x.id === c.id ? { ...x, ...fields } : x))
+    const { error } = await supabase.from('captains').update(fields).eq('id', c.id)
     if (error) {
-      setCaptains(prev => prev.map(x => x.id === c.id ? { ...x, table_number:before } : x))
-      setMsg({ tone:'err', text: c.name + ' — ' + errText(error) })
+      setCaptains(prev => prev.map(x => x.id === c.id ? { ...x, ...before } : x))
+      setMsg({ tone:'err', text: c.name + ' — ' + (error.code === '23505' ? 'another captain already has that name' : errText(error)) })
       return false
     }
     tick(c.id)
     return true
   }
 
+  async function remove(c) {
+    // No confirm dialog: removal is a soft delete and the captain can be added back
+    const { error } = await supabase.from('captains').update({ is_active:false }).eq('id', c.id)
+    if (error) { setMsg({ tone:'err', text: c.name + ' — ' + errText(error) }); return }
+    setCaptains(prev => prev.filter(x => x.id !== c.id))
+    setMsg({ tone:'ok', text: c.name + ' removed. Orders they already took keep their name.' })
+  }
+
+  async function create() {
+    const name = add.name.trim(), pin = add.pin.trim()
+    const table = add.table.trim() ? parseInt(add.table, 10) : null
+    if (!name) { setMsg({ tone:'err', text:'Enter the captain’s name' }); return }
+    if (!/^\d{4}$/.test(pin)) { setMsg({ tone:'err', text:'The PIN must be exactly 4 digits' }); return }
+    setAdding(true)
+    let { data, error } = await supabase.from('captains')
+      .insert({ event_id:eventId, name, pin, table_number:table, is_active:true })
+      .select('id, name, pin, mobile, is_active, table_number').single()
+    if (error?.code === '23505') {
+      // The name belongs to a captain removed earlier: bring them back with the new PIN and table
+      const { data: old } = await supabase.from('captains').select('id').eq('event_id', eventId).eq('is_active', false).ilike('name', name).maybeSingle()
+      if (old) ({ data, error } = await supabase.from('captains').update({ pin, table_number:table, is_active:true }).eq('id', old.id)
+        .select('id, name, pin, mobile, is_active, table_number').single())
+    }
+    setAdding(false)
+    if (error) {
+      setMsg({ tone:'err', text: error.code === '23505' ? 'A captain called "' + name + '" already exists at this event.' : errText(error) })
+      return
+    }
+    setCaptains(prev => [...prev, data].sort(naturalBy('name')))
+    setAdd({ name:'', pin:'', table: table ? String(table) : '' })
+    tick(data.id)
+    setMsg(null)
+  }
+  const suggestPin = () => setAdd(a => ({ ...a, pin: randomPins(1, captains.map(c => c.pin).filter(Boolean))[0] || '' }))
+
   return (
     <div style={card} id="ks-captains">
-      <SectionHead step={4} title="Captains → tables"
-        sub={'The table each captain stands at' + (tableCount ? ' (1–' + tableCount + ')' : '') + '. Saved when you leave the box or press Enter. Leave blank to unlink.'} />
+      <SectionHead step={step} title="Captains"
+        sub={'Everything about captains is here: name, sign-in PIN and the table they serve'
+          + (tableCount ? ' (1–' + tableCount + ')' : '') + '. On the tablet a captain signs in with name and PIN; the event and table are found automatically.'} />
 
       {msg && <Banner tone={msg.tone} onClose={() => setMsg(null)}>{msg.text}</Banner>}
 
-      {captains.length === 0 ? (
-        <Banner tone="info" style={{ marginBottom:0 }}>
-          No captains at this event yet. Add them under <strong>Control › Captains</strong>, then link each one to a table here.
-        </Banner>
-      ) : (
-        <>
-          <div style={{ fontSize:12.5, lineHeight:1.6, background:'var(--bg)', borderRadius:9, padding:'8px 12px',
-            marginBottom:10, color:'var(--ink2)', fontWeight:600 }}>
-            <span style={{ fontWeight:800, color:'var(--ink)' }}>Tables with captains:</span>{' '}
-            {covered.length ? ranges(covered) : 'none yet'}
-            {tableCount ? (
-              <>
-                {'  ·  '}
-                <span style={{ fontWeight:800, color: uncovered.length ? AMBER_INK : GREEN }}>Tables without a captain:</span>{' '}
-                <span style={{ color: uncovered.length ? AMBER_INK : GREEN }}>{uncovered.length ? ranges(uncovered) : 'none'}</span>
-              </>
-            ) : null}
-          </div>
-          <div className="ks-caps">
-            {captains.map(c => (
-              // Keyed on the saved table too: a new saved value starts a fresh draft
-              <CaptainRow key={c.id + ':' + (c.table_number ?? '')} c={c} tableCount={tableCount} onSave={saveTable} saved={!!ticks[c.id]}
-                crowd={c.table_number ? perTable[c.table_number] : 0} />
-            ))}
-          </div>
-        </>
+      {captains.length > 0 && (
+        <div style={{ fontSize:12.5, lineHeight:1.6, background:'var(--bg)', borderRadius:9, padding:'8px 12px',
+          marginBottom:10, color:'var(--ink2)', fontWeight:600 }}>
+          <span style={{ fontWeight:800, color:'var(--ink)' }}>Tables with captains:</span>{' '}
+          {covered.length ? ranges(covered) : 'none yet'}
+          {tableCount ? (
+            <>
+              {'  ·  '}
+              <span style={{ fontWeight:800, color: uncovered.length ? AMBER_INK : GREEN }}>Tables without a captain:</span>{' '}
+              <span style={{ color: uncovered.length ? AMBER_INK : GREEN }}>{uncovered.length ? ranges(uncovered) : 'none'}</span>
+            </>
+          ) : null}
+        </div>
       )}
+
+      {captains.length > 0 && (
+        <div className="ks-caps" style={{ marginBottom:12 }}>
+          {captains.map(c => (
+            <CaptainRow key={c.id + ':' + (c.table_number ?? '') + ':' + (c.pin ?? '')} c={c} tableCount={tableCount}
+              onSave={save} onRemove={remove} saved={!!ticks[c.id]}
+              crowd={c.table_number ? perTable[c.table_number] : 0} />
+          ))}
+        </div>
+      )}
+
+      {/* Add a captain: name, PIN and table in one line */}
+      <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', paddingTop: captains.length ? 10 : 0,
+        borderTop: captains.length ? '1px solid var(--line)' : 'none' }}>
+        <span style={{ ...label, flexShrink:0 }}>Add captain</span>
+        <input value={add.name} placeholder="Name" onChange={e => setAdd(a => ({ ...a, name:e.target.value }))}
+          onKeyDown={e => { if (e.key === 'Enter') create() }} style={{ ...input, flex:'1 1 160px', width:'auto' }} />
+        <input value={add.pin} placeholder="PIN" inputMode="numeric" maxLength={4}
+          onChange={e => setAdd(a => ({ ...a, pin:e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+          onKeyDown={e => { if (e.key === 'Enter') create() }}
+          style={{ ...input, width:84, textAlign:'center', fontWeight:900, letterSpacing:'2px' }} />
+        <button type="button" onClick={suggestPin} title="Suggest a PIN nobody else has"
+          style={{ ...btn, background:'#fff', color:'var(--ink)', border:'1.5px solid var(--line)', padding:'0 10px' }}>New PIN</button>
+        <input value={add.table} placeholder="Table" inputMode="numeric"
+          onChange={e => setAdd(a => ({ ...a, table:e.target.value.replace(/\D/g, '').slice(0, 3) }))}
+          onKeyDown={e => { if (e.key === 'Enter') create() }}
+          style={{ ...input, width:76, textAlign:'center', fontWeight:900 }} />
+        <button onClick={create} disabled={adding || !add.name.trim() || add.pin.length !== 4}
+          style={{ ...btn, opacity: (!add.name.trim() || add.pin.length !== 4) ? 0.45 : 1 }}>{adding ? 'Adding…' : 'Add'}</button>
+      </div>
     </div>
   )
 }
 
-function CaptainRow({ c, tableCount, onSave, saved, crowd }) {
+function CaptainRow({ c, tableCount, onSave, onRemove, saved, crowd }) {
   const [draft, setDraft] = useState(c.table_number ? String(c.table_number) : '')
+  const [pin, setPin] = useState(c.pin || '')
   const [err, setErr] = useState('')
 
-  async function commit() {
+  async function commitTable() {
     const s = draft.trim()
     const v = s === '' ? null : parseInt(s, 10)
     if (s !== '' && (!v || v < 1)) { setErr('Enter a table number'); setDraft(c.table_number ? String(c.table_number) : ''); return }
     setErr('')
-    await onSave(c, v)
+    await onSave(c, { table_number: v })
+  }
+  async function commitPin() {
+    const v = pin.trim()
+    if (v === (c.pin || '')) return
+    if (!/^\d{4}$/.test(v)) { setErr('PIN must be 4 digits'); setPin(c.pin || ''); return }
+    setErr('')
+    await onSave(c, { pin: v })
   }
 
   const warn = err ? err
+    : !/^\d{4}$/.test(String(c.pin || '')) ? 'Needs a 4-digit PIN'
     : !c.table_number ? 'No table yet'
     : tableCount && c.table_number > tableCount ? 'Above the ' + tableCount + ' tables at this event'
     : crowd > 2 ? crowd + ' captains on table ' + c.table_number
@@ -1294,18 +1359,24 @@ function CaptainRow({ c, tableCount, onSave, saved, crowd }) {
       background: tone === RED ? '#FEF2F2' : tone ? AMBER_BG : '#fff' }}>
       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:14, fontWeight:800, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.name}</div>
+          <div title={c.name} style={{ fontSize:14, fontWeight:800, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.name}</div>
           <div style={{ fontSize:11.5, fontWeight:700, color: tone || 'var(--ink2)', minHeight:16 }}>
             {warn || 'Table ' + c.table_number}
             <Saved show={saved} />
           </div>
         </div>
+        <input value={pin} inputMode="numeric" maxLength={4} placeholder="PIN" title="Sign-in PIN"
+          onChange={e => { setPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setErr('') }}
+          onBlur={commitPin} onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+          style={{ ...input, width:64, height:36, textAlign:'center', fontSize:14, fontWeight:900, letterSpacing:'2px', flexShrink:0 }} />
         <span style={{ ...label, fontSize:10 }}>Table</span>
         <input value={draft} inputMode="numeric" placeholder="—"
           onChange={e => { setDraft(e.target.value.replace(/\D/g, '').slice(0, 3)); setErr('') }}
-          onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
-          style={{ ...input, width:62, height:36, textAlign:'center', fontSize:15, fontWeight:900, flexShrink:0,
+          onBlur={commitTable} onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+          style={{ ...input, width:56, height:36, textAlign:'center', fontSize:15, fontWeight:900, flexShrink:0,
             borderColor: tone === RED ? '#FCA5A5' : tone ? AMBER_LINE : 'var(--line)' }} />
+        <button onClick={() => onRemove(c)} title={'Remove ' + c.name}
+          style={{ background:'none', border:'none', color:RED, fontSize:18, fontWeight:800, cursor:'pointer', padding:'0 2px', flexShrink:0 }}>×</button>
       </div>
     </div>
   )
@@ -1313,7 +1384,9 @@ function CaptainRow({ c, tableCount, onSave, saved, crowd }) {
 
 /* ------------------------------------------------------ waiters → kitchens */
 
-function WaitersSection({ waiters, setWaiters, kitchens }) {
+function WaitersSection({ eventId, waiters, setWaiters, kitchens }) {
+  const [add, setAdd] = useState({ number:'', name:'', kitchen:'' })
+  const [adding, setAdding] = useState(false)
   const [ticks, tick] = useTicks()
   const [msg, setMsg] = useState(null)
   const [issued, setIssued] = useState(null)   // [{ w, pin }] after "Give PINs"
@@ -1336,6 +1409,37 @@ function WaitersSection({ waiters, setWaiters, kitchens }) {
     }
     tick(w.id)
     return true
+  }
+
+  // Add a waiter here, with kitchen and PIN, instead of a separate Waiters tab
+  async function create() {
+    const num = add.number.trim(), nm = add.name.trim()
+    if (!num && !nm) { setMsg({ tone:'err', text:'Enter a waiter number or name' }); return }
+    setAdding(true)
+    const pin = randomPins(1, waiters.map(w => w.pin).filter(Boolean))[0]
+    const row = { event_id:eventId, waiter_number: num || nm, name: nm && num ? nm + ' (' + num + ')' : (nm || num),
+      kitchen_id: add.kitchen || null, pin, is_active:true }
+    let { data, error } = await supabase.from('waiters').insert(row)
+      .select('id, waiter_number, name, is_active, kitchen_id, pin').single()
+    if (error?.code === '23505') {
+      // Number used by a waiter removed earlier: bring that row back instead
+      const { data: old } = await supabase.from('waiters').select('id').eq('event_id', eventId).eq('is_active', false)
+        .eq('waiter_number', row.waiter_number).limit(1).maybeSingle()
+      if (old) ({ data, error } = await supabase.from('waiters').update({ name:row.name, kitchen_id:row.kitchen_id, pin, is_active:true })
+        .eq('id', old.id).select('id, waiter_number, name, is_active, kitchen_id, pin').single())
+      else error = { message:'Waiter ' + row.waiter_number + ' already exists at this event.' }
+    }
+    setAdding(false)
+    if (error) { setMsg({ tone:'err', text: errText(error) }); return }
+    setWaiters(prev => [...prev, data].sort(naturalBy('waiter_number')))
+    setIssued([{ w:data, pin }])
+    setAdd(a => ({ number:'', name:'', kitchen:a.kitchen }))
+    tick(data.id)
+  }
+  async function removeWaiter(w) {
+    const { error } = await supabase.from('waiters').update({ is_active:false }).eq('id', w.id)
+    if (error) { setMsg({ tone:'err', text: errText(error) }); return }
+    setWaiters(prev => prev.filter(x => x.id !== w.id))
   }
 
   async function givePins() {
@@ -1425,8 +1529,8 @@ function WaitersSection({ waiters, setWaiters, kitchens }) {
       )}
 
       {waiters.length === 0 ? (
-        <Banner tone="info" style={{ marginBottom:0 }}>
-          No waiters at this event yet. Add them under <strong>Control › Waiters</strong>, then give each one a kitchen and a PIN here.
+        <Banner tone="info" style={{ marginBottom:10 }}>
+          No waiters at this event yet. Add them below: each one gets a kitchen and a PIN straight away.
         </Banner>
       ) : (
         <>
@@ -1454,16 +1558,33 @@ function WaitersSection({ waiters, setWaiters, kitchens }) {
               // Keyed on the PIN too: one set by Give PINs replaces the draft and any old complaint
               <WaiterRow key={w.id + ':' + (w.pin ?? '')} w={w} kitchens={kitchens} activeIds={activeIds} saved={!!ticks[w.id]}
                 onKitchen={id => patch(w, { kitchen_id: id || null }, { kitchen_id: w.kitchen_id ?? null })}
-                onPin={pin => patch(w, { pin }, { pin: w.pin ?? null })} />
+                onPin={pin => patch(w, { pin }, { pin: w.pin ?? null })} onRemove={() => removeWaiter(w)} />
             ))}
           </div>
         </>
       )}
+
+      <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', paddingTop:10, marginTop:10,
+        borderTop:'1px solid var(--line)' }}>
+        <span style={{ ...label, flexShrink:0 }}>Add waiter</span>
+        <input value={add.number} placeholder="No. e.g. 07" onChange={e => setAdd(a => ({ ...a, number:e.target.value }))}
+          onKeyDown={e => { if (e.key === 'Enter') create() }} style={{ ...input, width:100 }} />
+        <input value={add.name} placeholder="Name (optional)" onChange={e => setAdd(a => ({ ...a, name:e.target.value }))}
+          onKeyDown={e => { if (e.key === 'Enter') create() }} style={{ ...input, flex:'1 1 150px', width:'auto' }} />
+        <select value={add.kitchen} onChange={e => setAdd(a => ({ ...a, kitchen:e.target.value }))}
+          style={{ ...input, width:150, cursor:'pointer' }}>
+          <option value="">Kitchen…</option>
+          {active.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
+        </select>
+        <button onClick={create} disabled={adding || (!add.number.trim() && !add.name.trim())}
+          style={{ ...btn, opacity: (!add.number.trim() && !add.name.trim()) ? 0.45 : 1 }}>{adding ? 'Adding…' : 'Add'}</button>
+        <span style={{ fontSize:11.5, color:'var(--ink2)' }}>A PIN is given automatically.</span>
+      </div>
     </div>
   )
 }
 
-function WaiterRow({ w, kitchens, activeIds, saved, onKitchen, onPin }) {
+function WaiterRow({ w, kitchens, activeIds, saved, onKitchen, onPin, onRemove }) {
   const [pin, setPin] = useState(w.pin || '')
   const [err, setErr] = useState('')
 
@@ -1508,6 +1629,8 @@ function WaiterRow({ w, kitchens, activeIds, saved, onKitchen, onPin }) {
           onBlur={commitPin} onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
           style={{ ...input, width:70, height:36, textAlign:'center', fontSize:14, fontWeight:900, letterSpacing:'2px',
             flexShrink:0, borderColor: err ? RED : pinOk ? 'var(--line)' : AMBER_LINE }} />
+        {onRemove && <button onClick={onRemove} title="Remove waiter"
+          style={{ background:'none', border:'none', color:RED, fontSize:18, fontWeight:800, cursor:'pointer', padding:'0 2px', flexShrink:0 }}>×</button>}
       </div>
     </div>
   )

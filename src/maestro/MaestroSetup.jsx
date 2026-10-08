@@ -70,7 +70,7 @@ export function MaestroPreService({ eventData, nonce }) {
   const bad = checks.filter(c => !c.ok).length
   return (
     <div className="ms">
-      <div className="card" style={{ borderColor: bad ? 'var(--warn)' : 'var(--green)' }}>
+      <div className="card" id="ms-ready" style={{ borderColor: bad ? 'var(--warn)' : 'var(--green)' }}>
         <h3>Pre-service check <span className={bad ? 'tagN' : 'tagF'} style={{ fontSize: 12 }}>{bad ? `${bad} to fix` : 'Ready for service'}</span></h3>
         {checks.map((c, i) => <div className="chk" key={i}><i className={c.ok ? 'ok' : 'bad'}>{c.ok ? '✓' : '!'}</i>{c.t}</div>)}
         <p className="sub" style={{ margin: '6px 0 0' }}>Kitchen screens: open <b>{location.origin}/kitchen</b> on each barker's system. Stewards need no device: the KOT tells them the table and cover.</p>
@@ -128,7 +128,7 @@ function ServiceSettings({ ev, onEventChange }) {
     if (data && onEventChange) onEventChange(data)
   }
   return (
-    <div className="card">
+    <div className="card" id="ms-courses">
       <h3>Service settings <Saved at={saved} /></h3>
       <p className="sub">The courses in the order they are served. The first course is served to every guest as soon as they are seated, if switched on.</p>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
@@ -168,7 +168,7 @@ function KitchenRules({ ev, d, setD, onChanged }) {
   }
   const active = d.kitchens.filter(k => k.is_active)
   return (
-    <div className="card">
+    <div className="card" id="ms-rules">
       <h3>Kitchen rules <Saved at={saved} /></h3>
       <p className="sub">Which kitchen prepares a dish: a kitchen chosen for the dish itself first, then a <b>course rule</b> below (for example every Dessert goes to the Desserts kitchen, whatever its cuisine), then the kitchen of its <b>cuisine</b> (menu category, set above), then the default kitchen.</p>
       {msg && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</p>}
@@ -235,7 +235,7 @@ function DishSplit({ ev, d, setD, onChanged }) {
   const barkerName = side => d.barkers.find(b => b.kitchen_id === k?.id && b.side === side && b.is_active)?.name
 
   return (
-    <div className="card">
+    <div className="card" id="ms-dishes">
       <h3>Dishes: course and barker <Saved at={saved} /></h3>
       <p className="sub">Every dish needs a course. Inside each kitchen the dishes are split between Barker A and Barker B, so a rush is shared. Choose a kitchen for a single dish only when it must go somewhere other than its rule.</p>
       {msg && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</p>}
@@ -317,7 +317,7 @@ function Barkers({ ev, d, setD, onChanged }) {
     try { navigator.clipboard.writeText(lines.join('\n')); setMsg('Copied the sign-in list.') } catch { setMsg(lines.join(' | ')) }
   }
   return (
-    <div className="card">
+    <div className="card" id="ms-barkers">
       <h3>Barkers <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Saved at={saved} /><button className="btn btn-ghost" onClick={givePins}>Give missing PINs</button><button className="btn btn-ghost" onClick={copy}>Copy sign-in list</button></span></h3>
       <p className="sub">Each barker signs in on their kitchen screen with their name and PIN. The name is printed on their KOTs.</p>
       {msg && <p style={{ color: msg.startsWith('Copied') ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{msg}</p>}
