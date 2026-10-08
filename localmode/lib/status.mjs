@@ -21,7 +21,7 @@ export async function statusCommand() {
       console.log(`Test database: ${snap.standin ? 'STAND-IN structure' : `cloud structure (read only, ${fmtDateTime(snap.downloadedAt)})`} + ${(snap.dbFiles || []).map((f) => `${f.file} ${f.ok ? 'OK' : 'WITH ERRORS'}`).join(', ') || 'no ../db files'}`)
     }
     for (const e of snap.events) console.log(`Event:       ${eventLabel(e)}`)
-    if (!snap.events.length) console.log('Event:       none' + (isDevSnapshot(snap) ? ' (node ss-local.mjs demo makes three demo events)' : ''))
+    if (!snap.events.length) console.log('Event:       none' + (isDevSnapshot(snap) ? ' (node ss-local.mjs demo makes four demo events)' : ''))
     if (!isDevSnapshot(snap)) console.log(`Downloaded:  ${fmtDateTime(snap.downloadedAt)} (${fmtAgo(Date.now() - Date.parse(snap.downloadedAt))}, ${snap.kind === 'refresh' ? 'refresh' : 'full prepare'})`)
     const c = snap.rowCounts || {}
     console.log(`Downloaded rows: ${Object.entries(c).filter(([, n]) => n).map(([t, n]) => `${t} ${n}`).join(', ')}`)

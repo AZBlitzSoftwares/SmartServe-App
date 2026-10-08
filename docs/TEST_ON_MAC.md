@@ -6,7 +6,7 @@ Everything below runs **on your MacBook only**. The cloud is never changed:
   structure to a database on the Mac, and applies the new `db/*.sql` updates **to the Mac's copy only**.
 - In this test mode the local server **never uploads** anything, so test orders stay on the Mac.
 
-You need: the repo at `~/SmartServe`, Node.js, Terminal (zsh), and a phone or tablet on the **same Wi-Fi**
+You need: the repo at `~/SmartServe`, Node.js **20 or newer** (`node -v` shows `v20...` or higher), Terminal (zsh), and a phone or tablet on the **same Wi-Fi**
 as the Mac. No printer needed (Virtual Printers). Allow about 30 minutes.
 
 Open a new Terminal window with **Cmd+N**. Copy each grey block, paste it into Terminal, press Enter.
@@ -15,11 +15,13 @@ Open a new Terminal window with **Cmd+N**. Copy each grey block, paste it into T
 
 ## 0. Get the branch (skip if done)
 
-Put `multikitchen.bundle` in `~/SmartServe`, then:
+Put `maestro.bundle` in `~/SmartServe`, then:
 
 ```zsh
-cd ~/SmartServe && git fetch ./multikitchen.bundle multikitchen:multikitchen && git checkout multikitchen
+cd ~/SmartServe && git fetch ./maestro.bundle maestro && git checkout -B maestro-latest FETCH_HEAD
 ```
+
+(Uncommitted changes in `~/SmartServe` stop the checkout: `git status` shows them.)
 
 ## 1. Install and build the app (Terminal window 1)
 
@@ -91,7 +93,7 @@ DONE - TEST DATABASE ready on this laptop. Nothing was written to the cloud.
 node ss-local.mjs demo
 ```
 
-It creates three events dated **today** and prints every login. They are also saved here:
+It creates four events dated **today** and prints every login. They are also saved here:
 `cat ~/SmartServe/localmode/data/demo-logins.txt`
 
 | Event | Who | Login |
@@ -102,12 +104,17 @@ It creates three events dated **today** and prints every login. They are also sa
 | | Waiters (assigned at the desk) | Ganesh (21), Harish (22), Javed (23) |
 | Demo · Multi-Kitchen (10 tables x 10 chairs) | Captains | `Rahul` / `1111` (table 1), `Imran` / `2222` (table 1), `Sameer` / `3333` (table 2), `Ayesha` / `4444` (table 3) |
 | | Waiter phones (`/waiter`) | `Arjun` 5101 Indian, `Salim` 5102 Arabic, `Kiran` 5103 Chinese, `Ravi` 5104 Italian, `Manoj` 5105 Mexican, `Tariq` 5106 Turkish |
+| Demo · Smart Serve Maestro (15 tables x 10 covers) | Captains | `Neha` / `7071` and `Arjun` / `7072` (table 7), `Rahul` / `1111`, `Imran` / `2222` (table 1), `Sameer` / `3333`, `Ayesha` / `4444` (table 2), `Faiz` / `8081` (8), `Priya` / `3131` (3) |
+| | Kitchen Display (`/kitchen`) | First Course `Sanjay` 6100; Italian `Ajay` 6201 / `Vijay` 6202; Asian `Rohit` 6301 / `Kunal` 6302; Modern Indian `Farhan` 6401 / `Sunil` 6402; Desserts `Pooja` 6501 / `Meena` 6502 |
 
 \* With 4a your real admin is copied from the cloud, so use your usual admin PIN (the demo prints which).
 
 Multi-kitchen kitchens: Indian IN (default), Arabic AR, Chinese CH, Italian IT, Mexican MX, Turkish TR,
 printers `127.0.0.1` ports 9101-9106 (in that order). **Desserts** and **Beverages** have no kitchen on
 purpose: they print in the default kitchen (Indian).
+
+Maestro kitchens: First Course FC 9101, Italian IT 9102, Asian AS 9103 (default), Modern Indian MI 9104,
+Desserts DS 9105, with the sample menu (Italian, Asian, Modern Indian; seven courses).
 
 ## 6. Start the Virtual Printers (Terminal window 2: Cmd+N)
 
@@ -116,7 +123,8 @@ cd ~/SmartServe/printhub && node fake-printer.mjs --kitchens 6 --open
 ```
 
 The page **http://localhost:9180** opens: six printers, each with Paper OK / Paper low / Paper out and
-Switch off / Switch on. Leave the window open.
+Switch off / Switch on. Leave the window open. (If the Maestro Test launcher's Virtual Printers are
+already running, that page is already open: skip this step.)
 
 ## 7. Start the local server (Terminal window 3: Cmd+N)
 
@@ -137,7 +145,7 @@ cd ~/SmartServe/localmode && node ss-local.mjs start
 cd ~/SmartServe/localmode && node ss-local.mjs printhub
 ```
 
-Check: `Printing KOTs for event: Demo · Multi-Kitchen` and six printers **ONLINE**.
+Check: `Printing KOTs for event: Demo · Multi-Kitchen` and `Demo · Smart Serve Maestro`, printers **ONLINE**.
 
 ## 9. Test checklist
 
@@ -169,6 +177,13 @@ Phone/tablet on the **same Wi-Fi** as the Mac, browser to `http://<mac-ip>:8080`
 - [ ] Captain: **Track** -> latest order -> **Cancel** (within 2 minutes) -> a **CANCEL** slip prints in that kitchen.
 - [ ] Desk: Control -> **Kitchens** lists the six kitchens with their printers.
 
+**D. Smart Serve Maestro**
+- [ ] Device: **Captain** -> `Neha` / `7071` -> table 7 -> **Mark C1 seated**: a First Course KOT prints on 9101.
+- [ ] **By course** -> Canapés: add one Italian and one Modern Indian canapé; Soup: add one Asian soup -> **Save & fire Canapés**.
+- [ ] Two KOTs print: Italian (9102) and Modern Indian (9104); the soup waits (held) until it is fired.
+- [ ] Kitchen PC: `http://<mac-ip>:8080/kitchen` -> `Ajay` / `6201` -> the Italian KOT -> Received -> Send to chef -> Ready.
+- [ ] Desk: **Demo · Smart Serve Maestro** -> **Control Desk**: kitchens, table 7, nothing late.
+
 ## 10. Offline test (the important one)
 
 Keep everything running. Cut the **internet** but keep the **Wi-Fi** between the Mac and the phone:
@@ -176,7 +191,7 @@ unplug the internet (WAN) cable from the router, or switch off the router's inte
 
 - [ ] On the Mac: `curl -sI https://www.google.com` fails (no internet), the phone still opens `http://<mac-ip>:8080`.
 - [ ] Phone: switch **mobile data off**. If it says *Wi-Fi has no internet*, choose **Stay connected / Keep**.
-- [ ] Repeat one order of **C** (and one of **A**): order, slips, waiter Delivered, Kitchen Board - all must work.
+- [ ] Repeat one order of **C**, one of **D** (and one of **A**): order, slips, waiter Delivered / kitchen display, Kitchen Board - all must work.
 
 Plug the internet back in when done.
 
@@ -192,7 +207,7 @@ Plug the internet back in when done.
 | `node ss-local.mjs status` | test mode, events, server running or not |
 
 - **Stop:** **Ctrl+C** in each window (Print Hub: press it twice if it waits for a printer).
-- **Reset the test data** (deletes all test orders, recreates the three demo events and logins):
+- **Reset the test data** (deletes all test orders, recreates the four demo events and logins):
   ```zsh
   cd ~/SmartServe/localmode && node ss-local.mjs demo --remove && node ss-local.mjs demo
   ```

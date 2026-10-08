@@ -1,8 +1,9 @@
-// "demo": three demo events dated TODAY in the laptop's TEST database, so all
-// three ways of working can be tried at once:
+// "demo": four demo events dated TODAY in the laptop's TEST database, so all
+// four ways of working can be tried at once:
 //   Demo · Guest Self-Service   guest tablets order for themselves
 //   Demo · Captain Service      captains take orders, the desk assigns waiters
 //   Demo · Multi-Kitchen        captain + chairs, one KOT per kitchen, Virtual Printers
+//   Demo · Smart Serve Maestro  covers and courses, barkers, kitchen display, sample menu
 // Running it again recreates them (fixed ids, so it is safe to repeat and
 // cached logins on the tablets stay valid). "demo --remove" deletes them.
 // Only for a test database ("prepare --dev"): never on an event download.
@@ -14,6 +15,7 @@ import {
   serverRunning, plural,
 } from './common.mjs'
 import { refuseRoot, pgBins, withPostgres, connectLocal } from './runtime.mjs'
+import { DB_DIR } from './devdb.mjs'
 
 export const DEMO_IDS = {
   self: '00000000-0000-4000-8000-0000000de301',
@@ -464,6 +466,7 @@ function summary({ today, port, st, running }) {
   L.push(`   Printers: the Virtual Printers on this laptop, ports ${KITCHENS[0].port}-${KITCHENS[KITCHENS.length - 1].port}.`)
   L.push('')
   L.push(`4) ${maestro.name}   ${maestro.tables} tables x ${maestro.chairs} covers`)
+  if (st.sampleMenu) L.push('   Menu: the sample menu - Italian, Asian, Modern Indian; seven courses; desserts from the Desserts kitchen.')
   L.push(`   Tablet link -> "Captain" -> ${maestro.captains.map(([n, p, t]) => `${n} ${p} (table ${t})`).join(', ')}`)
   L.push(`   Kitchen Display ${base}/kitchen  (barker name + PIN):`)
   for (const kt of maestro.kitchens) {
@@ -474,6 +477,24 @@ function summary({ today, port, st, running }) {
   L.push('')
   L.push('Reset the test data: node ss-local.mjs demo      Remove: node ss-local.mjs demo --remove')
   return L.join('\n')
+}
+
+// The Maestro demo gets the full sample menu (three cuisines, seven courses): the same
+// ../db/demo_maestro_menu.sql that sets up the cloud demo, run inside this transaction.
+// Without that file (or if it fails) the short menu above stays.
+async function sampleMaestroMenu(db) {
+  const f = path.join(DB_DIR, 'demo_maestro_menu.sql')
+  if (!fs.existsSync(f)) return false
+  await db.query('savepoint sample_menu')
+  try {
+    await db.query(fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, ''))
+    await db.query('release savepoint sample_menu')
+    return true
+  } catch (e) {
+    await db.query('rollback to savepoint sample_menu')
+    console.log(`  NOTE: the sample menu was not loaded (${String(e.message).split('\n')[0]}); the short demo menu is used.`)
+    return false
+  }
 }
 
 // ---------------------------------------------------------------- command
@@ -507,6 +528,7 @@ export async function demoCommand({ remove = false } = {}) {
       try {
         const deleted = await deleteDemo(db, cols)
         const st = remove ? null : await createDemo(db, cols, today)
+        if (st) st.sampleMenu = await sampleMaestroMenu(db)
         await db.query('commit')
         return { deleted, st }
       } catch (e) {

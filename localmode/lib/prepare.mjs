@@ -275,7 +275,7 @@ export async function prepareCommand({ refresh = false, force = false, dev = fal
     console.log(`  Database updates applied here: ${dbRes.length ? dbRes.map((r) => `${r.file} ${r.ok ? 'OK' : 'WITH ERRORS'}`).join(', ') : 'none found in ../db'}`)
     if (bad.length) console.log(`  !! Some statements failed - see ${P.report}`)
     console.log(`  Report: ${P.report}`)
-    console.log('\nNext:  node ss-local.mjs demo     (three demo events dated today)\n       node ss-local.mjs start')
+    console.log('\nNext:  node ss-local.mjs demo     (four demo events dated today)\n       node ss-local.mjs start')
     return
   }
   console.log(`\nDONE${refresh ? ' - data refreshed' : ''}: ${events.map((e) => e.name).join(' and ')} ${events.length > 1 ? 'are' : 'is'} on this laptop.`)
@@ -374,6 +374,6 @@ async function prepareStandin({ force }) {
   if (bad.length) console.log(`  !! Some statements failed - see ${P.report}`)
   console.log(`  Report: ${P.report}\n`)
   for (const l of STANDIN_WARNING) console.log(l)
-  console.log('\nNext:  node ss-local.mjs demo     (three demo events dated today)\n       node ss-local.mjs start')
+  console.log('\nNext:  node ss-local.mjs demo     (four demo events dated today)\n       node ss-local.mjs start')
 }
 

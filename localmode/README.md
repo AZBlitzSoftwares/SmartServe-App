@@ -195,7 +195,7 @@ node ss-local.mjs printhub [Print Hub options]   ../printhub/printhub.mjs --serv
 Test mode (try changes before they reach the cloud - step by step: ../docs/TEST_ON_MAC.md):
 node ss-local.mjs prepare --dev [--force]        cloud structure (read only) + ../db/*.sql on the laptop
 node ss-local.mjs prepare --dev --standin        no cloud at all: dev/standin-schema.sql + ../db/*.sql
-node ss-local.mjs demo [--remove]                three demo events dated today (logins: data/demo-logins.txt)
+node ss-local.mjs demo [--remove]                four demo events dated today (logins: data/demo-logins.txt)
 ```
 
 - **Test mode** (`prepare --dev`): the cloud database connection is opened read-only
@@ -212,9 +212,11 @@ node ss-local.mjs demo [--remove]                three demo events dated today (
 - `--standin` builds the database from `dev/standin-schema.sql` (an approximation of the live tables
   before the multi-kitchen update) + `../db/*.sql`, with no cloud connection and no `config.json`
   needed. It warns that the real structure must be tested with `prepare --dev` before an event.
-- `demo` (test mode only) deletes and recreates, in one transaction, three events dated today with
+- `demo` (test mode only) deletes and recreates, in one transaction, four events dated today with
   fixed ids (`...de301` guest self-service, `...de302` captain service, `...de303` captain
-  multi-kitchen with six kitchens on the Virtual Printers `127.0.0.1:9101-9106`), their menus,
+  multi-kitchen with six kitchens on the Virtual Printers `127.0.0.1:9101-9106`, `...de304` Smart
+  Serve Maestro with five kitchens on `9101-9105` and the sample menu from
+  `../db/demo_maestro_menu.sql`), their menus,
   tables, captains, waiters, supervisor `Demo Supervisor`/9090 and help items; child rows get ids
   derived from the event, so cached sessions on tablets stay valid. Only columns that exist are
   written. It adds `admin`/9999 if there is no `admin` login. `demo --remove` deletes them, children

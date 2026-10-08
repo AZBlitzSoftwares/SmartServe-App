@@ -11,7 +11,7 @@
 // Testing before anything goes to the cloud (TEST MODE - never writes to the cloud):
 //   node ss-local.mjs prepare --dev [--force]      cloud structure (read only) + ../db/*.sql on the laptop
 //   node ss-local.mjs prepare --dev --standin      no cloud at all: dev/standin-schema.sql + ../db/*.sql
-//   node ss-local.mjs demo [--remove]              three demo events dated today (guest, captain, multi-kitchen)
+//   node ss-local.mjs demo [--remove]              four demo events dated today (guest, captain, multi-kitchen, Maestro)
 //
 // Exit codes (used by the launchers): 0 done/stopped, 2 something to fix by
 // the operator (do not restart), anything else an unexpected stop.
