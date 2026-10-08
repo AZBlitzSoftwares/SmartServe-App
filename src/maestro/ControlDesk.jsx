@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
-import { lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, ago, tc } from './msData'
+import { lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, ago, tc, eventDishes } from './msData'
 
 const WAIT_MS = 2 * 60000      // a plate Ready this long without a steward is an alert
 
@@ -35,13 +35,13 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
       supabase.from('captains').select('id,name,table_number,is_active').eq('event_id', ev.id),
       supabase.from('barkers').select('id,name,side,kitchen_id,is_active,last_seen_at').eq('event_id', ev.id),
       supabase.from('sos_requests').select('id,table_id,table_number,captain_id,request_type,status,created_at,tables(table_number)').eq('event_id', ev.id).in('status', ['open', 'acknowledged', 'in_progress']),
-      supabase.from('menu_items').select('id,name,sold_out_at,sold_out_by').eq('event_id', ev.id).eq('is_available', false).not('sold_out_at', 'is', null),
+      eventDishes(ev.id, 'id,name,is_available,sold_out_at,sold_out_by'),
     ])
     for (const r of [kitchens, kots, items]) if (r.error) throw r.error
     return {
       ev: evr.data || ev, kitchens: kitchens.data || [], kots: kots.data || [], items: items.data || [],
       covers: covers.data || [], caps: (caps.data || []).filter(c => c.is_active !== false), barkers: (barkers.data || []).filter(b => b.is_active !== false),
-      sos: sos.error ? [] : (sos.data || []), sold: sold.data || [],
+      sos: sos.error ? [] : (sos.data || []), sold: (sold.data || []).filter(m => m.is_available === false && m.sold_out_at),
     }
   }, { eventId: ev.id, tables: ['kots', 'ms_items', 'ms_covers', 'kitchens', 'sos_requests'], intervalMs: 4000 })
 

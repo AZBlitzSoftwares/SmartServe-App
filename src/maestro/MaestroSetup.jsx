@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import './maestro.css'
-import { coursesOf, routeDish, errText, useNow } from './msData'
+import { coursesOf, routeDish, errText, useNow, eventDishes } from './msData'
 
 const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(:\d{1,5})?$/
 
@@ -22,7 +22,7 @@ function useSetupData(eventId, nonce) {
       const [k, c, m, b, cp] = await Promise.all([
         supabase.from('kitchens').select('*').eq('event_id', eventId).order('sort_order'),
         supabase.from('menu_categories').select('*').eq('event_id', eventId).order('sort_order'),
-        supabase.from('menu_items').select('*').eq('event_id', eventId).order('sort_order'),
+        eventDishes(eventId),
         supabase.from('barkers').select('*').eq('event_id', eventId).order('created_at'),
         supabase.from('captains').select('id,name,table_number,is_active').eq('event_id', eventId).eq('is_active', true),
       ])

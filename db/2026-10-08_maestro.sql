@@ -428,7 +428,8 @@ begin
         from unnest(v_new) cv
         cross join menu_items m
         cross join lateral ms_route(p_event_id, m.id) r
-       where m.event_id = p_event_id and m.course = v_first and coalesce(m.is_available, true)
+       where m.category_id in (select c.id from menu_categories c where c.event_id = p_event_id)
+         and m.course = v_first and coalesce(m.is_available, true)
       returning id
     )
     select array_agg(id) into v_ids from ins;

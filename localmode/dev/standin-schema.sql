@@ -20,7 +20,7 @@ create table tables (id uuid primary key default gen_random_uuid(), event_id uui
 create table captains (id uuid primary key default gen_random_uuid(), event_id uuid references events(id) on delete cascade, name text, pin text, mobile text, is_active boolean default true, created_at timestamptz default now());
 create table waiters (id uuid primary key default gen_random_uuid(), event_id uuid references events(id) on delete cascade, waiter_number text, name text, mobile text, is_active boolean default true, created_at timestamptz default now());
 create table menu_categories (id uuid primary key default gen_random_uuid(), event_id uuid references events(id) on delete cascade, name text, sort_order int, is_visible boolean default true, created_at timestamptz default now());
-create table menu_items (id uuid primary key default gen_random_uuid(), category_id uuid references menu_categories(id) on delete cascade, event_id uuid, name text, description text,
+create table menu_items (id uuid primary key default gen_random_uuid(), category_id uuid references menu_categories(id) on delete cascade, name text, description text,
   is_veg boolean default true, is_available boolean default true, photo_url text, is_live_counter boolean default false, sort_order int, created_at timestamptz default now());
 create table orders (id uuid primary key default gen_random_uuid(), event_id uuid references events(id) on delete cascade, table_id uuid references tables(id), status text default 'pending',
   captain_id uuid references captains(id), waiter_id uuid references waiters(id), assigned_at timestamptz, delivered_at timestamptz, cancel_reason text, created_at timestamptz default now());

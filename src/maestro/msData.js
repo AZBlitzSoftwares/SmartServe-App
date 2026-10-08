@@ -169,14 +169,28 @@ export function useNow(ms = 1000) {
   return now
 }
 
+// Dishes belong to an event through their category (menu_items has no
+// event_id of its own in the live database).
+export async function eventDishes(eventId, columns = '*', catIds = null) {
+  let ids = catIds
+  if (!ids) {
+    const c = await supabase.from('menu_categories').select('id').eq('event_id', eventId)
+    if (c.error) return { data: null, error: c.error }
+    ids = (c.data || []).map(x => x.id)
+  }
+  if (!ids.length) return { data: [], error: null }
+  return supabase.from('menu_items').select(columns).in('category_id', ids).order('sort_order')
+}
+
 // Menu, kitchens and barkers of one event, with every dish routed.
 export async function loadMenu(eventId) {
-  const [cats, dishes, kitchens] = await Promise.all([
+  const [cats, kitchens] = await Promise.all([
     supabase.from('menu_categories').select('*').eq('event_id', eventId).order('sort_order'),
-    supabase.from('menu_items').select('*').eq('event_id', eventId).order('sort_order'),
     supabase.from('kitchens').select('*').eq('event_id', eventId).order('sort_order'),
   ])
-  for (const r of [cats, dishes, kitchens]) if (r.error) throw r.error
+  for (const r of [cats, kitchens]) if (r.error) throw r.error
+  const dishes = await eventDishes(eventId, '*', (cats.data || []).map(c => c.id))
+  if (dishes.error) throw dishes.error
   const catsById = Object.fromEntries((cats.data || []).map(c => [c.id, c]))
   const list = (dishes.data || []).map(d => {
     const r = routeDish(d, catsById, kitchens.data)

@@ -80,7 +80,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   useEffect(() => { try { setDrafts(JSON.parse(localStorage.getItem(draftKey) || '{}')) } catch { setDrafts({}) } }, [draftKey])
   useEffect(() => { try { localStorage.setItem(draftKey, JSON.stringify(drafts)) } catch { /* full */ } }, [drafts, draftKey])
 
-  const menuQ = useLive(() => loadMenu(ev.id), { eventId: ev.id, tables: ['menu_items'], intervalMs: 20000 })
+  const menuQ = useLive(() => loadMenu(ev.id), { eventId: ev.id, tables: [], intervalMs: 15000 })
   const menu = menuQ.data
 
   const liveQ = useLive(async () => {
