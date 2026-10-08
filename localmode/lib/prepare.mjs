@@ -259,7 +259,7 @@ export async function prepareCommand({ refresh = false, force = false, dev = fal
     kind: refresh ? 'refresh' : 'full',
     mode: dev ? 'dev' : 'event',
     cloudUrl: cfg.cloud.url,
-    events: events.map((e) => ({ id: e.id, name: e.name, date: e.date, service_mode: e.service_mode, multi_kitchen: e.multi_kitchen })),
+    events: events.map((e) => ({ id: e.id, name: e.name, date: e.date, service_mode: e.service_mode, multi_kitchen: e.multi_kitchen, maestro: !!e.maestro })),
     rowCounts: counts,
     kitchens,
     media: { total: media.total, failed: media.failed.length },

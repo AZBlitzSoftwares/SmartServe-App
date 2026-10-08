@@ -12,7 +12,8 @@ import { resetUploadedBaseline } from './upload.mjs'
 
 const EV = 'event_id::text = any($1::text[])'
 const EVENT_COLS = `e.id::text as id, e.name, e.date::text as date, to_jsonb(e)->>'service_mode' as service_mode,
-                    coalesce((to_jsonb(e)->>'multi_kitchen')::boolean, false) as multi_kitchen`
+                    coalesce((to_jsonb(e)->>'multi_kitchen')::boolean, false) as multi_kitchen,
+                    coalesce((to_jsonb(e)->>'maestro')::boolean, false) as maestro`
 
 // ---------------------------------------------------------------- choosing events
 
@@ -64,7 +65,7 @@ export async function chooseEvents(cloud, cfg, { optional = false } = {}) {
     console.log(`\nReal events from ${fmtDay(from)} to ${fmtDay(to)} (copied READ-ONLY, only if you want them):\n`)
     rows.forEach((e, i) => {
       const mode = e.service_mode === 'captain' ? 'captain service' : 'guest self-service'
-      console.log(`   ${String(i + 1).padStart(2)})  ${fmtDay(e.date)}   ${e.name.padEnd(28)}  ${mode.padEnd(18)}  ${e.multi_kitchen ? 'multi-kitchen' : ''}`)
+      console.log(`   ${String(i + 1).padStart(2)})  ${fmtDay(e.date)}   ${e.name.padEnd(28)}  ${mode.padEnd(18)}  ${e.maestro ? 'Smart Serve Maestro' : e.multi_kitchen ? 'multi-kitchen' : ''}`)
     })
     const reader = lineReader('')
     try {
@@ -84,7 +85,7 @@ export async function chooseEvents(cloud, cfg, { optional = false } = {}) {
   rows.forEach((e, i) => {
     const mode = e.service_mode === 'captain' ? 'captain service' : 'guest self-service'
     const mark = remembered.includes(i + 1) ? '*' : ' '
-    console.log(` ${mark}${String(i + 1).padStart(2)})  ${fmtDay(e.date)}   ${e.name.padEnd(28)}  ${mode.padEnd(18)}  ${e.multi_kitchen ? 'multi-kitchen' : ''}`)
+    console.log(` ${mark}${String(i + 1).padStart(2)})  ${fmtDay(e.date)}   ${e.name.padEnd(28)}  ${mode.padEnd(18)}  ${e.maestro ? 'Smart Serve Maestro' : e.multi_kitchen ? 'multi-kitchen' : ''}`)
   })
   console.log(remembered.length ? '\n  * = downloaded last time\n' : '')
   const question = remembered.length

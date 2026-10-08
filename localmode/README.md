@@ -3,7 +3,7 @@
 When the venue internet is slow or gone, **one laptop runs the whole event** over the event router:
 captain tablets, guest tablets, waiter phones, the desk and the Print Hub all talk to the laptop instead
 of the cloud. It is the same app with a copy of the event's data, so every event type works
-(guest self-service, captain service, captain multi-kitchen).
+(guest self-service, captain service, captain multi-kitchen, Smart Serve Maestro).
 
 - **Plan A** (normal): everything runs on the cloud, as always.
 - **Plan B** (bad internet): switch every device to the laptop. The laptop sends its orders to the
@@ -60,6 +60,7 @@ You need a Mac (Apple Silicon or Intel) or a Windows 10/11 laptop, with its char
    - Captain and guest tablets: `http://192.168.1.10:8080/`
    - Waiter phones: `http://192.168.1.10:8080/waiter`
    - Desk: `http://192.168.1.10:8080/supervisor`
+   - Smart Serve Maestro kitchen screens (barkers): `http://192.168.1.10:8080/kitchen`
 8. **Power**: set the laptop never to sleep when plugged in, and keep the lid open during the event.
    (Mac: System Settings -> Battery/Energy. Windows: Settings -> System -> Power.)
 9. Do one test run (next section), so the **firewall question** is answered at the office, not at the venue:
@@ -102,8 +103,11 @@ Decide once, then switch **all** devices. Stay on Plan B until the event ends.
 2. Double-click **Start Local Server**. Wait for the panel with the links and *Database OK API OK*.
    For staff to scan the links: open `http://localhost:8080/qr` on the laptop screen.
 3. On **every** tablet and phone, open the browser and type the link from the panel (or your card):
-   captains and guest tablets `http://192.168.1.10:8080/`, waiters `.../waiter`.
-   **Captains and waiters sign in again** (same names and PINs). Guest tablets choose their table again.
+   captains and guest tablets `http://192.168.1.10:8080/`, waiters `.../waiter`, Maestro kitchen
+   screens `.../kitchen`.
+   **Captains, waiters and barkers sign in again** (same names and PINs). Guest tablets choose their table again.
+   Smart Serve Maestro: dishes a captain had held but not fired on the cloud are on the laptop only if
+   **Refresh Event Data** ran; otherwise the captain takes them again (the course board shows what is there).
 4. **Print Hub**: close the normal Print Hub window (Ctrl+C), then double-click
    **Start Print Hub (Local)** in this folder. Check every printer shows ONLINE.
 5. **Desk**: open `http://192.168.1.10:8080/supervisor` and log in.
@@ -111,7 +115,8 @@ Decide once, then switch **all** devices. Stay on Plan B until the event ends.
 On the server window, *Tablets/phones seen in the last 2 minutes* should go up as devices switch over.
 
 **KOT numbers**: the first time the server starts with newly downloaded data, every kitchen's
-numbering jumps by 100 (IT-021 -> IT-121), so no slip repeats a number the cloud already used.
+numbering jumps by 100 (IT-021 -> IT-121; on Maestro events both barker series, AS-A 014 -> AS-A 114
+and AS-B 009 -> AS-B 109), so no slip repeats a number the cloud already used.
 Tell the kitchens; it is expected.
 
 **Keep the server window open.** If it is closed by mistake or the laptop restarts, double-click
@@ -138,7 +143,8 @@ Sync is **one way**: laptop -> cloud. Two-way sync is a later phase.
 - Anything changed **on the cloud** after Prepare Event / Refresh Event Data does not reach the laptop.
   That is why all devices switch together and stay on Plan B.
 - Uploaded: tables, orders, dishes ordered, KOTs, help/SOS requests, chat messages, feedback and carts
-  (a cart cleared on the laptop is removed from the cloud too). Deleting anything else on the laptop is
+  (a cart cleared on the laptop is removed from the cloud too); on Smart Serve Maestro events also the
+  held and fired dishes, firings and seated covers, and both barkers' KOT numbers. Deleting anything else on the laptop is
   not copied.
 - **Not uploaded**: changes to the event, menu, kitchens, captains or waiters made on the laptop
   (Event Manager / Control). Make set-up changes on the cloud, then Refresh. Uploading pictures or

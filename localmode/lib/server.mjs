@@ -513,6 +513,9 @@ async function applyKotJump(pool, local, snap, n, events) {
   let amount = 0
   if ((await pool.query("select to_regclass('public.kitchens') as r")).rows[0].r) {
     await pool.query('update public.kitchens set kot_seq = kot_seq + $2 where event_id::text = any($1::text[])', [events, n])
+    // Smart Serve Maestro: Barker B has its own series (AS-B 014)
+    const hasB = (await pool.query("select 1 from information_schema.columns where table_schema = 'public' and table_name = 'kitchens' and column_name = 'kot_seq_b'")).rowCount > 0
+    if (hasB) await pool.query('update public.kitchens set kot_seq_b = coalesce(kot_seq_b, 0) + $2 where event_id::text = any($1::text[])', [events, n])
     amount = n
   }
   local.kotJump = { snapshotAt: snap.downloadedAt, amount, at: new Date().toISOString(), dataAgeMinutes: Math.round(ageMs / 60000) }
