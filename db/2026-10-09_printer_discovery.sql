@@ -123,11 +123,17 @@ begin
         if v_new is not null and ((select count(*) from jsonb_array_elements(v_seen) e where e->>'mac' = k.printer_mac) <> 1
            or exists (select 1 from kitchens o where o.event_id = p_event_id
                         -- another physical printer already lives there (kitchens sharing this
-                        -- same printer have the same MAC and follow it together)
+                        -- same printer have the same MAC and follow it together). Not when that
+                        -- printer was itself seen at another address in this scan: two printers
+                        -- that swapped addresses (a router restart) are both followed.
                         and ((o.id <> k.id and ss_printer_key(o.printer_ip, o.printer_port) = v_new->>'ip'
-                              and o.printer_mac is distinct from k.printer_mac)
+                              and o.printer_mac is distinct from k.printer_mac
+                              and not exists (select 1 from jsonb_array_elements(v_seen) e2
+                                               where e2->>'mac' = o.printer_mac and e2->>'ip' <> v_new->>'ip'))
                              or (ss_printer_key(o.backup_printer_ip) = v_new->>'ip'
-                              and o.backup_printer_mac is distinct from k.printer_mac)))) then
+                              and o.backup_printer_mac is distinct from k.printer_mac
+                              and not exists (select 1 from jsonb_array_elements(v_seen) e2
+                                               where e2->>'mac' = o.backup_printer_mac and e2->>'ip' <> v_new->>'ip'))))) then
           v_new := null;
         end if;
         if v_new is not null then
@@ -154,9 +160,13 @@ begin
         if v_new is not null and ((select count(*) from jsonb_array_elements(v_seen) e where e->>'mac' = k.backup_printer_mac) <> 1
            or exists (select 1 from kitchens o where o.event_id = p_event_id
                         and ((ss_printer_key(o.printer_ip, o.printer_port) = v_new->>'ip'
-                              and o.printer_mac is distinct from k.backup_printer_mac)
+                              and o.printer_mac is distinct from k.backup_printer_mac
+                              and not exists (select 1 from jsonb_array_elements(v_seen) e2
+                                               where e2->>'mac' = o.printer_mac and e2->>'ip' <> v_new->>'ip'))
                              or (o.id <> k.id and ss_printer_key(o.backup_printer_ip) = v_new->>'ip'
-                              and o.backup_printer_mac is distinct from k.backup_printer_mac)))) then
+                              and o.backup_printer_mac is distinct from k.backup_printer_mac
+                              and not exists (select 1 from jsonb_array_elements(v_seen) e2
+                                               where e2->>'mac' = o.backup_printer_mac and e2->>'ip' <> v_new->>'ip'))))) then
           v_new := null;
         end if;
         if v_new is not null then

@@ -125,7 +125,9 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
       const { data: cats, error: ce } = await supabase.from('menu_categories').select('id, name, sort_order').eq('event_id', eventData.id)
       if (ce) throw ce
       const catId = new Map((cats || []).map(c => [c.name.toLowerCase(), c.id]))
-      const missing = [...new Set(plan.dishes.map(d => d.category))].filter(n => !catId.has(n.toLowerCase()))
+      // only cuisines a dish will actually sit in: new dishes, and existing ones moved by the sheet
+      const needsCat = d => !isExisting(d) || (d.hasCat && existing === 'update')
+      const missing = [...new Set(plan.dishes.filter(needsCat).map(d => d.category))].filter(n => !catId.has(n.toLowerCase()))
       let sort = Math.max(0, ...(cats || []).map(c => c.sort_order || 0))
       if (missing.length) {
         const { data: made, error } = await supabase.from('menu_categories')

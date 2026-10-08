@@ -31,7 +31,9 @@ export function chimeReady() {
 }
 
 export function unlockChime() {
-  if (armed) return () => {}
+  // Already armed: still try to start it, since a touch screen's first press may not
+  // have counted as a gesture (Chrome counts a tap when the finger lifts)
+  if (armed) { context(); return () => {} }
   // Called from a tap: the context can start right now, not on the next tap
   const now = context()
   if (now && now.state === 'running') { armed = true; return () => {} }

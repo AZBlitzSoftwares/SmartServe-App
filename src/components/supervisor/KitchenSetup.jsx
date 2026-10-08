@@ -886,7 +886,7 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
     const at = Date.now()
     setSearch({ at, base: Infinity, phase:'asking' })
     const before = await load()
-    const base = (before || []).reduce((m, r) => Math.max(m, +new Date(r.seen_at) || 0), 0)
+    const base = (before || rows || []).reduce((m, r) => Math.max(m, +new Date(r.seen_at) || 0), 0)
     const { error } = await supabase.from('events').update({ printer_scan_at: new Date(at).toISOString() }).eq('id', eventId)
     if (error) { setSearch(null); if (/printer_scan_at/.test(error.message)) setMissing(true); else setNote({ tone:'err', text: errText(error, 'sent') }); return }
     setSearch({ at, base, phase:'waiting' })
