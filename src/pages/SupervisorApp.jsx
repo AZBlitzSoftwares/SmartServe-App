@@ -453,7 +453,8 @@ export default function SupervisorApp() {
       {/* Docked over the board rather than living in a tab. A supervisor
           answering "table 12 has been waiting" needs to see table 12 while
           they type, and a tab would replace the very thing being asked about. */}
-      {eventData && (
+      {/* Chat is with captains: a guest self-service event has none */}
+      {eventData && eventData.service_mode === 'captain' && (
         <SupervisorChat eventData={eventData}
           meName={currentUser?.name || currentUser?.username || (isAdmin ? 'Admin' : 'Operator')}
           minimized={!chatOpen} unread={chatUnread} focus={chatFocus}
