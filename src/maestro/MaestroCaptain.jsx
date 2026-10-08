@@ -461,7 +461,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const lateMin = lateMinutes(null, ev)
 
   const board = (
-    <div className="body">
+    <div className="body bd">
       <div className="main">
         <div className="boardwrap">
           <table className="board">

@@ -85,7 +85,7 @@
 .ms .ph .food{position:absolute;left:50%;top:50%;border-radius:50%}
 .ms .di{padding:9px 11px;display:flex;flex-direction:column;flex:1}
 .ms .dn{display:flex;align-items:center;gap:6px;font-weight:700;font-size:13.5px}
-.ms .dd{font-size:11.5px;color:var(--muted);margin:3px 0 8px;line-height:1.35;min-height:31px}
+.ms .dish .dd{font-size:11.5px;color:var(--muted);margin:3px 0 8px;line-height:1.35;min-height:31px}
 .ms .add{display:flex;justify-content:space-between;align-items:center;margin-top:auto;gap:6px}
 .ms .add .k{font-size:11px;color:var(--muted);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ms .st{display:flex;align-items:center;border:1.5px solid var(--amber);border-radius:8px;overflow:hidden;font-weight:800;font-size:13px;flex:none}
@@ -95,7 +95,7 @@
 .ms .cart .scroll{flex:1;overflow-y:auto;min-height:0}
 .ms .ch{padding:12px 14px;border-bottom:1px solid var(--line)}
 .ms .ch b{font-size:15px;color:var(--navy)}.ms .ch small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
-.ms .crs{padding:8px 14px;border-bottom:1px dashed var(--line)}
+.ms .cart .crs{padding:8px 14px;border-bottom:1px dashed var(--line)}
 .ms .crs .h{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
 .ms .it{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0;flex-wrap:wrap}
 .ms .it .k{margin-left:auto;font-size:11px;font-weight:600;color:var(--muted)}
@@ -217,6 +217,8 @@
 .ms .pon{background:var(--greenl);color:var(--green)} .ms .poff{background:var(--warn);color:#fff} .ms .punk{background:var(--slatel);color:var(--slate)}
 .ms .lo{flex:1;display:grid;grid-template-columns:1.1fr 1fr;gap:12px;padding:8px 14px 14px;min-height:0}
 @media (max-width:900px){.ms .lo{grid-template-columns:1fr}.ms .cart{width:300px}}
+/* tablet held upright: the course board takes the full width, status and pace go underneath */
+@media (max-width:900px){.ms .body.bd{flex-direction:column}.ms .body.bd .side{width:auto;border-left:0;border-top:1px solid var(--line);max-height:32vh}.ms table.board td.c b{max-width:120px}}
 .ms .pan{background:#fff;border-radius:12px;border:1.5px solid var(--line);padding:12px;display:flex;flex-direction:column;min-height:0}
 .ms .pan h4{font-size:13px;color:var(--navy);margin:0 0 8px;display:flex;justify-content:space-between;gap:8px}
 .ms .pan h4 span{font-weight:600;color:var(--muted);font-size:12px}

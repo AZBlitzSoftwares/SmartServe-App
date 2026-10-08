@@ -1043,7 +1043,7 @@ export default function GuestApp() {
           launcher is the Desk button in the top bar, so nothing floats over
           the Fire bar at the bottom. */}
       <CaptainChat eventData={eventData} captain={captain}
-        minimized={!chatOpen} unread={chatUnread} hidePill bottomOffset={16}
+        minimized={!chatOpen} unread={chatUnread} hidePill bottomOffset={16} title="Control Desk"
         onToggle={() => setChatOpen(o => !o)} />
       {chatToast && (
         <div onClick={() => { setChatToast(null); setChatOpen(true) }}
