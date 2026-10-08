@@ -97,11 +97,15 @@ begin
       set mac = coalesce(excluded.mac, found_printers.mac), status = excluded.status, hub = excluded.hub, seen_at = clock_timestamp();
   end loop;
 
-  -- one MAC is one printer: an older row with the same MAC at another address is out of date
+  -- one MAC is one printer: a row from an EARLIER scan with the same MAC at another address
+  -- is out of date. Not when this scan saw that MAC at several addresses (a Wi-Fi bridge or
+  -- extender can answer for several printers with its own MAC): those rows all stay.
   delete from found_printers o
    using found_printers n
    where o.event_id = p_event_id and n.event_id = p_event_id
-     and o.mac is not null and o.mac = n.mac and o.ip <> n.ip and o.seen_at < n.seen_at;
+     and o.mac is not null and o.mac = n.mac and o.ip <> n.ip
+     and o.seen_at < now() and n.seen_at >= now()
+     and (select count(*) from jsonb_array_elements(v_seen) e where e->>'mac' = o.mac) = 1;
 
   for k in select * from kitchens where event_id = p_event_id loop
     -- main printer
@@ -115,6 +119,17 @@ begin
         end if;
       elsif v_at is null or (v_at->>'mac' is not null and v_at->>'mac' <> k.printer_mac) then
         select e into v_new from jsonb_array_elements(v_seen) e where e->>'mac' = k.printer_mac and e->>'ip' <> v_key limit 1;
+        -- only a printer that is unmistakable, and never onto an address another kitchen prints to
+        if v_new is not null and ((select count(*) from jsonb_array_elements(v_seen) e where e->>'mac' = k.printer_mac) <> 1
+           or exists (select 1 from kitchens o where o.event_id = p_event_id
+                        -- another physical printer already lives there (kitchens sharing this
+                        -- same printer have the same MAC and follow it together)
+                        and ((o.id <> k.id and ss_printer_key(o.printer_ip, o.printer_port) = v_new->>'ip'
+                              and o.printer_mac is distinct from k.printer_mac)
+                             or (ss_printer_key(o.backup_printer_ip) = v_new->>'ip'
+                              and o.backup_printer_mac is distinct from k.printer_mac)))) then
+          v_new := null;
+        end if;
         if v_new is not null then
           update kitchens set printer_ip = v_new->>'ip', printer_port = case when v_new->>'ip' ~ ':\d+$' then printer_port else 9100 end,
                               printer_moved_from = v_key, printer_moved_at = now()
@@ -136,6 +151,14 @@ begin
         end if;
       elsif v_at is null or (v_at->>'mac' is not null and v_at->>'mac' <> k.backup_printer_mac) then
         select e into v_new from jsonb_array_elements(v_seen) e where e->>'mac' = k.backup_printer_mac and e->>'ip' <> v_key limit 1;
+        if v_new is not null and ((select count(*) from jsonb_array_elements(v_seen) e where e->>'mac' = k.backup_printer_mac) <> 1
+           or exists (select 1 from kitchens o where o.event_id = p_event_id
+                        and ((ss_printer_key(o.printer_ip, o.printer_port) = v_new->>'ip'
+                              and o.printer_mac is distinct from k.backup_printer_mac)
+                             or (o.id <> k.id and ss_printer_key(o.backup_printer_ip) = v_new->>'ip'
+                              and o.backup_printer_mac is distinct from k.backup_printer_mac)))) then
+          v_new := null;
+        end if;
         if v_new is not null then
           update kitchens set backup_printer_ip = v_new->>'ip' where id = k.id;
           v_moved := v_moved || jsonb_build_array(jsonb_build_object('kitchen', k.name || ' (backup)', 'from', v_key, 'to', v_new->>'ip'));
@@ -162,3 +185,6 @@ begin
 end $$;
 
 commit;
+
+-- make the API see the new table and functions at once
+notify pgrst, 'reload schema';

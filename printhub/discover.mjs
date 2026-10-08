@@ -136,6 +136,13 @@ function askStatus(sock, ms) {
  * Find printers. targets: hosts ("192.168.1.23") or "host:port"; every host
  * is tried on each of `ports`. Returns [{ ip, host, port, mac, status }]
  * where ip is "host" for port 9100 and "host:port" otherwise.
+ *
+ * Only the addresses in `askStatusOf` ("host:port" keys: the kitchen printers
+ * already set up, and the extra targets in the config) are asked for their
+ * paper status. Anything else that answers on the port is only connected to
+ * and let go, with not a single byte sent: a venue's office printer on the same
+ * network must never print a stray page because the Print Hub looked for
+ * printers. Its status is 'unknown' ("Answering" at the desk).
  */
 export async function findPrinters({
   hosts = scanHosts(),
@@ -145,6 +152,7 @@ export async function findPrinters({
   concurrency = 96,
   arp = readArp,
   skip = new Set(),
+  askStatusOf = new Set(),
 } = {}) {
   const jobs = [];
   for (const h of hosts) {
@@ -163,7 +171,9 @@ export async function findPrinters({
       seen.add(key);
       const sock = await tryConnect(host, port, timeoutMs);
       if (!sock) continue;
-      const status = await askStatus(sock, statusReplyMs);
+      let status = 'unknown';
+      if (askStatusOf.has(key)) status = await askStatus(sock, statusReplyMs);
+      else sock.destroy();
       found.push({ host, port, ip: port === 9100 ? host : key, status });
     }
   }

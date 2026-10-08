@@ -77,6 +77,8 @@ export default function MenuManager({ eventData, onEventChange }) {
   async function saveItem() {
     const catId = newItem.category_id || activeCategory
     if (!newItem.name.trim() || !catId) { alert('Dish name and category required'); return }
+    // a Maestro dish without a course never shows up on the captain's course tabs
+    if (isMs && courses.length && !courses.includes(newItem.course)) { alert('Pick the course for this dish (' + courses.join(', ') + ').'); return }
     setSaving(true)
     if (editItem) {
       const { error } = await supabase.from('menu_items').update({ name:newItem.name.trim(), description:newItem.description.trim(), category_id:catId, is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, ...(isMs ? { course:newItem.course||null } : {}) }).eq('id', editItem.id)

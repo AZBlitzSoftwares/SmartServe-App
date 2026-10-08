@@ -25,8 +25,16 @@ function context() {
   } catch (e) { return null }
 }
 
+/** true once the browser lets this page play sound */
+export function chimeReady() {
+  return !!ctx && ctx.state === 'running'
+}
+
 export function unlockChime() {
   if (armed) return () => {}
+  // Called from a tap: the context can start right now, not on the next tap
+  const now = context()
+  if (now && now.state === 'running') { armed = true; return () => {} }
   const arm = () => {
     armed = true
     context()

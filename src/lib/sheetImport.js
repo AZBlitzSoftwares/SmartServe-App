@@ -159,10 +159,16 @@ export function detectColumns(header) {
   const h = header.map(norm)
   const cols = {}
   const used = new Set()
-  for (const [key, names] of Object.entries(HEADS)) {
-    const ns = names.map(norm)
-    let i = h.findIndex((x, j) => !used.has(j) && ns.includes(x))
-    if (i < 0) i = h.findIndex((x, j) => !used.has(j) && ns.some(n => n.length > 2 && x.includes(n)))
+  const keys = Object.entries(HEADS).map(([k, names]) => [k, names.map(norm)])
+  // exact header names first, for every column; only then "contains" matches,
+  // so "Course Name" is never taken as the dish when "Menu Item Name" is there
+  for (const [key, ns] of keys) {
+    const i = h.findIndex((x, j) => !used.has(j) && ns.includes(x))
+    if (i >= 0) { cols[key] = i; used.add(i) }
+  }
+  for (const [key, ns] of keys) {
+    if (cols[key] != null) continue
+    const i = h.findIndex((x, j) => !used.has(j) && ns.some(n => n.length > 2 && x.includes(n)))
     if (i >= 0) { cols[key] = i; used.add(i) }
   }
   return cols
@@ -175,9 +181,11 @@ export function isVegValue(v) {
 }
 
 /* Match a course from the sheet to one of the event's courses:
-   "Main Course" -> "Mains", "Desserts" -> "Dessert", "soup" -> "Soup" */
+   "Main Course" -> "Mains", "Desserts" -> "Dessert", "soup" -> "Soup",
+   "Canapes" -> "Canapés", "Appetizer" -> "Appetiser" */
+const fold = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 export function matchCourse(raw, courses) {
-  const key = s => norm(s).replace(/\bcourse\b/g, '').replace(/\s+/g, ' ').trim().replace(/(es|s)$/, '')
+  const key = s => norm(fold(s)).replace(/\bcourse\b/g, '').replace(/\s+/g, ' ').trim().replace(/z/g, 's').replace(/(es|s)$/, '')
   const k = key(raw)
   if (!k) return null
   return courses.find(c => key(c) === k)
@@ -185,39 +193,59 @@ export function matchCourse(raw, courses) {
     || null
 }
 
-/* Header row + data rows -> dishes. Returns { dishes, cols, problems } */
+/* Header row + data rows -> dishes. Returns { dishes, cols, problems, headings } */
 export function menuRows(rows) {
-  if (!rows?.length) return { dishes: [], cols: {}, problems: ['The sheet is empty.'] }
-  // the header is the first row that names a dish column (sheets often start with a title)
-  let hi = rows.findIndex(r => detectColumns(r).name != null)
-  if (hi < 0) return { dishes: [], cols: {}, problems: ['No dish name column found. Put a header row with Dish (or Name), and optionally Cuisine, Course, Description, Veg.'] }
+  if (!rows?.length) return { dishes: [], cols: {}, problems: ['The sheet is empty.'], headings: [] }
+  // The header is the row (among the first ten) that names the most known columns,
+  // and a dish column: sheets often start with a title or an event line.
+  let hi = -1, best = 0
+  for (let r = 0; r < Math.min(rows.length, 10); r++) {
+    const c = detectColumns(rows[r])
+    const n = Object.keys(c).length
+    if (c.name != null && n > best) { hi = r; best = n }
+  }
+  if (hi < 0) return { dishes: [], cols: {}, problems: ['No dish name column found. Put a header row with Dish (or Name), and optionally Cuisine, Course, Description, Veg.'], headings: [] }
   const cols = detectColumns(rows[hi])
   const dishes = []
   const problems = []
-  let section = null   // a row with only a cuisine/course-looking value in the dish column starts a section
-  for (let r = hi + 1; r < rows.length; r++) {
-    const row = rows[r]
-    const get = k => cols[k] != null ? String(row[cols[k]] ?? '').trim() : ''
-    const name = get('name')
-    if (!name) continue
-    const others = Object.keys(cols).filter(k => k !== 'name').some(k => get(k))
-    // "SOUPS" on its own line, in capitals, is a heading rather than a dish
-    if (!others && name === name.toUpperCase() && /[A-Z]/.test(name) && name.length < 40) { section = name; continue }
+  const headings = []
+  const cell = (row, k) => cols[k] != null ? String(row[cols[k]] ?? '').trim() : ''
+  const body = rows.slice(hi + 1)
+  // A line in capitals with nothing else filled in is a heading ("SOUPS"), unless
+  // the sheet writes most dish names in capitals anyway.
+  const names = body.map(r => cell(r, 'name')).filter(Boolean)
+  const caps = n => n === n.toUpperCase() && /[A-Z]/.test(n)
+  const capsSheet = names.length > 0 && names.filter(caps).length / names.length > 0.5
+  let section = null
+  let lastCat = '', lastCourse = ''   // merged / blank cells repeat the row above
+  for (let i = 0; i < body.length; i++) {
+    const row = body[i]
+    const name = cell(row, 'name')
+    if (!name) {
+      // a row with only a cuisine or course filled in starts a group
+      if (cell(row, 'category')) lastCat = cell(row, 'category')
+      if (cell(row, 'course')) lastCourse = cell(row, 'course')
+      continue
+    }
+    const others = Object.keys(cols).filter(k => k !== 'name').some(k => cell(row, k))
+    if (!capsSheet && !others && caps(name) && name.length < 40) { section = name; headings.push(name); lastCat = ''; lastCourse = ''; continue }
+    if (cell(row, 'category')) lastCat = cell(row, 'category')
+    if (cell(row, 'course')) lastCourse = cell(row, 'course')
     dishes.push({
-      row: r + 1,
+      row: hi + i + 2,
       name,
-      description: get('description'),
-      category: get('category'),
-      course: get('course'),
+      description: cell(row, 'description'),
+      category: cols.category != null ? lastCat : '',
+      course: cols.course != null ? lastCourse : '',
       section,
-      is_veg: isVegValue(get('veg')),
-      barker: /^b$/i.test(get('barker')) ? 'B' : /^a$/i.test(get('barker')) ? 'A' : null,
-      is_live_counter: /^(y|yes|true|1)$/i.test(get('live')),
-      photo_url: get('photo') || null,
+      is_veg: isVegValue(cell(row, 'veg')),
+      barker: /^b$/i.test(cell(row, 'barker')) ? 'B' : /^a$/i.test(cell(row, 'barker')) ? 'A' : null,
+      is_live_counter: /^(y|yes|true|1)$/i.test(cell(row, 'live')),
+      photo_url: cell(row, 'photo') || null,
     })
   }
   if (!dishes.length) problems.push('No dishes found under the header row.')
-  return { dishes, cols, problems }
+  return { dishes, cols, problems, headings }
 }
 
 /* A template people can fill in, as CSV text */

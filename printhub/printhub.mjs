@@ -862,12 +862,19 @@ export function startHub(options = {}) {
         else down.push(t.ep.port === 9100 ? t.ep.host : t.ep.key);
       }
       const hosts = [...(o.scanSubnets !== false ? scanHosts() : []), ...down, ...(o.scanTargets || [])];
+      // the paper question goes only to printers this hub prints to, and to the config's extra targets
+      const askStatusOf = new Set(printerTargets().map((t) => `${t.ep.host}:${t.ep.port}`));
+      for (const h of o.scanTargets || []) {
+        if (/:\d{1,5}$/.test(h)) askStatusOf.add(h);
+        else for (const p of o.scanPorts || [9100]) askStatusOf.add(`${h}:${p}`);
+      }
       const scanned = await findPrinters({
         hosts,
         ports: o.scanPorts,
         timeoutMs: o.scanTimeoutMs,
         skip: new Set(known.keys()),
         arp: o.arp || readArp,
+        askStatusOf,
       });
       const arp = known.size ? await (o.arp || readArp)() : new Map();
       const found = [
@@ -1215,6 +1222,7 @@ export function loadConfig({ dir = HERE, argv = [] } = {}) {
       hubName: String(args.hub || cfg.hubName || os.hostname()).slice(0, 60),
       pollMs: Math.min(10_000, Math.max(500, Number(cfg.pollMs) || DEFAULTS.pollMs)),
       findPrinters: cfg.findPrinters !== false,
+      scanSubnets: cfg.scanSubnets !== false,
       scanTargets: Array.isArray(cfg.scanTargets) ? cfg.scanTargets.map(String) : [],
     },
   };

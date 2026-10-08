@@ -34,12 +34,18 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
   const plan = useMemo(() => {
     if (!parsed) return null
     const newCourses = []
+    const titleCase = t => t === t.toUpperCase() ? t.charAt(0) + t.slice(1).toLowerCase() : t
     const dishes = parsed.dishes.map(d => {
-      let rawCourse = d.course || ''
+      let rawCourse = isMs ? d.course || '' : ''
       let category = d.category
-      // a heading row such as "SOUPS" is the course when it names one, otherwise the cuisine
-      if (!rawCourse && d.section && matchCourse(d.section, courses)) rawCourse = d.section
-      else if (!category && d.section) category = d.section.charAt(0) + d.section.slice(1).toLowerCase()
+      if (isMs) {
+        // a heading row such as "SOUPS" is the course when it names one, otherwise the cuisine
+        if (!rawCourse && d.section && matchCourse(d.section, courses)) rawCourse = d.section
+        else if (!category && d.section) category = titleCase(d.section)
+      } else if (!category) {
+        // events without courses: a heading ("STARTERS") or a Course column is the menu category
+        category = d.section ? titleCase(d.section) : d.course ? titleCase(d.course) : ''
+      }
       let course = rawCourse ? matchCourse(rawCourse, courses) : null
       if (rawCourse && !course) {
         const label = rawCourse.trim().replace(/\s+/g, ' ')
@@ -47,23 +53,32 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
         if (!newCourses.some(c => c.toLowerCase() === nice.toLowerCase())) newCourses.push(nice)
         course = newCourses.find(c => c.toLowerCase() === nice.toLowerCase())
       }
-      return { ...d, category: category || 'General', courseOut: course, courseIsNew: !!course && !courses.includes(course) }
+      // hasCat: the sheet said which cuisine; only then does an existing dish change category
+      return { ...d, category: category || 'General', hasCat: !!category, courseOut: course, courseIsNew: !!course && !courses.includes(course) }
     })
     const seen = new Set(), dupes = []
     const unique = dishes.filter(d => { const k = d.name.toLowerCase(); if (seen.has(k)) { dupes.push(d.name); return false } seen.add(k); return true })
     return { dishes: unique, dupes, newCourses }
-  }, [parsed, courses])
+  }, [parsed, courses, isMs])
 
   const [existingNames, setExistingNames] = useState(null)
   const [existingCats, setExistingCats] = useState([])
   useEffect(() => {
     if (!plan) return
     ;(async () => {
-      const { data: cats } = await supabase.from('menu_categories').select('id, name').eq('event_id', eventData.id)
-      const ids = (cats || []).map(c => c.id)
-      const { data: items } = ids.length ? await supabase.from('menu_items').select('id, name').in('category_id', ids) : { data: [] }
-      setExistingCats(cats || [])
-      setExistingNames(new Map((items || []).map(i => [i.name.toLowerCase().trim(), i.id])))
+      try {
+        const { data: cats, error: e1 } = await supabase.from('menu_categories').select('id, name').eq('event_id', eventData.id)
+        if (e1) throw e1
+        const ids = (cats || []).map(c => c.id)
+        const { data: items, error: e2 } = ids.length ? await supabase.from('menu_items').select('id, name').in('category_id', ids) : { data: [] }
+        if (e2) throw e2
+        setExistingCats(cats || [])
+        setExistingNames(new Map((items || []).map(i => [i.name.toLowerCase().trim(), i.id])))
+      } catch (e) {
+        // the preview still works; Import re-reads the menu itself before writing
+        setErr('Could not read the current menu (' + (e?.message || 'no connection') + '). Dishes already on the menu are checked again when you press Import.')
+        setExistingCats([]); setExistingNames(new Map())
+      }
     })()
   }, [plan, eventData.id])
 
@@ -131,13 +146,13 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
         const id = byName.get(d.name.toLowerCase().trim())
         if (!id) fresh.push({ ...row, is_available: true })
         else if (existing === 'update') {
-          const patch = { category_id: row.category_id }
+          const patch = d.hasCat ? { category_id: row.category_id } : {}
           if (parsed.cols.description != null && d.description) patch.description = d.description
           if (parsed.cols.veg != null) patch.is_veg = d.is_veg
           if (isMs && row.course) patch.course = row.course
           if (isMs && d.barker) patch.barker = d.barker
           if (d.photo_url) patch.photo_url = d.photo_url
-          updates.push([id, patch])
+          if (Object.keys(patch).length) updates.push([id, patch])
         }
       }
       let added = 0, updated = 0
@@ -229,6 +244,11 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
               {Object.keys(parsed.cols).map(k => <span key={k} style={pill('#F0FDF4', '#15803D', '#BBF7D0')}>{COL_LABEL[k]}</span>)}
               {isMs && parsed.cols.course == null && <span style={pill('#FFF7ED', '#B45309', '#FED7AA')}>No Course column</span>}
             </div>
+            {parsed.headings?.length > 0 && (
+              <div style={{ fontSize:12.5, marginBottom:8, color:'var(--ink2)' }}>
+                <b style={{ color:'var(--ink)' }}>Read as headings, not dishes:</b> {parsed.headings.slice(0, 10).join(', ')}{parsed.headings.length > 10 ? '…' : ''}
+              </div>
+            )}
 
             {isMs && (
               <div style={{ fontSize:12.5, marginBottom:8 }}>

@@ -21,7 +21,7 @@ import FeedbackModal from '../components/guest/FeedbackModal'
 import ExitGate from '../components/guest/ExitGate'
 import NoEventScreen from '../components/guest/NoEventScreen'
 import { lazyPage } from '../lib/lazyPage'
-import { setUnsavedCheck, setSignOutReason } from '../lib/appUpdate'
+import { setUnsavedCheck, setSignOutReason, hideUpdatePill } from '../lib/appUpdate'
 import {
   entryFor, loadTodaysEvents, sessionStillCurrent, isCaptainEvent,
   clearGuestKeys, clearCaptainKeys, rememberMode, rememberedMode,
@@ -550,6 +550,9 @@ export default function GuestApp() {
     document.addEventListener('visibilitychange', vis)
     return () => { stop = true; clearInterval(t); document.removeEventListener('visibilitychange', vis) }
   }, [captain?.id])
+
+  // The Update button is for staff: guest screens update quietly at a safe moment
+  useEffect(() => { hideUpdatePill(!captain && ['welcome', 'menu', 'status', 'genie', 'setup', 'entry', 'noevent', 'loading'].includes(appState)) }, [captain, appState])
 
   // A guest's cart lives only in memory: no automatic update while it has dishes
   useEffect(() => { setUnsavedCheck(() => (cartRef.current?.length || 0) > 0) ; return () => setUnsavedCheck(null) }, [])

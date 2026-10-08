@@ -125,7 +125,9 @@ The Print Hub also protects against an address changing anyway (a printer left o
 - If a kitchen's printer turns up at a new address, the kitchen is **moved to the new address automatically** and printing carries on; the desk sees a green note saying so, and the move is in the log.
 - At the desk, **Find printers** lists every printer the hub can see. **Print a slip** prints "THIS PRINTER 192.168.1.104" on it, so you can tell which box is which; **Use for a kitchen** sets it as a kitchen's main or backup printer without typing.
 
-This needs the database update `db/2026-10-09_printer_discovery.sql`. Without it the Print Hub prints exactly as before and says the search is off. To switch the search off on a laptop, add `"findPrinters": false` to `config.json`.
+- It is careful on a shared network: only the kitchen printers already set up are asked for their paper status. Any other device that answers on port 9100 (an office printer, say) is only connected to and let go, with nothing sent, so it never prints a stray page. A printer follows a new address only when its hardware address is seen at exactly one address and no other kitchen prints there.
+
+This needs the database update `db/2026-10-09_printer_discovery.sql`. Without it the Print Hub prints exactly as before and says the search is off. To switch the search off on a laptop, add `"findPrinters": false` to `config.json`. To keep the search to the kitchen printers already set up (no look around the rest of the network), add `"scanSubnets": false`.
 
 ---
 

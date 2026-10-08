@@ -853,7 +853,7 @@ const keyOf = (ip, port) => { const e = splitIp(ip); const p = /:\d+$/.test(Stri
 function FindPrinters({ eventId, kitchens, setKitchens }) {
   const [rows, setRows] = useState(null)        // null = not loaded / not available
   const [missing, setMissing] = useState(false) // database update not applied yet
-  const [search, setSearch] = useState(null)    // { at, phase:'asking'|'waiting'|'done'|'nohub', n }
+  const [search, setSearch] = useState(null)    // { at, base, phase:'asking'|'waiting'|'done'|'nohub', n }
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState({})          // ip -> 'slip' | 'assign'
   const [note, setNote] = useState(null)
@@ -870,10 +870,12 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
     const t = setInterval(load, search && search.phase === 'waiting' ? 2000 : 20000)
     return () => clearInterval(t)
   }, [eventId, search?.phase])
-  // the search ends when fresh rows arrive, or after 25 s with nothing
+  // the search ends when fresh rows arrive, or after 25 s with nothing. "Fresh" is judged on the
+  // database clock (newer than anything seen before the button was pressed), so a tablet whose
+  // clock is a little off still sees the answer.
   useEffect(() => {
     if (!search || search.phase !== 'waiting') return
-    const fresh = (rows || []).filter(r => new Date(r.seen_at) >= search.at - 2000)
+    const fresh = (rows || []).filter(r => +new Date(r.seen_at) > search.base)
     if (fresh.length) { setSearch(s => ({ ...s, phase:'done', n: fresh.length })); setOpen(true); return }
     const t = setTimeout(() => setSearch(s => s && s.phase === 'waiting' ? { ...s, phase:'nohub' } : s), Math.max(0, 25000 - (Date.now() - search.at)))
     return () => clearTimeout(t)
@@ -882,10 +884,12 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
   async function find() {
     setNote(null)
     const at = Date.now()
-    setSearch({ at, phase:'asking' })
+    setSearch({ at, base: Infinity, phase:'asking' })
+    const before = await load()
+    const base = (before || []).reduce((m, r) => Math.max(m, +new Date(r.seen_at) || 0), 0)
     const { error } = await supabase.from('events').update({ printer_scan_at: new Date(at).toISOString() }).eq('id', eventId)
     if (error) { setSearch(null); if (/printer_scan_at/.test(error.message)) setMissing(true); else setNote({ tone:'err', text: errText(error, 'sent') }); return }
-    setSearch({ at, phase:'waiting' })
+    setSearch({ at, base, phase:'waiting' })
   }
 
   async function slip(f) {
@@ -927,7 +931,7 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
     : search.phase === 'asking' ? 'Asking the Print Hub…'
     : search.phase === 'waiting' ? 'The Print Hub is looking at its network…'
     : search.phase === 'done' ? search.n + ' printer' + (search.n === 1 ? '' : 's') + ' answered'
-    : 'No Print Hub answered. Start the Print Hub on the desk laptop: it searches the network it is connected to.'
+    : 'No printers reported. Check that the Print Hub is running on the desk laptop and that the laptop is on the printers’ network (router / Wi-Fi), then try again.'
 
   return (
     <div style={{ marginTop:14, borderTop:'1px solid var(--line)', paddingTop:12 }}>
@@ -1533,10 +1537,29 @@ function CaptainRow({ c, tableCount, onSave, onRemove, saved, crowd }) {
           onBlur={commitTable} onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
           style={{ ...input, width:56, height:36, textAlign:'center', fontSize:15, fontWeight:900, flexShrink:0,
             borderColor: tone === RED ? '#FCA5A5' : tone ? AMBER_LINE : 'var(--line)' }} />
-        <button onClick={() => onRemove(c)} title={'Remove ' + c.name}
-          style={{ background:'none', border:'none', color:RED, fontSize:18, fontWeight:800, cursor:'pointer', padding:'0 2px', flexShrink:0 }}>×</button>
+        <RemoveX what={c.name} onRemove={() => onRemove(c)} />
       </div>
     </div>
+  )
+}
+
+/* × that needs a second tap: removing a captain or waiter signs them out of their tablet,
+   so a stray tap during service must not do it. */
+function RemoveX({ what, onRemove }) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const t = setTimeout(() => setArmed(false), 4000)
+    return () => clearTimeout(t)
+  }, [armed])
+  if (armed) return (
+    <button onClick={() => { setArmed(false); onRemove() }} title={'Tap again to remove ' + what}
+      style={{ background:RED, border:'none', color:'#fff', fontSize:11.5, fontWeight:900, borderRadius:8,
+        height:30, padding:'0 8px', cursor:'pointer', flexShrink:0, whiteSpace:'nowrap' }}>Remove?</button>
+  )
+  return (
+    <button onClick={() => setArmed(true)} title={'Remove ' + what}
+      style={{ background:'none', border:'none', color:RED, fontSize:18, fontWeight:800, cursor:'pointer', padding:'0 2px', flexShrink:0 }}>×</button>
   )
 }
 
@@ -1787,8 +1810,7 @@ function WaiterRow({ w, kitchens, activeIds, saved, onKitchen, onPin, onRemove }
           onBlur={commitPin} onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
           style={{ ...input, width:70, height:36, textAlign:'center', fontSize:14, fontWeight:900, letterSpacing:'2px',
             flexShrink:0, borderColor: err ? RED : pinOk ? 'var(--line)' : AMBER_LINE }} />
-        {onRemove && <button onClick={onRemove} title="Remove waiter"
-          style={{ background:'none', border:'none', color:RED, fontSize:18, fontWeight:800, cursor:'pointer', padding:'0 2px', flexShrink:0 }}>×</button>}
+        {onRemove && <RemoveX what={nm || 'this waiter'} onRemove={onRemove} />}
       </div>
     </div>
   )

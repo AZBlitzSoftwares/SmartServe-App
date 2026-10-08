@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import net from 'node:net';
 import { normMac, parseArp, scanHosts, findPrinters } from '../discover.mjs';
 import { startFakePrinter } from '../fake-printer.mjs';
 
@@ -53,6 +54,7 @@ test('printers answering on the port are found, with their paper status and MAC'
     hosts: [`127.0.0.1:${a.port}`, `127.0.0.1:${b.port}`, '127.0.0.1:1'],
     timeoutMs: 300,
     arp: async () => new Map([['127.0.0.1', '00:11:62:0a:0b:0c']]),
+    askStatusOf: new Set([`127.0.0.1:${a.port}`, `127.0.0.1:${b.port}`]),
   });
   assert.equal(found.length, 2);
   assert.deepEqual(found.map((f) => f.ip).sort(), [`127.0.0.1:${a.port}`, `127.0.0.1:${b.port}`].sort());
@@ -60,4 +62,20 @@ test('printers answering on the port are found, with their paper status and MAC'
   assert.equal(found.find((f) => f.port === b.port).status, 'paper_low');
   assert.equal(found.find((f) => f.port === a.port).status, 'online');
   assert.equal(a.jobs.length + b.jobs.length, 0, 'a search prints nothing');
+});
+
+test('a device that is not a kitchen printer is found without a single byte sent to it', async (t) => {
+  const got = [];
+  const srv = net.createServer((sock) => {
+    sock.on('data', (d) => got.push(...d));
+    sock.on('error', () => {});
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  t.after(() => new Promise((r) => srv.close(r)));
+  const port = srv.address().port;
+  const found = await findPrinters({ hosts: [`127.0.0.1:${port}`], timeoutMs: 300, arp: async () => new Map() });
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(found.length, 1);
+  assert.equal(found[0].status, 'unknown');
+  assert.deepEqual(got, [], 'nothing sent: an office printer must not print a stray page');
 });

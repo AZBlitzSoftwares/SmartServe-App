@@ -10,9 +10,9 @@
    Take over: one barker can work the other barker's queue as well. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { unlockChime, playChatChime } from '../lib/chime'
+import { unlockChime, playChatChime, chimeReady } from '../lib/chime'
 import { todayISO, sessionStillCurrent } from '../components/guest/deviceEntry'
-import { setSignOutReason, takeSignOutReason } from '../lib/appUpdate'
+import { setSignOutReason, takeSignOutReason, setUnsavedCheck } from '../lib/appUpdate'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
 import { NEXT_ACTION, lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, loadMenu, shortName } from './msData'
@@ -114,6 +114,17 @@ function KitchenScreen({ session, onSignOut }) {
   const [sheet, setSheet] = useState(null)
   const now = useNow(1000)
   const seenNew = useRef(null)
+
+  // Never reload by itself while a barker is signed in (sound needs a tap after a reload)
+  useEffect(() => { setUnsavedCheck(() => true); return () => setUnsavedCheck(null) }, [])
+  // Browsers keep sound off until the screen is tapped once
+  const [soundOn, setSoundOn] = useState(() => chimeReady())
+  useEffect(() => {
+    if (soundOn) return
+    unlockChime()
+    const t = setInterval(() => { if (chimeReady()) setSoundOn(true) }, 1000)
+    return () => clearInterval(t)
+  }, [soundOn])
 
   /* A sign-in the desk has ended - barker removed, new PIN, moved to another
      kitchen or side - must not carry on from this screen's memory. */
@@ -266,7 +277,8 @@ function KitchenScreen({ session, onSignOut }) {
   const title = /kitchen$/i.test(kname.trim()) ? kname : `${kname} Kitchen`
 
   return (
-    <div className="ms kd" onClick={() => unlockChime()}>
+    <div className="ms kd" onClick={() => { unlockChime(); if (chimeReady()) setSoundOn(true) }}>
+      {!soundOn && <div style={{ background: '#7A4B00', color: '#FFE3A3', fontWeight: 800, fontSize: 14, padding: '8px 14px', textAlign: 'center', cursor: 'pointer' }}>Tap anywhere to turn on the sound for new KOTs</div>}
       <div className="top">
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <div className="brandmk"><div className="lt"><img src={logo} alt="" /></div></div>

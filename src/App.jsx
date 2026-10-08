@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import GuestApp from './pages/GuestApp'
 import ErrorBoundary from './components/ErrorBoundary'
 import { lazyPage } from './lib/lazyPage'
-import { watchForUpdates, safeToReload } from './lib/appUpdate'
+import { watchForUpdates, safeToReload, onPillHidden } from './lib/appUpdate'
 
 // ss-split-routes. Guest and captain tablets never open the supervisor or the
 // waiter screens, so those two are downloaded only when their own address is
@@ -28,14 +28,19 @@ function PageLoading() {
    lib/appUpdate.js); this small button lets staff take it at once. */
 function UpdatePill() {
   const [ready, setReady] = useState(false)
+  const [hidden, setHidden] = useState(false)
   useEffect(() => watchForUpdates(setReady), [])
-  if (!ready) return null
+  useEffect(() => onPillHidden(setHidden), [])
+  if (!ready || hidden) return null
+  const desk = window.location.pathname.startsWith('/supervisor')
+  const ask = desk ? 'Update now? The desk reloads and you sign in again.'
+    : 'Update now? Anything typed and not yet sent on this screen will be lost.'
   return (
-    <button onClick={() => { if (safeToReload() || window.confirm('Update now? Anything typed and not yet sent on this screen will be lost.')) window.location.reload() }}
+    <button onClick={() => { if (safeToReload() || window.confirm(ask)) window.location.reload() }}
       data-testid="update-pill"
-      style={{ position:'fixed', left:12, bottom:12, zIndex:900, border:'none', borderRadius:999, padding:'9px 14px',
-        background:'#0F766E', color:'#fff', fontWeight:800, fontSize:12.5, fontFamily:'Manrope, sans-serif',
-        boxShadow:'0 6px 18px rgba(0,0,0,0.25)', cursor:'pointer' }}>
+      style={{ position:'fixed', left:'50%', top:6, transform:'translateX(-50%)', zIndex:900, border:'none', borderRadius:999,
+        padding:'5px 12px', background:'#0F766E', color:'#fff', fontWeight:800, fontSize:11.5, fontFamily:'Manrope, sans-serif',
+        boxShadow:'0 4px 14px rgba(0,0,0,0.25)', cursor:'pointer', whiteSpace:'nowrap' }}>
       ⟳ New version ready · Update
     </button>
   )

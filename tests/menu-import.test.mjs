@@ -30,4 +30,20 @@ const t = menuRows(parseDelimited(menuTemplateCsv(C)))
 ok(t.dishes.length === 5 && t.dishes.every(d => matchCourse(d.course, C)), 'template round-trips with valid courses')
 ok(detectColumns(['Item', 'Section']).name === 0 && detectColumns(['Item', 'Section']).category === 1, 'Item / Section headers')
 ok(menuRows([['Price', 'Qty']]).problems.length === 1, 'no dish column -> clear problem')
+
+// review fixes: fill-down, capitals sheets, header pick, spelling variants
+{
+  const merged = menuRows(parseDelimited('Cuisine\tCourse\tDish\nItalian\tSoup\tMinestrone\n\t\tRibollita\nAsian\t\tTom Yum\n'))
+  ok(merged.dishes.map(d => d.category + '/' + d.course).join(',') === 'Italian/Soup,Italian/Soup,Asian/Soup', 'blank cells repeat the row above (merged cells)')
+  const allCaps = menuRows(parseDelimited('Dish\nTOMATO BASIL\nRIBOLLITA\nLAKSA\n'))
+  ok(allCaps.dishes.length === 3 && !allCaps.headings.length, 'a sheet written in capitals keeps every dish')
+  const titled = menuRows(parseDelimited('Event name: Wedding\nCuisine,Course,Dish Name,Description\nItalian,Soup,Minestrone,Beans\n'))
+  ok(titled.dishes.length === 1 && titled.dishes[0].category === 'Italian', 'header row is the one with the most known columns')
+  const cn = detectColumns(['Course Name', 'Menu Item Name', 'Cuisine'])
+  ok(cn.name === 1 && cn.course === 0, '"Course Name" is the course, "Menu Item Name" the dish: ' + JSON.stringify(cn))
+  const CC = ['First Course', 'Canapés', 'Soup', 'Salad', 'Appetiser', 'Main Course', 'Dessert']
+  ok(matchCourse('Canapes', CC) === 'Canapés' && matchCourse('Appetizers', CC) === 'Appetiser' && matchCourse('Mains', CC) === 'Main Course', 'Canapes / Appetizers / Mains match')
+  const heads = menuRows(parseDelimited('Dish\tVeg\nSOUPS\t\nMinestrone\tVeg\nMAINS\t\nRisotto\tVeg\n'))
+  ok(heads.headings.join(',') === 'SOUPS,MAINS' && heads.dishes[1].section === 'MAINS', 'heading rows are reported')
+}
 console.log(fails ? fails + ' FAILED' : 'all passed'); process.exitCode = fails ? 1 : 0

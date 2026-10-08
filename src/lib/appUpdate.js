@@ -19,8 +19,22 @@ const CHECK_EVERY_MS = 4 * 60 * 1000
 const QUIET_RELOAD_MS = 8 * 60 * 1000
 
 let unsavedCheck = () => false
-/** A screen with unsaved work registers a check: true = do not reload now. */
+/** A screen with unsaved work registers a check: true = do not reload now.
+    The desk and the kitchen screen register one that is always true while
+    someone is signed in, so they never reload by themselves (the desk would
+    land on its sign-in screen; the kitchen screen would lose its sound). */
 export function setUnsavedCheck(fn) { unsavedCheck = typeof fn === 'function' ? fn : () => false }
+
+// The Update button is for staff. Guest screens hide it and simply update
+// at the next safe moment (screen waking, quiet spell, nothing in the cart).
+let pillHidden = false
+const pillSubs = new Set()
+export function hideUpdatePill(v) {
+  if (pillHidden === !!v) return
+  pillHidden = !!v
+  pillSubs.forEach(f => f(pillHidden))
+}
+export function onPillHidden(f) { pillSubs.add(f); f(pillHidden); return () => pillSubs.delete(f) }
 
 export function runningEntry(doc = document) {
   const s = doc.querySelector('script[type="module"][src*="/assets/"]')

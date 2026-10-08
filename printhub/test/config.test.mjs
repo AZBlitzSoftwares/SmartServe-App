@@ -62,6 +62,7 @@ test('a real key starts with the cloud server and the config values', (t) => {
     hubName: 'desk-laptop',
     pollMs: 1500,
     findPrinters: true,
+    scanSubnets: true,
     scanTargets: [],
   });
 });

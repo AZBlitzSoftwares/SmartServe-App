@@ -12,6 +12,7 @@ import FeedbackReport from '../components/supervisor/FeedbackReport'
 import SupervisorChat from '../components/supervisor/SupervisorChat'
 import { playChatChime, unlockChime } from '../lib/chime'
 import { lazyPage } from '../lib/lazyPage'
+import { setUnsavedCheck } from '../lib/appUpdate'
 // ss-maestro: course-firing events get their own desk and reports, loaded only when used
 const ControlDesk = lazyPage(() => import('../maestro/ControlDesk'), 'controldesk')
 const MaestroReports = lazyPage(() => import('../maestro/MaestroReports'), 'msreports')
@@ -38,6 +39,9 @@ const TYPE_EMOJI  = { sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', wate
 
 export default function SupervisorApp() {
   const [authed, setAuthed] = useState(false)
+  // A new version never reloads the desk by itself: it would land on the sign-in
+  // screen. The Update button at the top is there when the operator is ready.
+  useEffect(() => { setUnsavedCheck(() => authed); return () => setUnsavedCheck(null) }, [authed])
   const [currentUser, setCurrentUser] = useState(null)
   const [activeTab, setActiveTab] = useState('kot')
   const [deskView, setDeskView] = useState('desk')   // ss-maestro: Control Desk or printer board
