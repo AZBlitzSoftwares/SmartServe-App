@@ -114,6 +114,19 @@ Each printer needs an IP address that **never changes**, and the same address mu
 
 Use the event's own router. Hotel or "guest" Wi-Fi often blocks devices from seeing each other, so the laptop cannot reach the printers.
 
+### Why our own router, and what happens if a printer's address changes
+
+A printer with a fixed IP only works on a network with the same first three numbers. At a venue whose network is `192.168.0.x` or `10.0.5.x`, printers set to `192.168.1.10x` cannot be reached at all. So the kit travels with **its own router**: printers, desk laptop and tablets all join it, and the router's internet port is plugged into the venue's internet (or a 4G dongle). The printer addresses then never depend on the venue.
+
+The Print Hub also protects against an address changing anyway (a printer left on automatic addressing, a router reset):
+
+- It **finds printers** on its network by itself: at start, whenever the desk presses **Find printers** (Control > Kitchens & printers), and every minute while a printer is not answering.
+- It reads each printer's **hardware (MAC) address**, which never changes, and remembers it for the kitchen.
+- If a kitchen's printer turns up at a new address, the kitchen is **moved to the new address automatically** and printing carries on; the desk sees a green note saying so, and the move is in the log.
+- At the desk, **Find printers** lists every printer the hub can see. **Print a slip** prints "THIS PRINTER 192.168.1.104" on it, so you can tell which box is which; **Use for a kitchen** sets it as a kitchen's main or backup printer without typing.
+
+This needs the database update `db/2026-10-09_printer_discovery.sql`. Without it the Print Hub prints exactly as before and says the search is off. To switch the search off on a laptop, add `"findPrinters": false` to `config.json`.
+
 ---
 
 ## Testing without a printer (Virtual Printers)

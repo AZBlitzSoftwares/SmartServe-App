@@ -307,6 +307,20 @@ function buildCancel(job, { backup, now }) {
 
 function buildTest(job, { printer, now }) {
   const r = new Receipt();
+  if (job.kot_no === 'IDENTIFY') {
+    // "Print a slip" from the desk's printer search: which physical printer is this?
+    const where = printer || job.target_ip || '-';
+    r.init();
+    r.align('center').bold(true).size(2).line('THIS PRINTER');
+    r.size(1).line(where);
+    r.bold(false).align('left').dashes();
+    r.line(`Time:    ${formatDateTime(now)}`);
+    r.line();
+    for (const l of wrap('Found by the Print Hub. At the desk, choose it for a kitchen under Control > Kitchens & printers.', WIDTH)) r.line(l);
+    r.dashes();
+    footer(r, job, now);
+    return r.toBuffer();
+  }
   const kitchen = String(job.kitchen_name || 'this kitchen');
   r.init();
   r.align('center').bold(true).size(2).line('TEST PRINT');

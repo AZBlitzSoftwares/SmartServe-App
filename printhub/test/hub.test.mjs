@@ -26,6 +26,7 @@ const FAST = {
   requestTimeoutMs: 2000,
   stopWaitMs: 3000,
   display: 'none',
+  findPrinters: false, // the printer search has its own tests below; never scan the test machine's network
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -52,8 +53,8 @@ const jobTexts = (printer) => printer.jobs.map((j) => j.decoded.lines.map((l) =>
 const hasLine = (lines, re) => lines.some((l) => (re instanceof RegExp ? re.test(l) : l === re));
 
 /** Common setup: mock server, today's event, a hub; everything is cleaned up afterwards. */
-async function setup(t, { reclaimMs, legacyStatus, hub: hubOptions = {} } = {}) {
-  const mock = await startMockPostgrest({ reclaimMs, legacyStatus });
+async function setup(t, { reclaimMs, legacyStatus, noDiscovery, hub: hubOptions = {} } = {}) {
+  const mock = await startMockPostgrest({ reclaimMs, legacyStatus, noDiscovery });
   const event = mock.addEvent({ name: 'Sharma Wedding', date: localDate() });
   const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'printhub-test-'));
   const printers = [];
@@ -402,4 +403,56 @@ test('helpers: endpoints, errors and an offline probe', async () => {
   } finally {
     await silent.close();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Printer search: a printer that comes back with a new address is followed
+// ---------------------------------------------------------------------------
+const MAC = 'aa:bb:cc:00:00:01';
+const SEARCH = { findPrinters: true, scanSubnets: false, scanEveryMs: 200, scanRequestMs: 100, scanTimeoutMs: 300 };
+
+test('a kitchen printer that restarts on a new address is found by its MAC and KOTs print there', async (t) => {
+  const ctx = await setup(t);
+  const { mock, event } = ctx;
+  const oldPort = await closedPort(); // the printer is gone from its old address
+  const moved = await ctx.printer(); // ...and answers on a new one
+  const k = mock.addKitchen({ event_id: event.id, name: 'Asian', prefix: 'AS', printer_ip: '127.0.0.1', printer_port: oldPort, printer_mac: MAC });
+  const kot = mock.addKot({ kitchen: k, kot_no: 'AS-001', table_number: 3, items: [{ name: 'Dim Sum', qty: 2 }] });
+  ctx.start({ ...SEARCH, scanTargets: [`127.0.0.1:${moved.port}`], arp: async () => new Map([['127.0.0.1', MAC]]) });
+  await waitFor(() => mock.db.kitchens[0].printer_ip === `127.0.0.1:${moved.port}`, 'kitchen moved to the new address');
+  assert.equal(mock.db.kitchens[0].printer_moved_from, `127.0.0.1:${oldPort}`);
+  // the failed KOT goes out again once the printer reports online at its new address
+  await waitFor(() => moved.jobs.length > 0 || mock.kot(kot.id).print_status === 'failed', 'KOT tried');
+  if (mock.kot(kot.id).print_status === 'failed') mock.kot(kot.id).print_status = 'queued'; // the server re-queues on 'online'
+  await waitFor(() => mock.kot(kot.id).print_status === 'printed', 'KOT printed on the moved printer');
+  assert.ok(hasLine(jobTexts(moved).flat(), /AS-001/), 'AS-001 printed on the printer at its new address');
+  assert.ok(ctx.state.recent.some((r) => /moved .* followed by its MAC/.test(r.text)), 'the move is shown on the board');
+});
+
+test('Find printers at the desk: the hub searches and reports what it found', async (t) => {
+  const ctx = await setup(t);
+  const { mock, event } = ctx;
+  const p1 = await ctx.printer();
+  const spare = await ctx.printer();
+  mock.addKitchen({ event_id: event.id, name: 'Italian', prefix: 'IT', printer_ip: '127.0.0.1', printer_port: p1.port });
+  ctx.start({ ...SEARCH, scanEveryMs: 60_000, scanTargets: [`127.0.0.1:${spare.port}`], arp: async () => new Map() });
+  await waitFor(() => mock.db.found.length >= 1, 'search at start');
+  const before = mock.db.found.length;
+  mock.db.events[0].printer_scan_at = new Date().toISOString(); // the button
+  await waitFor(() => mock.db.found.length > before, 'search after the desk asked');
+  const last = mock.db.found[mock.db.found.length - 1].printers.map((f) => f.ip).sort();
+  assert.deepEqual(last, [`127.0.0.1:${p1.port}`, `127.0.0.1:${spare.port}`].sort(), 'both printers reported, the working one without being disturbed');
+  assert.equal(p1.jobs.length, 0, 'nothing printed by the search');
+});
+
+test('a server without the printer search keeps printing and switches the search off', async (t) => {
+  const ctx = await setup(t, { noDiscovery: true });
+  const { mock, event } = ctx;
+  const p1 = await ctx.printer();
+  const k = mock.addKitchen({ event_id: event.id, name: 'Italian', prefix: 'IT', printer_ip: '127.0.0.1', printer_port: p1.port });
+  const kot = mock.addKot({ kitchen: k, kot_no: 'IT-001', table_number: 1, items: [{ name: 'Penne', qty: 1 }] });
+  ctx.start({ ...SEARCH, arp: async () => new Map() });
+  await waitFor(() => mock.kot(kot.id).print_status === 'printed', 'printed');
+  await waitFor(() => ctx.state.discovery.on === false, 'search switched off');
+  assert.ok(ctx.state.recent.some((r) => /database update/.test(r.text)));
 });

@@ -636,6 +636,11 @@ function KitchensSection({ eventId, maestro, kitchens, setKitchens, setCats, wai
       ;({ data: row, error } = await supabase.from('kitchens')
         .insert({ ...payload, event_id: eventId, sort_order: maxOrder + 1 }).select().single())
     } else {
+      // A printer typed in by hand is a different printer: forget the hardware address
+      // learned for the old one, or the Print Hub would "follow" it back
+      const old = kitchens.find(k => k.id === form.id)
+      if (old && 'printer_mac' in old && (old.printer_ip || null) !== payload.printer_ip) payload.printer_mac = null
+      if (old && 'backup_printer_mac' in old && (old.backup_printer_ip || null) !== payload.backup_printer_ip) payload.backup_printer_mac = null
       ;({ data: row, error } = await supabase.from('kitchens').update(payload).eq('id', form.id).select().single())
     }
     if (error || !row) { setSaving(false); setFormErr(errText(error)); return }
@@ -816,7 +821,7 @@ function KitchensSection({ eventId, maestro, kitchens, setKitchens, setCats, wai
         ) : (
           <KitchenRow key={k.id} k={k} maestro={maestro} first={idx === 0} last={idx === kitchens.length - 1}
             isDefault={defaultKitchen?.id === k.id} now={now} test={tests[k.id]}
-            sharedWith={k.printer_ip ? kitchens.filter(o => o.id !== k.id && o.printer_ip === k.printer_ip) : []}
+            sharedWith={k.printer_ip ? kitchens.filter(o => o.id !== k.id && keyOf(o.printer_ip, o.printer_port) === keyOf(k.printer_ip, k.printer_port)) : []}
             confirm={confirm?.id === k.id ? confirm : null} counts={ownCounts(k.id)}
             onMove={d => move(k, d)} onEdit={() => openEdit(k)} onTest={() => testPrint(k)}
             onMakeDefault={async () => { if (await makeDefault(k.id)) setMsg({ tone:'ok', text: k.name + ' is now the default kitchen' }) }}
@@ -824,6 +829,159 @@ function KitchensSection({ eventId, maestro, kitchens, setKitchens, setCats, wai
             onDelete={() => doDelete(k)} onActive={on => setActive(k, on)} />
         ))}
       </div>
+
+      {kitchens.length > 0 && !form && <FindPrinters eventId={eventId} kitchens={kitchens} setKitchens={setKitchens} />}
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------- find printers */
+
+/* The Print Hub looks for printers on its own network and lists them here,
+   with their hardware (MAC) address. A printer is chosen for a kitchen from
+   the list instead of typing an IP, and "Print a slip" shows which physical
+   printer is which. Each kitchen printer's MAC is remembered, so a printer
+   that comes back from a restart with a new address is followed by the hub
+   on its own - those moves are shown here too. */
+const ago = (t, now) => {
+  const m = Math.round((now - new Date(t)) / 60000)
+  return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.round(m / 60) + ' h ago'
+}
+const splitIp = ip => { const m = String(ip || '').match(/^(.+):(\d+)$/); return m ? { host:m[1], port:Number(m[2]) } : { host:String(ip || ''), port:9100 } }
+const keyOf = (ip, port) => { const e = splitIp(ip); const p = /:\d+$/.test(String(ip || '')) ? e.port : Number(port) || 9100; return e.host ? (p === 9100 ? e.host : e.host + ':' + p) : null }
+
+function FindPrinters({ eventId, kitchens, setKitchens }) {
+  const [rows, setRows] = useState(null)        // null = not loaded / not available
+  const [missing, setMissing] = useState(false) // database update not applied yet
+  const [search, setSearch] = useState(null)    // { at, phase:'asking'|'waiting'|'done'|'nohub', n }
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState({})          // ip -> 'slip' | 'assign'
+  const [note, setNote] = useState(null)
+  const [now, setNow] = useState(() => Date.now())   // refreshed with every load, for "seen 2 min ago"
+
+  async function load() {
+    const { data, error } = await supabase.from('found_printers').select('*').eq('event_id', eventId).order('seen_at', { ascending:false })
+    setNow(Date.now())
+    if (error) { if (/found_printers|schema cache|does not exist/i.test(error.message)) setMissing(true); return null }
+    setRows(data || []); return data || []
+  }
+  useEffect(() => { load() }, [eventId])
+  useEffect(() => {
+    const t = setInterval(load, search && search.phase === 'waiting' ? 2000 : 20000)
+    return () => clearInterval(t)
+  }, [eventId, search?.phase])
+  // the search ends when fresh rows arrive, or after 25 s with nothing
+  useEffect(() => {
+    if (!search || search.phase !== 'waiting') return
+    const fresh = (rows || []).filter(r => new Date(r.seen_at) >= search.at - 2000)
+    if (fresh.length) { setSearch(s => ({ ...s, phase:'done', n: fresh.length })); setOpen(true); return }
+    const t = setTimeout(() => setSearch(s => s && s.phase === 'waiting' ? { ...s, phase:'nohub' } : s), Math.max(0, 25000 - (Date.now() - search.at)))
+    return () => clearTimeout(t)
+  }, [rows, search])
+
+  async function find() {
+    setNote(null)
+    const at = Date.now()
+    setSearch({ at, phase:'asking' })
+    const { error } = await supabase.from('events').update({ printer_scan_at: new Date(at).toISOString() }).eq('id', eventId)
+    if (error) { setSearch(null); if (/printer_scan_at/.test(error.message)) setMissing(true); else setNote({ tone:'err', text: errText(error, 'sent') }); return }
+    setSearch({ at, phase:'waiting' })
+  }
+
+  async function slip(f) {
+    setBusy(b => ({ ...b, [f.ip]:'slip' }))
+    const { error } = await supabase.from('kots').insert({ event_id:eventId, kitchen_id:null, kind:'test', kot_no:'IDENTIFY',
+      kitchen_name:'Printer ' + f.ip, printer_ip:f.ip, items:[], status:'open' })
+    setBusy(b => ({ ...b, [f.ip]:null }))
+    setNote(error ? { tone:'err', text: errText(error, 'sent') } : { tone:'ok', text:'A slip saying THIS PRINTER ' + f.ip + ' is printing on that printer.' })
+  }
+
+  async function assign(f, value) {
+    if (!value) return
+    const [slot, id] = value.split(':')
+    const k = kitchens.find(x => x.id === id)
+    if (!k) return
+    const { host, port } = splitIp(f.ip)
+    const patch = slot === 'main'
+      ? { printer_ip: host, printer_port: port, printer_mac: f.mac || null }
+      : { backup_printer_ip: f.ip, backup_printer_mac: f.mac || null }
+    setBusy(b => ({ ...b, [f.ip]:'assign' }))
+    const { data, error } = await supabase.from('kitchens').update(patch).eq('id', k.id).select().single()
+    setBusy(b => ({ ...b, [f.ip]:null }))
+    if (error) { setNote({ tone:'err', text: k.name + ' — ' + errText(error) }); return }
+    setKitchens(prev => prev.map(x => x.id === k.id ? data : x))
+    setNote({ tone:'ok', text: (slot === 'main' ? k.name + ' prints on ' : k.name + ' falls back to ') + f.ip + '. Use Test print on the kitchen to check.' })
+  }
+
+  if (missing) return (
+    <div style={{ marginTop:12, fontSize:12, color:'var(--ink2)' }}>Printer search is not available yet on this database (update 2026-10-09_printer_discovery.sql).</div>
+  )
+
+  const users = f => kitchens.flatMap(k => [
+    keyOf(k.printer_ip, k.printer_port) === f.ip ? k.name : null,
+    keyOf(k.backup_printer_ip) === f.ip ? k.name + ' (backup)' : null]).filter(Boolean)
+  const moved = kitchens.filter(k => k.printer_moved_at && now - new Date(k.printer_moved_at) < 12 * 3600e3)
+  const list = rows || []
+  const latest = list.length ? Math.max(...list.map(r => +new Date(r.seen_at))) : 0
+  const phaseText = !search ? null
+    : search.phase === 'asking' ? 'Asking the Print Hub…'
+    : search.phase === 'waiting' ? 'The Print Hub is looking at its network…'
+    : search.phase === 'done' ? search.n + ' printer' + (search.n === 1 ? '' : 's') + ' answered'
+    : 'No Print Hub answered. Start the Print Hub on the desk laptop: it searches the network it is connected to.'
+
+  return (
+    <div style={{ marginTop:14, borderTop:'1px solid var(--line)', paddingTop:12 }}>
+      {moved.map(k => (
+        <Banner key={k.id} tone="ok">{k.name}’s printer came back on a new address ({k.printer_moved_from} → {keyOf(k.printer_ip, k.printer_port)}) {ago(k.printer_moved_at, now)}. The Print Hub recognised it by its hardware address and moved the kitchen; nothing to do.</Banner>
+      ))}
+      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+        <button onClick={find} disabled={search?.phase === 'asking' || search?.phase === 'waiting'}
+          style={{ ...btn, background:'#fff', color:'var(--ink)', border:'1.5px solid var(--line)' }}>
+          {search?.phase === 'waiting' || search?.phase === 'asking' ? '🔎 Searching…' : '🔎 Find printers'}</button>
+        {list.length > 0 && (
+          <button onClick={() => setOpen(o => !o)} style={{ background:'none', border:'none', color:'var(--ink)', fontWeight:800, fontSize:12.5, cursor:'pointer', textDecoration:'underline' }}>
+            {open ? 'Hide' : 'Show'} {list.length} printer{list.length === 1 ? '' : 's'} found</button>
+        )}
+        <span style={{ fontSize:12, fontWeight:700, color: search?.phase === 'nohub' ? AMBER_INK : 'var(--ink2)' }}>
+          {phaseText || 'The Print Hub finds printers on its network and follows a printer that restarts on a new address.'}</span>
+      </div>
+      {note && <div style={{ marginTop:8 }}><Banner tone={note.tone} onClose={() => setNote(null)}>{note.text}</Banner></div>}
+      {open && list.length > 0 && (
+        <div style={{ display:'grid', gap:6, marginTop:10 }}>
+          {list.map(f => {
+            const used = users(f)
+            const stale = latest - new Date(f.seen_at) > 3 * 60000
+            return (
+              <div key={f.id} className="ks-row" style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', border:'1.5px solid var(--line)',
+                borderRadius:10, padding:'8px 12px', background: stale ? 'var(--bg)' : '#fff', opacity: stale ? 0.7 : 1 }}>
+                <div style={{ minWidth:170 }}>
+                  <div style={{ fontWeight:900, fontVariantNumeric:'tabular-nums' }}>🖨 {f.ip}</div>
+                  <div style={{ fontSize:11, color:'var(--ink2)', fontFamily:'ui-monospace, Menlo, monospace' }}>{f.mac || 'hardware address not readable'}</div>
+                </div>
+                <span style={{ fontSize:11, fontWeight:800, borderRadius:999, padding:'2px 8px',
+                  background: f.status === 'paper_out' ? '#FEF2F2' : f.status === 'paper_low' ? AMBER_BG : '#F0FDF4',
+                  color: f.status === 'paper_out' ? RED : f.status === 'paper_low' ? AMBER_INK : GREEN }}>
+                  {f.status === 'paper_out' ? 'Paper out' : f.status === 'paper_low' ? 'Paper low' : 'Answering'}</span>
+                <span style={{ fontSize:11.5, color:'var(--ink2)' }}>seen {ago(f.seen_at, now)}</span>
+                <span style={{ fontSize:12, fontWeight:700, color: used.length ? 'var(--ink)' : AMBER_INK, flex:1, minWidth:140 }}>
+                  {used.length ? 'Used by ' + used.join(', ') : 'Not used by any kitchen'}</span>
+                <button onClick={() => slip(f)} disabled={!!busy[f.ip]} style={{ ...btn, height:32, padding:'0 10px', fontSize:12, background:'#fff', color:'var(--ink)', border:'1.5px solid var(--line)' }}>
+                  {busy[f.ip] === 'slip' ? 'Sending…' : 'Print a slip'}</button>
+                <select value="" onChange={e => assign(f, e.target.value)} disabled={!!busy[f.ip]}
+                  style={{ ...input, width:190, height:32, fontSize:12.5 }}>
+                  <option value="">Use for a kitchen…</option>
+                  <optgroup label="Main printer for">
+                    {kitchens.filter(k => k.is_active !== false).map(k => <option key={'m' + k.id} value={'main:' + k.id}>{k.name}</option>)}
+                  </optgroup>
+                  <optgroup label="Backup printer for">
+                    {kitchens.filter(k => k.is_active !== false).map(k => <option key={'b' + k.id} value={'backup:' + k.id}>{k.name}</option>)}
+                  </optgroup>
+                </select>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

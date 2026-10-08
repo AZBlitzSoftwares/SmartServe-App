@@ -17,6 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildKot, formatTime, parseStatusByte, STATUS_REQUEST } from './escpos.mjs';
+import { findPrinters, readArp, scanHosts } from './discover.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +43,14 @@ export const DEFAULTS = {
   lateNightHour: 6, // until 6 AM, yesterday's event still counts as "today"
   renderMs: 2000,
   stopWaitMs: 12_000,
+  // Printer search (printers that move to a new IP address are followed by their MAC)
+  findPrinters: true,
+  scanRequestMs: 5000, // how often to look for a "Find printers" press at the desk
+  scanEveryMs: 60_000, // while a printer is down, search the network at most this often
+  scanTimeoutMs: 400,
+  scanPorts: [9100],
+  scanTargets: [], // extra "host" or "host:port" to try (e.g. Virtual Printers)
+  scanSubnets: true,
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -395,6 +404,7 @@ export function startHub(options = {}) {
     pendingReports: new Map(), // KOT id -> { ok, error } printed but the server was not told yet
     counts: new Map(), // kitchen_id -> { printed, failed }  (since this hub started)
     recent: [], // last activity, newest first
+    discovery: { on: o.findPrinters !== false, running: false, lastAt: 0, found: [], requests: new Map(), note: '' },
   };
 
   let stopped = false;
@@ -700,6 +710,7 @@ export function startHub(options = {}) {
       lastKitchensAt = Date.now();
     }
     for (const ev of state.events.values()) await claim(ev);
+    checkScanRequests().catch((e) => logFile(`ERR  printer search request: ${e?.message || e}`));
   }
 
   let failStreak = 0;
@@ -748,8 +759,15 @@ export function startHub(options = {}) {
     }
   }
 
+  let firstSearchDone = false;
   async function healthLoop() {
     await checkPrinters();
+    // Once at start, then while any printer is down (it may have a new address)
+    const anyDown = printerTargets().some((t) => isDown(getPrinter(t.ep).status));
+    if (state.events.size && (!firstSearchDone || (anyDown && Date.now() - disc.lastAt >= o.scanEveryMs))) {
+      firstSearchDone = true;
+      discover(anyDown ? 'printer down' : 'start');
+    }
     later(healthLoop, o.probeMs);
   }
 
@@ -822,6 +840,99 @@ export function startHub(options = {}) {
       reporting = null;
     })();
     return reporting;
+  }
+
+  // ---- printer search --------------------------------------------------------
+  // Looks for printers on the laptop's network and tells the server, which
+  // remembers each kitchen printer's MAC and follows it to a new address.
+  // Printers that are working are not touched (a connection to a printer in
+  // the middle of a KOT could hold it up): they are reported from what the
+  // hub already knows, with their MAC from the ARP table.
+  const disc = state.discovery;
+  async function discover(reason) {
+    if (!disc.on || disc.running || stopped || !state.events.size) return;
+    disc.running = true;
+    const startedAt = Date.now();
+    try {
+      const known = new Map(); // "host:port" -> status, for printers known to be working
+      const down = [];
+      for (const t of printerTargets()) {
+        const st = getPrinter(t.ep).status;
+        if (st === 'online' || st === 'paper_low') known.set(t.ep.key, { ep: t.ep, status: st });
+        else down.push(t.ep.port === 9100 ? t.ep.host : t.ep.key);
+      }
+      const hosts = [...(o.scanSubnets !== false ? scanHosts() : []), ...down, ...(o.scanTargets || [])];
+      const scanned = await findPrinters({
+        hosts,
+        ports: o.scanPorts,
+        timeoutMs: o.scanTimeoutMs,
+        skip: new Set(known.keys()),
+        arp: o.arp || readArp,
+      });
+      const arp = known.size ? await (o.arp || readArp)() : new Map();
+      const found = [
+        ...scanned,
+        ...[...known.values()].map(({ ep, status }) => ({
+          host: ep.host,
+          port: ep.port,
+          ip: ep.port === 9100 ? ep.host : ep.key,
+          status,
+          mac: arp.get(ep.host) || null,
+        })),
+      ];
+      disc.found = found;
+      disc.lastAt = startedAt;
+      logFile(`SCAN ${reason}: ${found.length} printer(s) ${found.map((f) => f.ip + (f.mac ? ` [${f.mac}]` : '')).join(', ')}`);
+      let moved = 0;
+      for (const ev of state.events.values()) {
+        if (stopped) return;
+        const r = await api.rpc('hub_found_printers', {
+          p_event_id: ev.id,
+          p_hub: hubName,
+          p_printers: found.map((f) => ({ ip: f.ip, mac: f.mac, status: f.status })),
+        });
+        for (const m of r?.moved || []) {
+          moved++;
+          note('ok', `${m.kitchen} printer moved ${m.from} -> ${m.to}: followed by its MAC address`);
+        }
+      }
+      if (moved) lastKitchensAt = 0; // print to the new address from the next poll
+      disc.note = `${found.length} printer${found.length === 1 ? '' : 's'} found at ${clockTime(new Date(startedAt))}`;
+      if (reason === 'desk') note('info', `Printer search for the desk: ${disc.note}`);
+    } catch (e) {
+      if (e?.code === 'PGRST202' || e?.code === '42883' || /hub_found_printers/.test(String(e?.message))) {
+        disc.on = false;
+        note('warn', 'Printer search needs the database update 2026-10-09_printer_discovery.sql - printing is not affected');
+      } else logFile(`ERR  printer search: ${e?.message || e}`);
+    } finally {
+      disc.running = false;
+    }
+  }
+
+  // The desk's "Find printers" button sets events.printer_scan_at
+  let lastRequestCheck = 0;
+  async function checkScanRequests() {
+    if (!disc.on || Date.now() - lastRequestCheck < o.scanRequestMs || !state.events.size) return;
+    lastRequestCheck = Date.now();
+    let rows;
+    try {
+      rows = await api.get(`events?id=in.(${[...state.events.keys()].join(',')})&select=id,printer_scan_at`);
+    } catch (e) {
+      if (/printer_scan_at/.test(String(e?.message))) {
+        disc.on = false;
+        note('warn', 'Printer search needs the database update 2026-10-09_printer_discovery.sql - printing is not affected');
+      }
+      return;
+    }
+    let wanted = false;
+    for (const r of rows || []) {
+      const at = r.printer_scan_at ? Date.parse(r.printer_scan_at) : 0;
+      if (at && at !== disc.requests.get(r.id)) {
+        if (disc.requests.has(r.id) || Date.now() - at < 120_000) wanted = true; // a fresh press, not one from yesterday
+        disc.requests.set(r.id, at);
+      }
+    }
+    if (wanted) discover('desk');
   }
 
   // ---- console board ---------------------------------------------------------
@@ -989,6 +1100,8 @@ export function renderBoard(state, { logDir = null, color = false, width = 80, h
   lines.push(
     `Printing now: ${state.inFlight.size - waiting}` + (waiting ? `    ${yellow(`Printed, waiting to tell server: ${waiting}`)}` : ''),
   );
+  const d = state.discovery;
+  if (d?.on && (d.running || d.note)) lines.push(dim(`Printer search: ${d.running ? 'looking for printers on this network...' : d.note}`));
   lines.push('');
   lines.push(bold('LAST ACTIVITY'));
   if (state.recent.length === 0) lines.push(dim('  (nothing yet)'));
@@ -1101,6 +1214,8 @@ export function loadConfig({ dir = HERE, argv = [] } = {}) {
       eventId,
       hubName: String(args.hub || cfg.hubName || os.hostname()).slice(0, 60),
       pollMs: Math.min(10_000, Math.max(500, Number(cfg.pollMs) || DEFAULTS.pollMs)),
+      findPrinters: cfg.findPrinters !== false,
+      scanTargets: Array.isArray(cfg.scanTargets) ? cfg.scanTargets.map(String) : [],
     },
   };
 }

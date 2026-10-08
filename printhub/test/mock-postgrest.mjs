@@ -22,8 +22,8 @@ export function endpointOf(ipText, port) {
  * @param {boolean} [o.legacyStatus]    behave like a server with the old 3-argument
  *                                      hub_printer_status (no p_printer_port)
  */
-export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789abcdef', reclaimMs = 45_000, legacyStatus = false } = {}) {
-  const db = { events: [], kitchens: [], kots: [] };
+export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789abcdef', reclaimMs = 45_000, legacyStatus = false, noDiscovery = false } = {}) {
+  const db = { events: [], kitchens: [], kots: [], found: [] };
   const calls = []; // every request: { name, args, at }
   let mode = 'up'; // 'up' | 'down' (drop every connection) | 'reports-down' (drop hub_report only)
   let clock = Date.parse('2026-10-13T13:00:00Z');
@@ -99,6 +99,38 @@ export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789ab
       }
       return requeued;
     },
+    // mirrors db/2026-10-09_printer_discovery.sql: learn a kitchen printer's MAC, follow it to a new address
+    hub_found_printers({ p_event_id, p_printers }) {
+      const key = (ip, port) => {
+        const ep = endpointOf(ip, port);
+        if (!ep.host) return null;
+        return ep.port === 9100 ? ep.host : `${ep.host}:${ep.port}`;
+      };
+      const seen = (p_printers || []).map((f) => ({ ip: key(f.ip), mac: f.mac ? String(f.mac).toLowerCase() : null, status: f.status }));
+      db.found.push({ event_id: p_event_id, printers: seen });
+      const moved = [];
+      let learned = 0;
+      for (const k of db.kitchens.filter((x) => x.event_id === p_event_id)) {
+        const kk = key(k.printer_ip, k.printer_port);
+        if (!kk) continue;
+        const at = seen.find((f) => f.ip === kk);
+        if (!k.printer_mac) {
+          if (at?.mac) {
+            k.printer_mac = at.mac;
+            learned++;
+          }
+        } else if (!at || (at.mac && at.mac !== k.printer_mac)) {
+          const nw = seen.find((f) => f.mac === k.printer_mac && f.ip !== kk);
+          if (nw) {
+            k.printer_moved_from = kk;
+            k.printer_ip = nw.ip;
+            if (!/:\d+$/.test(nw.ip)) k.printer_port = 9100;
+            moved.push({ kitchen: k.name, from: kk, to: nw.ip });
+          }
+        }
+      }
+      return { moved, learned };
+    },
   };
 
   // PostgREST-style filters: col=eq.value ; select=a,b,c
@@ -106,7 +138,12 @@ export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789ab
     let out = rows;
     for (const [key, value] of params) {
       if (key === 'select' || key === 'order') continue;
-      if (!value.startsWith('eq.')) throw new Error(`mock supports only eq filters (${key}=${value})`);
+      if (value.startsWith('in.(') && value.endsWith(')')) {
+        const set = new Set(value.slice(4, -1).split(','));
+        out = out.filter((r) => set.has(String(r[key])));
+        continue;
+      }
+      if (!value.startsWith('eq.')) throw new Error(`mock supports only eq and in filters (${key}=${value})`);
       const want = value.slice(3);
       out = out.filter((r) => String(r[key]) === want);
     }
@@ -145,7 +182,7 @@ export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789ab
           if (fn === 'hub_printer_status' && legacyStatus && 'p_printer_port' in args) {
             return send(404, { code: 'PGRST202', message: 'Could not find the function public.hub_printer_status(p_event_id, p_printer_ip, p_printer_port, p_status) in the schema cache' });
           }
-          if (!rpc[fn]) return send(404, { code: 'PGRST202', message: `Could not find the function public.${fn}` });
+          if (!rpc[fn] || (noDiscovery && fn === 'hub_found_printers')) return send(404, { code: 'PGRST202', message: `Could not find the function public.${fn}` });
           return send(200, rpc[fn](args));
         }
         const t = url.pathname.match(/^\/rest\/v1\/(events|kitchens)$/);
@@ -172,7 +209,7 @@ export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789ab
       mode = m;
     },
     addEvent(e) {
-      const row = { id: randomUUID(), name: 'Test Event', date: null, multi_kitchen: true, ...e };
+      const row = { id: randomUUID(), name: 'Test Event', date: null, multi_kitchen: true, printer_scan_at: null, ...e };
       db.events.push(row);
       return row;
     },
