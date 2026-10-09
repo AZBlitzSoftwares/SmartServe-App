@@ -1301,8 +1301,9 @@ function RoutingSection({ cats, setCats, kitchens, itemCounts, defaultKitchen })
   return (
     <div style={card} id="ks-routing">
       <SectionHead step={3} title="Menu routing"
-        sub={'Which kitchen cooks each menu category. Saved as soon as you choose. Anything left blank goes to the default kitchen'
-          + (defaultKitchen ? ' (' + defaultKitchen.name + ').' : '.')}
+        sub={'Which kitchen cooks each menu category. The categories on the left are the ones in the Menu tab (they appear here by themselves when'
+          + ' you add one there); pick the kitchen whose printer and barkers get those dishes. Saved as soon as you choose.'
+          + ' A category left blank goes to the default kitchen' + (defaultKitchen ? ' (' + defaultKitchen.name + ').' : '.')}
         right={cats.length > 0 && (
           <button onClick={autoMatch} style={{ ...btn, background: unrouted.length ? MARI : '#E5E7EB',
             color: unrouted.length ? '#fff' : '#9CA3AF' }}
@@ -1369,6 +1370,10 @@ function RoutingSection({ cats, setCats, kitchens, itemCounts, defaultKitchen })
 }
 
 /* ------------------------------------------------------ captains → tables */
+
+// Captains in table order (Table 1, 2, 3 ...), by name within a table; no table yet last
+const byTable = list => [...list].sort((a, b) =>
+  (a.table_number || 1e9) - (b.table_number || 1e9) || String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric:true }))
 
 function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount }) {
   const [ticks, tick] = useTicks()
@@ -1456,7 +1461,7 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount 
 
       {captains.length > 0 && (
         <div className="ks-caps" style={{ marginBottom:12 }}>
-          {captains.map(c => (
+          {byTable(captains).map(c => (
             <CaptainRow key={c.id + ':' + (c.table_number ?? '') + ':' + (c.pin ?? '')} c={c} tableCount={tableCount}
               onSave={save} onRemove={remove} saved={!!ticks[c.id]}
               crowd={c.table_number ? perTable[c.table_number] : 0} />

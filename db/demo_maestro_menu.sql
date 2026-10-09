@@ -5,7 +5,8 @@
 -- client's list arrives). Menu categories are kitchen-wise: Italian, Oriental, Indian, Desserts.
 -- Every course is chosen by the guest and fired by the captain (no automatic first course).
 -- Every table gets a table captain (the earlier eight logins are kept).
--- Barker A / B share each kitchen's dishes about half and half.
+-- Barker A / B share each kitchen's dishes about half and half. Every dish has a demo photo
+-- (Wikimedia Commons; credits in docs/maestro-demo-photo-credits.md).
 -- Replaces the demo event's menu, courses and kitchen layout and clears its test service
 -- (orders, KOTs, chat, help requests). Kitchens on the Virtual Printers (127.0.0.1) are put on
 -- ports 9101-9104; a kitchen already given a real printer keeps it. Safe to run more than once.
@@ -91,39 +92,39 @@ begin
   select exists (select 1 from information_schema.columns where table_schema = 'public'
                   and table_name = 'menu_items' and column_name = 'sort_order') into has_sort;
   for c in select * from (values
-    (1, 'Italian', 'Soup', 'Funghi Tea Soup', 'Truffle foam', 'A'),
-    (2, 'Italian', 'Soup', 'Cream of Asparagus Soup (Jain)', 'Jain preparation', 'B'),
-    (3, 'Italian', 'Appetizer', 'Spinach Gnudi Butter Sage', '', 'A'),
-    (4, 'Italian', 'Entrée', 'Margherita Pizza', '', 'B'),
-    (5, 'Italian', 'Entrée', 'Giardino Pizza (Jain)', 'Jain preparation', 'A'),
-    (6, 'Italian', 'Palate Cleanser', 'Beetroot Sorbet', 'Cucumber granita', 'B'),
-    (7, 'Italian', 'Main Course 1', 'Spaghetti Arrabiata', '', 'A'),
-    (8, 'Italian', 'Main Course 2', 'Asparagus Barley Truffle Risotto', '', 'B'),
-    (9, 'Oriental', 'Soup', 'Siamese Noodle Soup', '', 'A'),
-    (10, 'Oriental', 'Appetizer', 'Crispy Kale & Asparagus Uramaki', 'Crispy kale uramaki, asparagus uramaki', 'B'),
-    (11, 'Oriental', 'Entrée', 'Baked Yasai Umami', '', 'A'),
-    (12, 'Oriental', 'Palate Cleanser', 'Lemongrass Granita', '', 'B'),
-    (13, 'Oriental', 'Main Course 1', 'Grilled Tofu', 'Snow peas, baby pak choy, nut butter espuma', 'A'),
-    (14, 'Oriental', 'Main Course 2', 'Blue Pea Flower Edamame Fried Rice', '', 'B'),
-    (15, 'Oriental', 'Main Course 2', 'Exotic Veggies in Chili Basil Sauce', '', 'A'),
-    (16, 'Indian', 'Soup', 'Tamatar Dhaniya Shorba', '', 'A'),
-    (17, 'Indian', 'Appetizer', 'Potato Gratin Chaat', '', 'B'),
-    (18, 'Indian', 'Appetizer', 'Dabeli Bao', '', 'A'),
-    (19, 'Indian', 'Entrée', 'Ajmer Style Kadhi Kachori', '', 'B'),
-    (20, 'Indian', 'Palate Cleanser', 'Sugarcane Sorbet', '', 'A'),
-    (21, 'Indian', 'Main Course 1', 'Stracciatella Palak Saag', 'Truffle chili oil, makai di roti', 'B'),
-    (22, 'Indian', 'Main Course 2', 'Amritsari Chole Kulcha', 'Amritsari chole, Amritsari kulcha, paneer makhani, onion chutney', 'A'),
-    (23, 'Indian', 'Main Course 2', 'Dal Bukhara & Pyaz Ka Pulao', 'Dal Bukhara, pyaz ka pulao, papad roll', 'B'),
-    (24, 'Desserts', 'Dessert', 'Tiramisu', 'Eggless, mascarpone, espresso', 'A'),
-    (25, 'Desserts', 'Dessert', 'Pistachio Panna Cotta', 'Berry compote', 'B'),
-    (26, 'Desserts', 'Dessert', 'Mango Sticky Rice', 'Coconut cream, sesame', 'A'),
-    (27, 'Desserts', 'Dessert', 'Dark Chocolate Mousse', 'Eggless, cocoa nib crumble', 'B'),
-    (28, 'Desserts', 'Dessert', 'Rasmalai Tres Leches', 'Saffron milk, pistachio', 'A'),
-    (29, 'Desserts', 'Dessert', 'Kesar Pista Kulfi', 'Falooda, rose syrup', 'B')
-  ) v(n, cuisine, course, name, description, barker) loop
+    (1, 'Italian', 'Soup', 'Funghi Tea Soup', 'Truffle foam', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/funghi-tea-soup.jpg'),
+    (2, 'Italian', 'Soup', 'Cream of Asparagus Soup (Jain)', 'Jain preparation', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/cream-of-asparagus-soup.jpg'),
+    (3, 'Italian', 'Appetizer', 'Spinach Gnudi Butter Sage', '', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/spinach-gnudi.jpg'),
+    (4, 'Italian', 'Entrée', 'Margherita Pizza', '', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/margherita-pizza.jpg'),
+    (5, 'Italian', 'Entrée', 'Giardino Pizza (Jain)', 'Jain preparation', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/giardino-pizza.jpg'),
+    (6, 'Italian', 'Palate Cleanser', 'Beetroot Sorbet', 'Cucumber granita', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/beetroot-sorbet.jpg'),
+    (7, 'Italian', 'Main Course 1', 'Spaghetti Arrabiata', '', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/spaghetti-arrabiata.jpg'),
+    (8, 'Italian', 'Main Course 2', 'Asparagus Barley Truffle Risotto', '', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/asparagus-risotto.jpg'),
+    (9, 'Oriental', 'Soup', 'Siamese Noodle Soup', '', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/siamese-noodle-soup.jpg'),
+    (10, 'Oriental', 'Appetizer', 'Crispy Kale & Asparagus Uramaki', 'Crispy kale uramaki, asparagus uramaki', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/kale-asparagus-uramaki.jpg'),
+    (11, 'Oriental', 'Entrée', 'Baked Yasai Umami', '', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/baked-yasai-umami.jpg'),
+    (12, 'Oriental', 'Palate Cleanser', 'Lemongrass Granita', '', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/lemongrass-granita.jpg'),
+    (13, 'Oriental', 'Main Course 1', 'Grilled Tofu', 'Snow peas, baby pak choy, nut butter espuma', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/grilled-tofu.jpg'),
+    (14, 'Oriental', 'Main Course 2', 'Blue Pea Flower Edamame Fried Rice', '', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/blue-pea-fried-rice.jpg'),
+    (15, 'Oriental', 'Main Course 2', 'Exotic Veggies in Chili Basil Sauce', '', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/exotic-veggies-chili-basil.jpg'),
+    (16, 'Indian', 'Soup', 'Tamatar Dhaniya Shorba', '', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/tamatar-dhaniya-shorba.jpg'),
+    (17, 'Indian', 'Appetizer', 'Potato Gratin Chaat', '', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/potato-gratin-chaat.jpg'),
+    (18, 'Indian', 'Appetizer', 'Dabeli Bao', '', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/dabeli-bao.jpg'),
+    (19, 'Indian', 'Entrée', 'Ajmer Style Kadhi Kachori', '', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/kadhi-kachori.jpg'),
+    (20, 'Indian', 'Palate Cleanser', 'Sugarcane Sorbet', '', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/sugarcane-sorbet.jpg'),
+    (21, 'Indian', 'Main Course 1', 'Stracciatella Palak Saag', 'Truffle chili oil, makai di roti', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/stracciatella-palak-saag.jpg'),
+    (22, 'Indian', 'Main Course 2', 'Amritsari Chole Kulcha', 'Amritsari chole, Amritsari kulcha, paneer makhani, onion chutney', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/amritsari-chole-kulcha.jpg'),
+    (23, 'Indian', 'Main Course 2', 'Dal Bukhara & Pyaz Ka Pulao', 'Dal Bukhara, pyaz ka pulao, papad roll', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/dal-bukhara-pulao.jpg'),
+    (24, 'Desserts', 'Dessert', 'Tiramisu', 'Eggless, mascarpone, espresso', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/tiramisu.jpg'),
+    (25, 'Desserts', 'Dessert', 'Pistachio Panna Cotta', 'Berry compote', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/pistachio-panna-cotta.jpg'),
+    (26, 'Desserts', 'Dessert', 'Mango Sticky Rice', 'Coconut cream, sesame', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/mango-sticky-rice.jpg'),
+    (27, 'Desserts', 'Dessert', 'Dark Chocolate Mousse', 'Eggless, cocoa nib crumble', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/dark-chocolate-mousse.jpg'),
+    (28, 'Desserts', 'Dessert', 'Rasmalai Tres Leches', 'Saffron milk, pistachio', 'A', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/rasmalai-tres-leches.jpg'),
+    (29, 'Desserts', 'Dessert', 'Kesar Pista Kulfi', 'Falooda, rose syrup', 'B', 'https://kapmreqrhlifxuzjjejz.supabase.co/storage/v1/object/public/smartserve/dishes/maestro-demo/kesar-pista-kulfi.jpg')
+  ) v(n, cuisine, course, name, description, barker, photo) loop
     select id into cat from menu_categories where event_id = ev and name = c.cuisine;
-    insert into menu_items (category_id, name, description, is_veg, is_available, is_live_counter, course, barker)
-    values (cat, c.name, nullif(c.description, ''), true, true, false, c.course, c.barker);
+    insert into menu_items (category_id, name, description, is_veg, is_available, is_live_counter, course, barker, photo_url)
+    values (cat, c.name, nullif(c.description, ''), true, true, false, c.course, c.barker, nullif(c.photo, ''));
     if has_sort then
       execute 'update menu_items set sort_order = $1 where category_id = $2 and name = $3' using c.n, cat, c.name;
     end if;

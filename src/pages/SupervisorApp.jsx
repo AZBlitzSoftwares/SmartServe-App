@@ -43,7 +43,7 @@ export default function SupervisorApp() {
   // screen. The Update button at the top is there when the operator is ready.
   useEffect(() => { setUnsavedCheck(() => authed); return () => setUnsavedCheck(null) }, [authed])
   const [currentUser, setCurrentUser] = useState(null)
-  const [activeTab, setActiveTab] = useState('kot')
+  const [chosenTab, setActiveTab] = useState('kot')
   const [deskView, setDeskView] = useState('desk')   // ss-maestro: Control Desk or printer board
   const [eventData, setEventData] = useState(null)
   const eventManuallySet = useRef(false) // true once user or initial load sets event
@@ -228,6 +228,9 @@ export default function SupervisorApp() {
     else if (evs.length) { setEventData(evs[0]); eventManuallySet.current = true }
   }
 
+  const feedbackTab = !eventData || eventData.service_mode !== 'captain'
+  // Feedback was open and the desk switched to a captain event: show its first tab instead
+  const activeTab = chosenTab === 'feedback' && !feedbackTab ? 'kot' : chosenTab
   if (!authed) return <SupervisorLogin onLogin={(user) => { setCurrentUser(user); setAuthed(true) }} />
 
   const isAdmin = currentUser?.role === 'admin'
@@ -238,7 +241,8 @@ export default function SupervisorApp() {
       : { id:'kot',     label:'Orders',   emoji:'🎫', badge:orderCount },
     { id:'menu',    label:'Menu',     emoji:'📋', badge:0 },
     { id:'reports', label:'Reports',  emoji:'📊', badge:0 },
-    { id:'feedback', label:'Feedback', emoji:'⭐', badge:0 },
+    // Guests give feedback on their own tablet only at guest self-service events
+    ...(feedbackTab ? [{ id:'feedback', label:'Feedback', emoji:'⭐', badge:0 }] : []),
     // Supervisors get table release here rather than through Events,
     // which would also expose every other event and staff deletion.
     { id:'tables',  label:'Control',  emoji:'🎛️', badge:0 },
@@ -449,7 +453,7 @@ export default function SupervisorApp() {
           </Suspense>
         )}
         {activeTab==='reports' && !eventData?.maestro && <ReportsDashboard eventData={eventData} onEventChange={setEventData} />}
-        {activeTab==='feedback' && <FeedbackReport eventData={eventData} />}
+        {activeTab==='feedback' && feedbackTab && <FeedbackReport eventData={eventData} />}
         {activeTab==='tables'  && <TableManager eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='events'  && <EventManager onEventChange={(ev) => { setEventData(ev); loadEvents() }} />}
       </div>

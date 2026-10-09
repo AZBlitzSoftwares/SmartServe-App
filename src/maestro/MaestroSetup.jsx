@@ -133,7 +133,7 @@ function ServiceSettings({ ev, dishes = [], onEventChange }) {
   return (
     <div className="card" id="ms-courses">
       <h3>Service settings <Saved at={saved} /></h3>
-      <p className="sub">The courses in the order they are served, with the number of dishes in each. The first course is served to every guest as soon as they are seated, if switched on. The dishes themselves (23 soups, if that is the menu) are added under <b>Menu</b>: one by one, or the caterer's whole Excel menu in one go with a Course column.</p>
+      <p className="sub">The courses of this event in the order they are served; the number after each is how many dishes the menu has in it. ‹ › move a course earlier or later, ✕ removes it, <b>Add</b> adds one, then <b>Save settings</b>. Captains see the courses in this order and fire them one after another. The dishes go into their course in the <b>Menu</b> tab: one by one, or a whole Excel menu with a Course column.</p>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
         {courses.map((c, i) => (
           <span key={c + i} className="cc" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', background: i === 0 ? 'var(--goldl)' : '#fff' }}>
@@ -154,6 +154,11 @@ function ServiceSettings({ ev, dishes = [], onEventChange }) {
         <button className="btn btn-navy" onClick={save}>Save settings</button>
         {msg && <span style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</span>}
       </div>
+      <p className="sub" style={{ marginTop: 10, marginBottom: 0 }}>
+        <b>Late alert:</b> a KOT not marked Ready this many minutes after it was fired turns red on the kitchen screen and is listed under Needs attention on the Control Desk.{' '}
+        <b>Pacing alert:</b> a seated table where nothing has been fired for this long is listed on the Control Desk with <i>Remind captain</i>, so no table waits too long between courses.{' '}
+        <b>Automatic first course:</b> when ticked, seating a cover sends the {courses[0] || 'first course'} straight to the kitchen (for a course every guest gets, like a welcome bite); leave it off when guests choose it.
+      </p>
     </div>
   )
 }
