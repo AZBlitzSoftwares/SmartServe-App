@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
-import { lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, ago, tc, eventDishes } from './msData'
+import { lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, ago, tc, eventDishes, captainsForCover } from './msData'
 
 const WAIT_MS = 2 * 60000      // a plate Ready this long without a steward is an alert
 
@@ -32,7 +32,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
         .eq('event_id', ev.id).gte('created_at', since),
       supabase.from('ms_items').select('id,table_number,cover_no,course,state,fired_at,served_at,held_at,kitchen_id').eq('event_id', ev.id),
       supabase.from('ms_covers').select('table_number,cover_no,seated_at').eq('event_id', ev.id),
-      supabase.from('captains').select('id,name,table_number,is_active').eq('event_id', ev.id),
+      supabase.from('captains').select('*').eq('event_id', ev.id),
       supabase.from('barkers').select('id,name,side,kitchen_id,is_active,last_seen_at').eq('event_id', ev.id),
       supabase.from('sos_requests').select('id,table_id,table_number,captain_id,request_type,status,created_at,tables(table_number)').eq('event_id', ev.id).in('status', ['open', 'acknowledged', 'in_progress']),
       eventDishes(ev.id, 'id,name,is_available,sold_out_at,sold_out_by'),
@@ -88,6 +88,19 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
         action: 'Call kitchen', onAct: () => ack('late-' + k.id, 3),
       }))
     }
+    // A KOT is marked received the moment a kitchen screen shows it. Still New after a
+    // minute: no screen of that kitchen is open, the printed slip is the only copy.
+    for (const kt of d.kitchens) {
+      const unseen = orders.filter(k => k.kitchen_id === kt.id && k.stage === 'new' && now - new Date(k.fired_at || k.created_at) > 60000)
+      if (!unseen.length) continue
+      const key = 'unseen-' + kt.id + '-' + unseen.length
+      alerts.push({
+        key, w: 95, icon: 'K', color: 'var(--warn)',
+        title: `${unseen.length} KOT${unseen.length === 1 ? '' : 's'} not on the ${kt.name} kitchen screen`,
+        sub: `${unseen.map(k => k.kot_no).slice(0, 6).join(', ')} · no ${kt.name} kitchen screen is open · ask the barker to open it`,
+        action: 'Seen', onAct: () => ack(key, 5),
+      })
+    }
     for (const kt of d.kitchens) {
       const failed = (d.kots || []).filter(k => k.kitchen_id === kt.id && k.print_status === 'failed' && k.status !== 'cancelled')
       const down = ['offline', 'paper_out', 'error'].includes(kt.printer_status)
@@ -121,7 +134,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
       const last = Math.max(new Date(c.seated_at).getTime(), ...its.filter(i => i.fired_at).map(i => new Date(i.fired_at).getTime()))
       const open = its.some(i => i.state === 'fired' && !i.served_at)
       if (!open && now - last > pacing * 60000) {
-        const cap = d.caps.filter(x => x.table_number === c.table_number).map(x => x.name).join(', ')
+        const cap = captainsForCover(d.caps, c.table_number, c.cover_no, E.chairs_per_table).map(x => x.name).join(', ')
         const key = `pace-${c.table_number}-${c.cover_no}`
         alerts.push({
           key, w: 60, icon: 'P', color: 'var(--blue)',
@@ -163,7 +176,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
   }, 'Help request resolved')
   const undoSold = m => run(() => rpc('ms_sold_out', { p_menu_item_id: m.id, p_sold_out: false, p_by: 'Control Desk' }), `${m.name} is available again`)
   const remind = (t, c, key) => run(async () => {
-    const caps = (d?.caps || []).filter(x => x.table_number === t)
+    const caps = captainsForCover(d?.caps, t, c, E.chairs_per_table)
     if (!caps.length) throw new Error('No table captain is linked to table T' + t)
     const { error } = await supabase.from('chat_messages').insert(caps.map(cp => ({
       event_id: ev.id, captain_id: cp.id, sender: 'supervisor', sender_name: 'Control Desk',
@@ -225,7 +238,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
               return (
                 <div className="kt" key={kt.id}>
                   <h5>{kt.name}{printerPill(kt)}</h5>
-                  <div className="n3"><div><b>{n}</b>New</div><div><b>{p}</b>Prep</div><div><b>{r}</b>Ready</div><div className={l ? 'l' : ''}><b>{l}</b>Late</div></div>
+                  <div className="n3"><div><b>{n}</b>Received</div><div><b>{p}</b>Prep</div><div><b>{r}</b>Ready</div><div className={l ? 'l' : ''}><b>{l}</b>Late</div></div>
                   <div className="meta"><span>{bs.length ? <>Barkers {bs.sort((a, b) => a.side.localeCompare(b.side)).map(b => (
                     <span key={b.id} className="bk" title={`Barker ${b.side} · ${b.name} · ${b.last_seen_at && now - new Date(b.last_seen_at) < 90000 ? 'screen on' : 'screen not open'}`}>
                       {b.side}<i className={b.last_seen_at && now - new Date(b.last_seen_at) < 90000 ? 'on' : 'off'} /></span>))}</> : 'No barker yet'}</span><span>Avg {mmss(fr.length ? fr.reduce((a, b) => a + b, 0) / fr.length : null)}</span></div>

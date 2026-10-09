@@ -6,14 +6,17 @@
      Course board  every cover x every course at a glance. Tap the held dishes
                    to send and tap Fire: one KOT per cover per kitchen barker.
    Seating a cover fires the First Course automatically (event setting).
-   Served, Remake and Cancel are on the course board. Help alerts the desk. */
+   Served, Remake and Cancel are on the course board. Help alerts the desk.
+   Two captains can share a table and split its covers (Event set-up >
+   Captains): each sees their own covers, and can open the other's covers
+   with one tap to take an order or fire for them. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
 import {
   coursesOf, courseRank, lateMinutes, dishStatus, useLive, useNow, loadMenu, rpc, errText, newRef,
-  NOTE_CHIPS, ago, shortName, tc,
+  NOTE_CHIPS, ago, shortName, tc, coverRange, servesCover, rangeText, coversText,
 } from './msData'
 
 const FOODS = ['#7DAA6A', '#7A3B2A', '#D5532F', '#A66A2C', '#C9A15B', '#B5582A', '#8E6BBF', '#3F8F8A', '#C98B2E']
@@ -77,7 +80,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
     return Number(captain.table_number) || saved || null
   })
   const [view, setView] = useState('take')
-  const [cover, setCover] = useState(1)
+  const [coverPick, setCover] = useState(() => coverRange(captain, coverCount)?.from || 1)
   // The menu is one row of tabs: All, then the courses in service order. Inside a course the
   // dishes are grouped by cuisine; "All" shows the whole menu course by course. Search covers it all.
   const [courseTab, setCourseTab] = useState(ALL)
@@ -89,6 +92,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const [sheet, setSheet] = useState(null)
   const [pickTable, setPickTable] = useState(false)
   const [noteOpen, setNoteOpen] = useState(null)   // draft row whose note chips are showing
+  const [showAll, setShowAll] = useState(false)     // the other captain's covers opened as well
   const now = useNow(1000)
 
   useEffect(() => { if (table) localStorage.setItem(tableKey, String(table)) }, [table, tableKey])
@@ -109,7 +113,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
       supabase.from('kots').select('id,kot_no,kitchen_id,kitchen_name,cover_no,barker,stage,fired_at,ready_at,dispatched_at,served_at,status,kind,is_remake,print_status')
         .eq('event_id', ev.id).eq('table_number', table).eq('kind', 'order'),
       supabase.from('ms_covers').select('*').eq('event_id', ev.id).eq('table_number', table),
-      supabase.from('captains').select('id,name,table_number').eq('event_id', ev.id).eq('table_number', table).eq('is_active', true).order('created_at'),
+      supabase.from('captains').select('*').eq('event_id', ev.id).eq('table_number', table).eq('is_active', true).order('created_at'),
     ])
     for (const r of [items, kots, covers]) if (r.error) throw r.error
     return { items: items.data || [], kots: kots.data || [], covers: covers.data || [], captains: caps.data || [] }
@@ -120,6 +124,19 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const kitchenById = useMemo(() => Object.fromEntries((menu?.kitchens || []).map(k => [k.id, k])), [menu])
   const dishById = useMemo(() => Object.fromEntries((menu?.dishes || []).map(d => [d.id, d])), [menu])
   const seated = useMemo(() => new Set(live.covers.filter(c => c.seated_at).map(c => c.cover_no)), [live.covers])
+
+  // This captain's covers, read live so a split changed at the desk reaches the tablet
+  const me = live.captains.find(c => c.id === captain.id) || (Number(captain.table_number) === Number(table) ? captain : null)
+  const myRange = coverRange(me, coverCount)
+  const allCovers = Array.from({ length: coverCount }, (_, i) => i + 1)
+  const isMine = c => !myRange || (c >= myRange.from && c <= myRange.to)
+  const myCovers = allCovers.filter(isMine)
+  const visibleCovers = showAll ? [...myCovers, ...allCovers.filter(c => !isMine(c))] : myCovers
+  const ownerOf = c => live.captains.filter(x => x.id !== captain.id && coverRange(x, coverCount) && servesCover(x, c, coverCount)).map(x => x.name).join(', ')
+  // A cover outside the captain's own falls back to their first cover once the others are closed
+  const cover = myRange && !showAll && !isMine(coverPick) ? myRange.from : coverPick
+  // Open or close the other covers: stay on the cover in view (or the captain's first), nothing left selected
+  const toggleOthers = () => { setCover(isMine(cover) ? cover : myRange.from); setSel(new Set()); setShowAll(v => !v) }
 
   const itemsOf = c => live.items.filter(i => i.cover_no === c && i.state !== 'cancelled')
   const statusOf = i => dishStatus(i, kotById[i.kot_id], now, lateMinutes(kitchenById[i.kitchen_id], ev))
@@ -137,6 +154,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
 
   const capNo = live.captains.findIndex(c => c.id === captain.id)
   const capLabel = `${captain.name}${capNo >= 0 ? ` (Table Captain ${capNo + 1})` : ''}`
+  const seatedMine = myCovers.filter(c => seated.has(c)).length
 
   // ----------------------------------------------------------- actions
   const draft = drafts[cover] || {}
@@ -167,7 +185,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   }
 
   async function seatAll() {
-    const todo = Array.from({ length: coverCount }, (_, i) => i + 1).filter(c => !seated.has(c))
+    const todo = visibleCovers.filter(c => !seated.has(c))
     if (!todo.length) return
     setBusy(true)
     try {
@@ -287,7 +305,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(90px,1fr))' }}>
             {Array.from({ length: n }, (_, i) => i + 1).map(t => (
               <button key={t} className={'save'} style={{ borderColor: t === table ? 'var(--amber)' : 'var(--line)', background: t === table ? 'var(--amberl)' : '#fff' }}
-                onClick={() => { setTable(t); setPickTable(false); setSel(new Set()) }}>T{t}</button>
+                onClick={() => { setTable(t); setPickTable(false); setSel(new Set()); setShowAll(false) }}>T{t}</button>
             ))}
           </div>
         </div>
@@ -381,6 +399,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
         <div className="ch">
           <b>Full order · {tc(table, cover)}</b>
           <small>Taken once, saved for the cover and fired course by course</small>
+          {!isMine(cover) && <div className="helpout">Helping out: C{cover} is {ownerOf(cover) || 'another captain'}'s cover</div>}
           <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {seated.has(cover)
               ? <span className="tagF">Seated</span>
@@ -442,7 +461,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   )
 
   // ----------------------------------------------------------- Course board
-  const boardCovers = Array.from({ length: coverCount }, (_, i) => i + 1)
+  const boardCovers = visibleCovers
   const cellItems = (c, course) => live.items.filter(i => i.cover_no === c && i.course === course && i.state !== 'cancelled')
   const selItems = live.items.filter(i => sel.has(i.id) && i.state === 'held')
   const selCovers = [...new Set(selItems.map(i => i.cover_no))].sort((a, b) => a - b)
@@ -467,7 +486,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   }
 
   function onCourseHead(course) {
-    const held = live.items.filter(i => i.course === course && i.state === 'held').map(i => i.id)
+    const held = live.items.filter(i => i.course === course && i.state === 'held' && boardCovers.includes(i.cover_no)).map(i => i.id)
     if (held.length) toggleIds(held)
   }
 
@@ -508,7 +527,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
             <tbody>
               {boardCovers.map(c => (
                 <tr key={c}>
-                  <td className="cvc" style={{ cursor: 'pointer' }} onClick={() => onCoverHead(c)}>C{c}<small>{selCovers.includes(c) ? 'selected' : seated.has(c) ? 'seated' : itemsOf(c).length ? 'ordered' : 'empty'}</small></td>
+                  <td className={'cvc' + (isMine(c) ? '' : ' oth')} style={{ cursor: 'pointer' }} onClick={() => onCoverHead(c)}>C{c}<small>{selCovers.includes(c) ? 'selected' : seated.has(c) ? 'seated' : itemsOf(c).length ? 'ordered' : 'empty'}</small></td>
                   {courses.map(course => {
                     const its = cellItems(c, course)
                     if (!its.length) return <td key={course} className="c na"><b>—</b></td>
@@ -535,7 +554,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
             <div><b>{selItems.length} {selItems.length === 1 ? 'dish' : 'dishes'} selected · {selCovers.map(c => 'C' + c).join(', ')}</b><br />
               <small>{selCourses.join(' + ')} · {selKitchens.join(', ')} · creates {selKots} KOT{selKots === 1 ? '' : 's'}, one cover each</small></div>
           ) : (
-            <div><b>Tap held dishes to fire</b><br /><small>Tap a course heading for the whole table, or a cover for its next course</small></div>
+            <div><b>Tap held dishes to fire</b><br /><small>Tap a course heading for every cover shown, or a cover for its next course</small></div>
           )}
           <div style={{ flex: 1 }} />
           <button className="btn btn-ghost" style={{ background: 'transparent', color: '#fff', borderColor: 'rgba(255,255,255,.35)' }} disabled={!sel.size} onClick={() => setSel(new Set())}>Clear</button>
@@ -558,7 +577,8 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
           {pace.length ? pace.slice(0, 8).map((p, i) => <div key={i}><b>C{p.c}</b> {p.t}</div>) : <span className="muted">Seat covers and fire the first course to see the pace here.</span>}
         </div>
         <div className="pace" style={{ background: '#FFF8E6' }}><b>Flexible sequence:</b> fire one dish, a whole course, or two courses together, for one cover or several.</div>
-        <button className="btn btn-ghost" disabled={busy || seated.size >= coverCount} onClick={seatAll}>Seat all covers{autoFirst ? ` · fires ${firstCourse}` : ''}</button>
+        {myRange && <button className="btn btn-ghost" onClick={toggleOthers}>{showAll ? `Only my covers (${rangeText(myRange)})` : `Show the other covers too`}</button>}
+        <button className="btn btn-ghost" disabled={busy || visibleCovers.every(c => seated.has(c))} onClick={seatAll}>{myRange && !showAll ? `Seat my covers (${rangeText(myRange)})` : 'Seat all covers'}{autoFirst ? ` · fires ${firstCourse}` : ''}</button>
       </div>
     </div>
   )
@@ -566,10 +586,10 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   return (
     <div className="ms cap-app">
       <AppBar
-        title={view === 'take' ? `Table T${table} · ${capLabel}` : `Table T${table} · Course board`}
+        title={view === 'take' ? `Table T${table} · ${capLabel}${myRange ? ` · ${rangeText(myRange)}` : ''}` : `Table T${table} · Course board`}
         sub={view === 'take'
-          ? `${coverCount} covers · ${seated.size} seated · Captain App`
-          : `${live.captains.map((c, i) => `${c.name} (TC${i + 1})`).join(' · ') || captain.name} · ${seated.size} covers seated · tap dishes to fire`}
+          ? (myRange ? `Your covers ${rangeText(myRange)} · ${seatedMine} seated · Captain App` : `${coverCount} covers · ${seated.size} seated · Captain App`)
+          : `${live.captains.map((c, i) => `${c.name} (TC${i + 1}${coverRange(c, coverCount) ? ' · ' + rangeText(coverRange(c, coverCount)) : ''})`).join(' · ') || captain.name} · ${seated.size} covers seated · tap dishes to fire`}
         right={<>
           <div className="tabsw">
             <button className={view === 'take' ? 'a' : ''} onClick={() => setView('take')}>Take order</button>
@@ -582,14 +602,22 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
         </>} />
       {view === 'take' && (
         <div className="covers">
-          <span className="l">Cover</span>
-          {Array.from({ length: coverCount }, (_, i) => i + 1).map(c => {
+          <span className="l">{myRange ? 'My covers' : 'Cover'}</span>
+          {visibleCovers.map((c, i) => {
             const s = coverState(c)
-            return (
-              <button key={c} className={'cv' + (c === cover ? ' sel' : s === 'ordered' || s === 'served' ? ' done' : s === 'seated' ? ' seat' : '')}
-                onClick={() => setCover(c)}><b>C{c}</b><small>{c === cover ? 'taking now' : s}{drafts[c] && c !== cover ? ' *' : ''}</small></button>
-            )
+            const first = !isMine(c) && (i === 0 || isMine(visibleCovers[i - 1]))
+            return [
+              first && <span key={'o' + c} className="l oth">{ownerOf(c) || 'Other covers'}</span>,
+              <button key={c} className={'cv' + (isMine(c) ? '' : ' oth') + (c === cover ? ' sel' : s === 'ordered' || s === 'served' ? ' done' : s === 'seated' ? ' seat' : '')}
+                onClick={() => setCover(c)}><b>C{c}</b><small>{c === cover ? 'taking now' : s}{drafts[c] && c !== cover ? ' *' : ''}</small></button>,
+            ]
           })}
+          {myRange && (
+            <button className="cvmore" onClick={toggleOthers}
+              title={showAll ? 'Back to your own covers' : 'Open the other covers of this table to take an order or fire for them'}>
+              {showAll ? `Only my covers` : `Other covers (${coversText(allCovers.filter(c => !isMine(c)))})`}
+            </button>
+          )}
         </div>
       )}
       {view === 'take' ? takeOrder : board}

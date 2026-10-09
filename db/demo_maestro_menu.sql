@@ -4,7 +4,8 @@
 -- plus Dessert, cooked in a separate Desserts kitchen (the desserts are placeholders until the
 -- client's list arrives). Menu categories are kitchen-wise: Italian, Oriental, Indian, Desserts.
 -- Every course is chosen by the guest and fired by the captain (no automatic first course).
--- Every table gets a table captain (the earlier eight logins are kept).
+-- Every table gets a table captain (the earlier eight logins are kept); tables 1, 2 and 7 have two
+-- captains who split the covers C1-C5 / C6-C10 (once 2026-10-10_maestro_covers.sql has run).
 -- Barker A / B share each kitchen's dishes about half and half. Every dish has a demo photo
 -- (Wikimedia Commons; credits in docs/maestro-demo-photo-credits.md).
 -- Replaces the demo event's menu, courses and kitchen layout and clears its test service
@@ -88,6 +89,18 @@ begin
       insert into captains (event_id, name, pin, table_number, is_active) values (ev, c.name, c.pin, c.table_number, true);
     end if;
   end loop;
+
+  -- tables shared by two captains split their covers (C1-C5 / C6-C10); a split already set is kept.
+  -- Needs 2026-10-10_maestro_covers.sql; skipped quietly before it.
+  if exists (select 1 from information_schema.columns where table_schema = 'public'
+              and table_name = 'captains' and column_name = 'cover_from') then
+    execute $q$
+      update captains k set cover_from = v.f, cover_to = v.t
+        from (values ('Rahul', 1, 5), ('Imran', 6, 10), ('Sameer', 1, 5), ('Ayesha', 6, 10),
+                     ('Neha', 1, 5), ('Arjun', 6, 10)) v(name, f, t)
+       where k.event_id = $1 and lower(k.name) = lower(v.name) and k.is_active
+         and k.cover_from is null and k.cover_to is null$q$ using ev;
+  end if;
 
   select exists (select 1 from information_schema.columns where table_schema = 'public'
                   and table_name = 'menu_items' and column_name = 'sort_order') into has_sort;

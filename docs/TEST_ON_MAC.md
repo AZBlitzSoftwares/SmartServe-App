@@ -104,7 +104,7 @@ It creates four events dated **today** and prints every login. They are also sav
 | | Waiters (assigned at the desk) | Ganesh (21), Harish (22), Javed (23) |
 | Demo · Multi-Kitchen (10 tables x 10 chairs) | Captains | `Rahul` / `1111` (table 1), `Imran` / `2222` (table 1), `Sameer` / `3333` (table 2), `Ayesha` / `4444` (table 3) |
 | | Waiter phones (`/waiter`) | `Arjun` 5101 Indian, `Salim` 5102 Arabic, `Kiran` 5103 Chinese, `Ravi` 5104 Italian, `Manoj` 5105 Mexican, `Tariq` 5106 Turkish |
-| Demo · Smart Serve Maestro (15 tables x 10 covers) | Captains | `Neha` / `7071` and `Arjun` / `7072` (table 7), `Rahul` / `1111`, `Imran` / `2222` (table 1), `Sameer` / `3333`, `Ayesha` / `4444` (table 2), `Faiz` / `8081` (8), `Priya` / `3131` (3); one captain on every other table (all in `demo-logins.txt`) |
+| Demo · Smart Serve Maestro (15 tables x 10 covers) | Captains | `Neha` / `7071` (C1–C5) and `Arjun` / `7072` (C6–C10) at table 7, `Rahul` / `1111` (C1–C5), `Imran` / `2222` (C6–C10) at table 1, `Sameer` / `3333` (C1–C5), `Ayesha` / `4444` (C6–C10) at table 2, `Faiz` / `8081` (8), `Priya` / `3131` (3); one captain on every other table (all in `demo-logins.txt`) |
 | | Kitchen Display (`/kitchen`) | Italian `Ajay` 6201 / `Vijay` 6202; Oriental `Rohit` 6301 / `Kunal` 6302; Indian `Farhan` 6401 / `Sunil` 6402; Desserts `Pooja` 6501 / `Meena` 6502 |
 
 \* With 4a your real admin is copied from the cloud, so use your usual admin PIN (the demo prints which).
@@ -181,7 +181,7 @@ Phone/tablet on the **same Wi-Fi** as the Mac, browser to `http://<mac-ip>:8080`
 - [ ] Device: **Captain** -> `Neha` / `7071` -> table 7 -> **Mark C1 seated** (nothing prints yet: the guest chooses every course).
 - [ ] **By course**: Soup from Oriental, Appetizer from Indian, Entrée from Italian, and so on to Dessert -> **Save & fire Soup**.
 - [ ] One KOT prints: the soup on Oriental (9102); every later course waits (held) until it is fired.
-- [ ] Kitchen PC: `http://<mac-ip>:8080/kitchen` -> `Rohit` / `6301` -> the Oriental KOT -> Received -> Send to chef -> Ready.
+- [ ] Kitchen PC: `http://<mac-ip>:8080/kitchen` -> `Rohit` / `6301` -> the Oriental KOT arrives already Received -> Start preparing -> Ready. Reprint prints it again; Whole kitchen shows (and can move) Barker B's KOTs too.
 - [ ] Captain: **Course board** -> tap the **Appetizer** heading -> **Fire** -> the Indian KOT prints on 9103.
 - [ ] Desk: **Demo · Smart Serve Maestro** -> **Control Desk**: kitchens, table 7, nothing late.
 

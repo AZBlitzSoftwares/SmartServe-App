@@ -12,14 +12,50 @@ import { supabase } from '../lib/supabase'
 export const STAGES = ['new', 'received', 'in_prep', 'ready', 'dispatched']
 export const STAGE_LABEL = { new: 'New', received: 'Received', in_prep: 'In Preparation', ready: 'Ready', dispatched: 'Dispatched' }
 // The barker's next action from each stage, as on the Kitchen Display.
+// A KOT is received the moment it reaches the kitchen screen (no "New" step for the
+// barker), so a new KOT and a received one both move on to preparation.
 export const NEXT_ACTION = {
-  new: { to: 'received', label: 'Received', cls: 'b1' },
-  received: { to: 'in_prep', label: 'Send to chef', cls: 'b2' },
+  new: { to: 'in_prep', label: 'Start preparing', cls: 'b2' },
+  received: { to: 'in_prep', label: 'Start preparing', cls: 'b2' },
   in_prep: { to: 'ready', label: 'Ready', cls: 'b3' },
   ready: { to: 'dispatched', label: 'Dispatched', cls: 'b2' },
 }
 export const DEFAULT_COURSES = ['First Course', 'Soup', 'Starters', 'Mains', 'Dessert']
 export const NOTE_CHIPS = ['Jain', 'No onion-garlic', 'Less spicy', 'Allergy']
+
+/* Covers a table captain looks after. Two captains can share a table and
+   split its covers (Neha C1-C5, Arjun C6-C10): set in Event set-up >
+   Captains. No range set: every cover of the table. Either captain can still
+   open the other's covers on the tablet when needed. */
+export function coverRange(cap, coverCount) {
+  const n = Math.max(1, Number(coverCount) || 10)
+  const f = Number(cap?.cover_from) || null
+  const t = Number(cap?.cover_to) || null
+  if (!f && !t) return null
+  const from = Math.min(Math.max(1, f || 1), n)
+  const to = Math.min(Math.max(from, t || n), n)
+  return from === 1 && to === n ? null : { from, to }
+}
+export const servesCover = (cap, c, coverCount) => { const r = coverRange(cap, coverCount); return !r || (c >= r.from && c <= r.to) }
+export const rangeText = r => r ? (r.from === r.to ? `C${r.from}` : `C${r.from}–C${r.to}`) : 'all covers'
+// C1–C3, C7–C10 for a list of cover numbers
+export function coversText(nums) {
+  const xs = [...new Set(nums)].sort((a, b) => a - b)
+  const out = []
+  for (let i = 0; i < xs.length; i++) {
+    let j = i
+    while (j + 1 < xs.length && xs[j + 1] === xs[j] + 1) j++
+    out.push(i === j ? `C${xs[i]}` : `C${xs[i]}–C${xs[j]}`)
+    i = j
+  }
+  return out.join(', ')
+}
+// The captains of a table who look after one cover (all of the table's captains if none has it)
+export function captainsForCover(caps, table, c, coverCount) {
+  const at = (caps || []).filter(x => x.is_active !== false && Number(x.table_number) === Number(table))
+  const mine = at.filter(x => servesCover(x, c, coverCount))
+  return mine.length ? mine : at
+}
 
 export function newRef() {
   try { if (crypto?.randomUUID) return crypto.randomUUID() } catch { /* older webview */ }

@@ -1,13 +1,15 @@
 /* Smart Serve Maestro - Kitchen Display (/kitchen).
 
    The kitchen barker's screen: a large screen, a mouse, at the pass.
-     My dishes      the barker's own KOTs in four columns, oldest first:
-                    New -> Received -> In Preparation -> Ready, then Dispatched
-                    when the plate leaves with a steward. One click per stage.
-     Whole kitchen  every open KOT of both barkers, large text for the chefs.
+     My dishes      the barker's own KOTs in three columns, oldest first:
+                    Received -> In Preparation -> Ready, then Dispatched when
+                    the plate leaves with a steward. One click per stage.
+                    A KOT is marked received as soon as it reaches the screen.
+     Whole kitchen  every open KOT of both barkers, with the same buttons, so
+                    one barker can carry on for the other when needed.
    Timers run from firing and turn red after the kitchen's late threshold.
    Coming-up counts show dishes held at the tables and not yet fired.
-   Take over: one barker can work the other barker's queue as well. */
+   Reprint sends a KOT to the kitchen printer again, marked REPRINT. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { unlockChime, playChatChime, chimeReady } from '../lib/chime'
@@ -107,13 +109,13 @@ function KitchenScreen({ session, onSignOut }) {
   const { barker, event } = session
   const kitchenId = barker.kitchen_id
   const [view, setView] = useState('mine')
-  const [takeover, setTakeover] = useState(false)
   const [picked, setPicked] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
   const [sheet, setSheet] = useState(null)
   const now = useNow(1000)
-  const seenNew = useRef(null)
+  const seenKots = useRef(null)
+  const receiving = useRef(new Set())
 
   // Never reload by itself while a barker is signed in (sound needs a tap after a reload)
   useEffect(() => { setUnsavedCheck(() => true); return () => setUnsavedCheck(null) }, [])
@@ -178,25 +180,46 @@ function KitchenScreen({ session, onSignOut }) {
   const d = q.data
   const kitchen = d?.kitchen
   const late = lateMinutes(kitchen, d?.ev || event)
-  const twoBarkers = (Number(kitchen?.barkers) || 2) >= 2
-  const other = barker.side === 'A' ? 'B' : 'A'
-  const mySides = new Set([barker.side, ...(takeover ? [other] : [])])
+  const mine = k => (k.barker || 'A') === barker.side
 
   const kots = useMemo(() => {
-    const list = (d?.kots || []).filter(k => view === 'whole' || mySides.has(k.barker || 'A'))
+    const list = (d?.kots || []).filter(k => view === 'whole' || mine(k))
     // remakes first, then oldest first
     return [...list].sort((a, b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0) || new Date(a.fired_at || a.created_at) - new Date(b.fired_at || b.created_at))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d, view, takeover, barker.side])
+  }, [d, view, barker.side])
 
-  // chime when a new KOT arrives for this barker
+  // Chime when a KOT arrives that this screen shows (the barker's own, or the
+  // whole kitchen's while that view is open)
   useEffect(() => {
     if (!d) return
-    const ids = new Set((d.kots || []).filter(k => k.stage === 'new' && mySides.has(k.barker || 'A')).map(k => k.id))
-    if (seenNew.current) {
-      for (const id of ids) if (!seenNew.current.has(id)) { try { playChatChime() } catch { /* no audio */ } break }
+    // Every KOT of the kitchen counts as seen once loaded, so opening Whole kitchen later
+    // does not chime for KOTs that were already there
+    const all = (d.kots || []).map(k => k.id)
+    if (seenKots.current) {
+      const fresh = (d.kots || []).filter(k => !seenKots.current.has(k.id) && (view === 'whole' || mine(k)))
+      if (fresh.length) { try { playChatChime() } catch { /* no audio */ } }
     }
-    seenNew.current = ids
+    seenKots.current = new Set([...(seenKots.current || []), ...all])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d])
+
+  /* A KOT is received the moment it reaches the kitchen screen: no New step
+     for the barker. Only a KOT still at New moves (never one a barker has
+     already started), and each one is sent once. If no kitchen screen is
+     open, the KOT stays "not yet received" on the Control Desk. */
+  useEffect(() => {
+    const fresh = (d?.kots || []).filter(k => k.stage === 'new' && !receiving.current.has(k.id)).map(k => k.id)
+    if (!fresh.length) return
+    fresh.forEach(id => receiving.current.add(id))
+    ;(async () => {
+      try {
+        const { error } = await supabase.from('kots').update({ stage: 'received', received_at: new Date().toISOString(), stage_by: barker.name })
+          .in('id', fresh).eq('stage', 'new')
+        if (error) throw error
+        q.reload()
+      } catch { fresh.forEach(id => receiving.current.delete(id)) /* tried again on the next refresh */ }
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d])
 
@@ -209,23 +232,31 @@ function KitchenScreen({ session, onSignOut }) {
     return ''
   }
   const by = st => kots.filter(k => k.stage === st)
+  // New only lasts until the screen has marked it received: shown as received
+  const received = kots.filter(k => k.stage === 'new' || k.stage === 'received')
   const lateCount = kots.filter(k => cls(k) === 'l').length
 
   const heldCounts = useMemo(() => {
     const m = new Map()
     for (const h of d?.held || []) {
-      if (view !== 'whole' && !mySides.has(h.barker || 'A')) continue
+      if (view !== 'whole' && !mine(h)) continue
       m.set(h.name, (m.get(h.name) || 0) + (h.qty || 1))
     }
     return [...m.entries()].sort((a, b) => b[1] - a[1])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d, view, takeover])
+  }, [d, view])
 
   async function move(k, to, quiet) {
     const from = k.stage
     try {
+      // Both barkers can act on a KOT: if the other screen has just moved it, leave it be
+      const { data: cur } = await supabase.from('kots').select('stage').eq('id', k.id).maybeSingle()
+      if (cur && cur.stage !== from && !(from === 'new' && cur.stage === 'received')) {
+        if (!quiet) setToast({ text: `${k.kot_no} was just moved by the other screen` })
+        return
+      }
       await rpc('ms_kot_stage', { p_kot_id: k.id, p_stage: to, p_by: barker.name })
-      if (!quiet) setToast({ text: `${k.kot_no} · ${to === 'in_prep' ? 'sent to chef' : to}`, undo: () => moveBack(k, from) })
+      if (!quiet) setToast({ text: `${k.kot_no} · ${to === 'in_prep' ? 'in preparation' : to}`, undo: () => moveBack(k, from === 'new' ? 'received' : from) })
     } catch (e) { setToast({ text: errText(e), err: true }) }
   }
   async function moveBack(k, stage) {
@@ -252,27 +283,47 @@ function KitchenScreen({ session, onSignOut }) {
   }
   const pick = k => setPicked(s => { const n = new Set(s); n.has(k.id) ? n.delete(k.id) : n.add(k.id); return n })
 
+  // The KOT slip again, from the kitchen printer, marked REPRINT on the slip
+  async function reprint(k) {
+    if (busy) return
+    setBusy(true)
+    try {
+      await rpc('ms_reprint', { p_kot_id: k.id, p_printer_ip: null })
+      setToast({ text: `${k.kot_no} sent to the printer again · marked REPRINT` })
+      await q.reload()
+    } catch (e) { setToast({ text: errText(e), err: true }) }
+    setBusy(false)
+  }
+
   // A plain render function, not a component: a component declared in here
   // would be a new type on every one-second tick and remount every card.
-  // The whole-kitchen view is an overview: no buttons, nothing to select.
-  const card = (k, whole) => (
-    <div key={k.id} className={'tl ' + cls(k) + (picked.has(k.id) ? ' pk' : '')}
-      onClick={whole ? undefined : e => { if (e.target.tagName !== 'BUTTON') pick(k) }} style={{ cursor: whole ? 'default' : 'pointer' }}>
-      <div className="tr">
-        <b>{k.kot_no}{whole && <span className={'tag ' + ((k.barker || 'A') === 'A' ? 'ta' : 'tb')}>{k.barker || 'A'}</span>}</b>
-        <span className="tm">{mmss(age(k))}</span>
+  // Whole kitchen has the same buttons: a barker can act on the other barker's KOTs.
+  const card = (k, whole) => {
+    const n = NEXT_ACTION[k.stage]
+    return (
+      <div key={k.id} className={'tl ' + cls(k) + (picked.has(k.id) ? ' pk' : '')}
+        onClick={e => { if (e.target.tagName !== 'BUTTON') pick(k) }} style={{ cursor: 'pointer' }}>
+        <div className="tr">
+          <b>{k.kot_no}{whole && <span className={'tag ' + ((k.barker || 'A') === 'A' ? 'ta' : 'tb')}>{k.barker || 'A'}</span>}</b>
+          <span className="tm">{mmss(age(k))}</span>
+        </div>
+        <span className="cvb">T{k.table_number} · C{k.cover_no}</span>
+        {k.course && <span className="crs">{k.course}</span>}
+        {k.is_remake && <span className="rmk">REMAKE</span>}
+        {k.print_status === 'failed' && <span className="rmk">NOT PRINTED</span>}
+        <div className="dd">
+          {(k.items || []).map((it, i) => (
+            <div key={i}>{it.qty} × {it.name}{it.note && String(it.note).split(',').map(x => x.trim()).filter(Boolean).map(x => <span key={x} className="jn">{x}</span>)}</div>
+          ))}
+        </div>
+        <div className="kact">
+          {n && <button className={'kbtn ' + n.cls} disabled={busy} onClick={() => act(k)}>{n.label}</button>}
+          <button className="kbtn rp" disabled={busy} title="Print this KOT again on the kitchen printer"
+            onClick={() => reprint(k)}>Reprint</button>
+        </div>
       </div>
-      <span className="cvb">T{k.table_number} · C{k.cover_no}</span>
-      {k.course && <span className="crs">{k.course}</span>}
-      {k.is_remake && <span className="rmk">REMAKE</span>}
-      <div className="dd">
-        {(k.items || []).map((it, i) => (
-          <div key={i}>{it.qty} × {it.name}{it.note && String(it.note).split(',').map(n => n.trim()).filter(Boolean).map(n => <span key={n} className="jn">{n}</span>)}</div>
-        ))}
-      </div>
-      {!whole && NEXT_ACTION[k.stage] && <button className={'kbtn ' + NEXT_ACTION[k.stage].cls} disabled={busy} onClick={() => act(k)}>{NEXT_ACTION[k.stage].label}</button>}
-    </div>
-  )
+    )
+  }
   const kname = String(kitchen?.name || barker.kitchen_name || '')
   const title = /kitchen$/i.test(kname.trim()) ? kname : `${kname} Kitchen`
 
@@ -283,16 +334,15 @@ function KitchenScreen({ session, onSignOut }) {
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <div className="brandmk"><div className="lt"><img src={logo} alt="" /></div></div>
           <div className="brandsep" style={{ margin: '0 12px' }} />
-          <h1>{title} <span>· {view === 'whole' ? 'Whole kitchen' : `Barker ${barker.side} · ${barker.name}${takeover ? ` + Barker ${other}` : ''}`}</span></h1>
+          <h1>{title} <span>· {view === 'whole' ? 'Whole kitchen' : `Barker ${barker.side} · ${barker.name}`}</span></h1>
         </div>
         <div className="seg">
-          <button className={view === 'mine' ? 'a' : ''} onClick={() => setView('mine')}>My dishes ({barker.side}{takeover ? '+' + other : ''})</button>
+          <button className={view === 'mine' ? 'a' : ''} onClick={() => { setView('mine'); setPicked(new Set()) }}>My dishes ({barker.side})</button>
           <button className={view === 'whole' ? 'a' : ''} onClick={() => setView('whole')}>Whole kitchen</button>
         </div>
         <div className="cnt">
-          {view === 'whole'
-            ? <><div className="c"><b>{by('new').length + by('received').length}</b>New &amp; received</div><div className="c"><b>{by('in_prep').length}</b>In prep</div></>
-            : <><div className="c"><b>{by('new').length}</b>New</div><div className="c"><b>{by('received').length}</b>Received</div><div className="c"><b>{by('in_prep').length}</b>In prep</div></>}
+          <div className="c"><b>{received.length}</b>Received</div>
+          <div className="c"><b>{by('in_prep').length}</b>In prep</div>
           <div className="c"><b>{by('ready').length}</b>Ready</div>
           <div className="c r"><b>{lateCount}</b>Late</div>
         </div>
@@ -315,19 +365,20 @@ function KitchenScreen({ session, onSignOut }) {
         </div>
       )}
 
+      {view === 'whole' && <div className="whint">Both barkers' KOTs. Use the buttons when the other barker is away: every change shows on both screens at once.</div>}
       {!d ? <div style={{ color: '#AEB8D0', padding: 20 }}>Loading…</div> : view === 'mine' ? (
         <div className="cols">
-          {[['new', 'New'], ['received', 'Received'], ['in_prep', 'In preparation'], ['ready', 'Ready · hand to a steward']].map(([st, label]) => (
-            <div className="col" key={st}>
-              <div className="colh"><span>{label}</span><span>{by(st).length}</span></div>
-              <div className="colb">{by(st).map(k => card(k, false))}</div>
+          {[[received, 'Received'], [by('in_prep'), 'In preparation'], [by('ready'), 'Ready · hand to a steward']].map(([list, label]) => (
+            <div className="col" key={label}>
+              <div className="colh"><span>{label}</span><span>{list.length}</span></div>
+              <div className="colb">{list.map(k => card(k, false))}</div>
             </div>
           ))}
         </div>
       ) : (
         <div className="cols whole">
-          <div className="col"><div className="colh"><span>New &amp; received</span><span>oldest first</span></div>
-            <div className="colb g2">{[...by('new'), ...by('received')].sort((a, b) => age(b) - age(a)).map(k => card(k, true))}</div></div>
+          <div className="col"><div className="colh"><span>Received</span><span>oldest first</span></div>
+            <div className="colb g2">{[...received].sort((a, b) => age(b) - age(a)).map(k => card(k, true))}</div></div>
           <div className="col"><div className="colh"><span>In preparation</span><span>red = over {late} min</span></div>
             <div className="colb g2">{by('in_prep').map(k => card(k, true))}</div></div>
           <div className="col"><div className="colh"><span>Ready · to dispatch</span></div>
@@ -337,7 +388,7 @@ function KitchenScreen({ session, onSignOut }) {
 
       <div className="foot">
         <span>{view === 'whole'
-          ? 'Blue = Barker A · gold = Barker B · dispatched KOTs clear from the screen automatically'
+          ? 'Blue = Barker A · gold = Barker B · tap cards to move several at once · dispatched KOTs clear from the screen automatically'
           : `Each KOT is for one table and one cover · the timer runs from firing · red after ${late} minutes`}</span>
         <span>{d?.avgReady != null ? `Avg. firing to ready ${mmss(d.avgReady)} · ` : ''}Dispatched this service: {d?.dispatched ?? 0}</span>
       </div>
@@ -348,7 +399,6 @@ function KitchenScreen({ session, onSignOut }) {
             <h3>{barker.name} · Barker {barker.side}</h3>
             <p>{kitchen?.name} kitchen · {event.name}</p>
             <div className="row">
-              {twoBarkers && <button className="btn btn-navy" onClick={() => { setTakeover(t => !t); setSheet(null) }}>{takeover ? `Stop working Barker ${other}'s queue` : `Take over Barker ${other}'s queue`}</button>}
               <button className="btn btn-ghost" onClick={() => setSheet('soldout')}>Sold out dishes</button>
               <button className="btn btn-ghost" onClick={() => { setSheet(null); q.reload() }}>Refresh</button>
               <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={onSignOut}>Sign out</button>
