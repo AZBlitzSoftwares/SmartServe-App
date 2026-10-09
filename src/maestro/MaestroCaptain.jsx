@@ -24,17 +24,16 @@ const ALL = '__all'
 
 function hash(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h }
 
-function DishPhoto({ dish }) {
+// Small square photo for the menu rows (the plate drawing when there is no photo)
+function DishThumb({ dish }) {
   const [broken, setBroken] = useState(false)
   if (dish.photo_url && !broken) {
-    return <div className="ph"><img src={dish.photo_url} alt="" loading="lazy" onError={() => setBroken(true)} /></div>
+    return <div className="thumb"><img src={dish.photo_url} alt="" loading="lazy" onError={() => setBroken(true)} /></div>
   }
   const f = FOODS[hash(dish.name) % FOODS.length]
   return (
-    <div className="ph" style={{ background: 'linear-gradient(135deg,#F0E4CC,#fff)' }}>
-      <div className="plate" />
-      <div className="food" style={{ width: 54, height: 54, margin: '-27px 0 0 -27px', background: `radial-gradient(circle at 35% 35%,${f}cc,${f})` }} />
-      <div className="food" style={{ width: 17, height: 17, margin: '-23px 0 0 6px', background: '#fff8' }} />
+    <div className="thumb" style={{ background: 'linear-gradient(135deg,#F0E4CC,#fff)' }}>
+      <div className="food" style={{ width: 30, height: 30, margin: '-15px 0 0 -15px', background: `radial-gradient(circle at 35% 35%,${f}cc,${f})` }} />
     </div>
   )
 }
@@ -81,9 +80,10 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   })
   const [view, setView] = useState('take')
   const [coverPick, setCover] = useState(() => coverRange(captain, coverCount)?.from || 1)
-  // The menu is one row of tabs: All, then the courses in service order. Inside a course the
-  // dishes are grouped by cuisine; "All" shows the whole menu course by course. Search covers it all.
+  // Two filter rows: Course (All, Soup ... Dessert) and Cuisine (All, Italian, Oriental ...).
+  // The list is grouped "Soup · Italian", "Soup · Indian" ... Search covers the whole menu.
   const [courseTab, setCourseTab] = useState(ALL)
+  const [cuisineTab, setCuisineTab] = useState(ALL)
   const [q, setQ] = useState('')
   const [drafts, setDrafts] = useState({})          // cover -> { menu_item_id: {qty, note} }
   const [sel, setSel] = useState(() => new Set())    // ms_items ids picked on the board
@@ -116,7 +116,10 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
       supabase.from('captains').select('*').eq('event_id', ev.id).eq('table_number', table).eq('is_active', true).order('created_at'),
     ])
     for (const r of [items, kots, covers]) if (r.error) throw r.error
-    return { items: items.data || [], kots: kots.data || [], covers: covers.data || [], captains: caps.data || [] }
+    // Table Captain 1, 2 ... in cover order (C1-C5 first), then in the order they were added
+    const capList = [...(caps.data || [])].sort((a, b) => (Number(a.cover_from) || 99) - (Number(b.cover_from) || 99)
+      || String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.name).localeCompare(String(b.name)))
+    return { items: items.data || [], kots: kots.data || [], covers: covers.data || [], captains: capList }
   }, { eventId: ev.id, tables: ['ms_items', 'kots', 'ms_covers'], intervalMs: 3000, deps: [table] })
   const live = liveQ.data || { items: [], kots: [], covers: [], captains: [] }
 
@@ -319,20 +322,27 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const visibleCat = new Set(cats.map(c => c.id))
   const dishesShown = (menu?.dishes || []).filter(d => visibleCat.has(d.category_id) && !(autoFirst && d.course === firstCourse))
   const courseOf = d => courses.includes(d.course) ? d.course : 'Other'
-  const courseTabs = [...courses, 'Other'].filter(c => dishesShown.some(d => courseOf(d) === c))
+  // Each filter row offers only what has dishes under the other row's choice, so the two
+  // together never end up on an empty list (Desserts has no Soup)
+  const courseTabs = [...courses, 'Other'].filter(c => dishesShown.some(d => courseOf(d) === c && (cuisineTab === ALL || d.category_id === cuisineTab)))
   const activeCourse = courseTabs.includes(courseTab) ? courseTab : ALL
   const catName = id => menu?.catsById?.[id]?.name || ''
-  const catRank = id => { const i = cats.findIndex(c => c.id === id); return i < 0 ? 999 : i }
+  const cuisineAll = cats.filter(c => dishesShown.some(d => d.category_id === c.id))
+  const cuisineTabs = cuisineAll.filter(c => dishesShown.some(d => d.category_id === c.id && (courseTab === ALL || courseOf(d) === courseTab)))
+  const activeCuisine = cuisineTabs.some(c => c.id === cuisineTab) ? cuisineTab : ALL
   const query = q.trim().toLowerCase()
   const shown = query
     ? dishesShown.filter(d => `${d.name} ${d.description || ''} ${catName(d.category_id)} ${d.course || ''}`.toLowerCase().includes(query))
-    : dishesShown.filter(d => activeCourse === ALL || courseOf(d) === activeCourse)
-  // "All" has a heading per course; inside one course the dishes sit side by side, cuisine by
-  // cuisine, each card naming its cuisine (so the captain sees every soup at a glance)
-  const byCuisine = list => [...list].sort((a, b) => catRank(a.category_id) - catRank(b.category_id))
-  const groupsShown = query || activeCourse !== ALL ? []
-    : courseTabs.map(c => ({ key: c, title: c, list: byCuisine(shown.filter(d => courseOf(d) === c)) })).filter(g => g.list.length)
-  const headed = groupsShown.length > 1
+    : dishesShown.filter(d => (activeCourse === ALL || courseOf(d) === activeCourse) && (activeCuisine === ALL || d.category_id === activeCuisine))
+  // One heading per course; inside it the dishes go cuisine by cuisine, each row tagged
+  // with its cuisine (Italian, Oriental, Indian ...) so two soups of two kitchens are told apart
+  const cuisineRank = id => { const i = cuisineAll.findIndex(c => c.id === id); return i < 0 ? 99 : i }
+  const groupsShown = query ? [] : courseTabs.map(c => {
+    const list = shown.filter(d => courseOf(d) === c).sort((a, b) => cuisineRank(a.category_id) - cuisineRank(b.category_id))
+    const cz = [...new Set(list.map(d => catName(d.category_id)))]
+    return { key: c, title: c, sub: `${list.length} ${list.length === 1 ? 'dish' : 'dishes'}${cz.length ? ' · ' + cz.join(', ') : ''}`, list }
+  }).filter(g => g.list.length)
+  const czTag = id => <span className={'cz z' + (cuisineRank(id) % 6)}>{catName(id)}</span>
 
   const coverItems = itemsOf(cover)
   const draftRows = Object.entries(draft).map(([id, v]) => ({ id, ...v, dish: dishById[id] })).filter(r => r.dish)
@@ -345,22 +355,21 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const ncKitchens = [...new Set(ncDishes.map(d => d.kitchen))].filter(Boolean)
   const heldCount = coverItems.filter(i => i.state === 'held').length + draftRows.length
 
+  // One compact row per dish, like the guest menu: photo, name, description, ADD
   const dishCard = d => {
     const q = draft[d.id]?.qty || 0
     const off = d.is_available === false
     return (
-      <div key={d.id} className={'dish' + (off ? ' off' : '')}>
-        <DishPhoto dish={d} />
-        <div className="di">
+      <div key={d.id} className={'dish drow' + (off ? ' off' : '') + (q ? ' picked' : '')}>
+        <DishThumb dish={d} />
+        <div className="dm">
           <div className="dn"><Veg veg={d.is_veg} />{d.name}</div>
-          {d.description && <div className="dd">{d.description}</div>}
-          {query && <div className="dq">{d.course}</div>}
-          <div className="add">
-            <span className="k">{off ? 'Sold out' : catName(d.category_id)}</span>
-            {off ? null : q ? (
-              <div className="st"><button className="m" onClick={() => addDish(d.id, -1)}>−</button><span>{q}</span><button className="m" onClick={() => addDish(d.id, 1)}>+</button></div>
-            ) : <button className="btn btn-amber addb" onClick={() => addDish(d.id, 1)}>ADD +</button>}
-          </div>
+          <div className="dd">{czTag(d.category_id)}{query ? <b className="dq">{d.course}</b> : null}{d.description || ''}</div>
+        </div>
+        <div className="da">
+          {off ? <span className="so">Sold out</span> : q ? (
+            <div className="st"><button className="m" onClick={() => addDish(d.id, -1)}>−</button><span>{q}</span><button className="m" onClick={() => addDish(d.id, 1)}>+</button></div>
+          ) : <button className="btn btn-amber addb" onClick={() => addDish(d.id, 1)}>ADD +</button>}
         </div>
       </div>
     )
@@ -380,16 +389,29 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
             {query ? (
               <div className="found">{shown.length} {shown.length === 1 ? 'dish' : 'dishes'} matching “{q.trim()}”</div>
             ) : (
-              <div className="tabs">
-                {[ALL, ...courseTabs].map(c => (
-                  <button key={c} className={'tab' + (c === activeCourse ? ' a' : '')} onClick={() => setCourseTab(c)}>{c === ALL ? 'All' : c}</button>
-                ))}
-              </div>
+              <>
+                <div className="frow"><span className="fl">Course</span>
+                  <div className="tabs">
+                    {[ALL, ...courseTabs].map(c => (
+                      <button key={c} className={'tab' + (c === activeCourse ? ' a' : '')} onClick={() => setCourseTab(c)}>{c === ALL ? 'All' : c}</button>
+                    ))}
+                  </div>
+                </div>
+                {cuisineAll.length > 1 && (
+                  <div className="frow"><span className="fl">Cuisine</span>
+                    <div className="cuis">
+                      {[{ id: ALL, name: 'All' }, ...cuisineTabs].map(c => (
+                        <button key={c.id} className={'cc' + (c.id === activeCuisine ? ' a' : '')} onClick={() => setCuisineTab(c.id)}>{c.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
-            <div className="grid">
-              {headed
-                ? groupsShown.flatMap(g => [<div key={'h' + g.key} className="ghead">{g.title}</div>, ...g.list.map(dishCard)])
-                : (query ? shown : byCuisine(shown)).map(dishCard)}
+            <div className="dlist">
+              {query
+                ? shown.map(dishCard)
+                : groupsShown.flatMap(g => [<div key={'h' + g.key} className="ghead">{g.title}<span>· {g.sub}</span></div>, ...g.list.map(dishCard)])}
               {!shown.length && <div className="empty">{query ? 'No dish matches that search.' : 'No dishes here.'}</div>}
             </div>
           </>
@@ -568,8 +590,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
           <div><i className="hd" />Held · saved, not fired</div>
           <div><i className="fi" />Fired · in the kitchen</div>
           <div><i className="rd" />Ready at the pass</div>
-          <div><i className="ow" />Dispatched · on the way</div>
-          <div><i className="sv" />Served</div>
+          <div><i className="sv" />Served · handed over at the pass</div>
           <div><i className="lt" />Late · over {lateMin} min</div>
         </div>
         <h5 style={{ marginTop: 6 }}>Pace</h5>
@@ -586,9 +607,9 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   return (
     <div className="ms cap-app">
       <AppBar
-        title={view === 'take' ? `Table T${table} · ${capLabel}${myRange ? ` · ${rangeText(myRange)}` : ''}` : `Table T${table} · Course board`}
+        title={view === 'take' ? `Table T${table} · ${captain.name}${myRange ? ` · ${rangeText(myRange)}` : ''}` : `Table T${table} · Course board`}
         sub={view === 'take'
-          ? (myRange ? `Your covers ${rangeText(myRange)} · ${seatedMine} seated · Captain App` : `${coverCount} covers · ${seated.size} seated · Captain App`)
+          ? `${capNo >= 0 ? `Table Captain ${capNo + 1} · ` : ''}${myRange ? `your covers ${rangeText(myRange)} · ${seatedMine} seated` : `${coverCount} covers · ${seated.size} seated`}`
           : `${live.captains.map((c, i) => `${c.name} (TC${i + 1}${coverRange(c, coverCount) ? ' · ' + rangeText(coverRange(c, coverCount)) : ''})`).join(' · ') || captain.name} · ${seated.size} covers seated · tap dishes to fire`}
         right={<>
           <div className="tabsw">

@@ -2,11 +2,13 @@
 
    The kitchen barker's screen: a large screen, a mouse, at the pass.
      My dishes      the barker's own KOTs in three columns, oldest first:
-                    Received -> In Preparation -> Ready, then Dispatched when
-                    the plate leaves with a steward. One click per stage.
+                    Received -> In Preparation -> Ready, then Handed over when
+                    the plate leaves with a steward: that completes the KOT.
                     A KOT is marked received as soon as it reaches the screen.
      Whole kitchen  every open KOT of both barkers, with the same buttons, so
                     one barker can carry on for the other when needed.
+     Done           KOTs handed over this service, with their times, and the
+                    barker's counts (handed over, average time, late).
    Timers run from firing and turn red after the kitchen's late threshold.
    Coming-up counts show dishes held at the tables and not yet fired.
    Reprint sends a KOT to the kitchen printer again, marked REPRINT. */
@@ -108,7 +110,8 @@ const inp = { background: '#111A2E', border: '1.5px solid #2E3B5C', color: '#fff
 function KitchenScreen({ session, onSignOut }) {
   const { barker, event } = session
   const kitchenId = barker.kitchen_id
-  const [view, setView] = useState('mine')
+  const [view, setView] = useState('mine')           // mine | whole | done
+  const [doneScope, setDoneScope] = useState('mine')  // Done view: my KOTs or the whole kitchen
   const [picked, setPicked] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
@@ -160,20 +163,22 @@ function KitchenScreen({ session, onSignOut }) {
 
   const q = useLive(async () => {
     const since = new Date(Date.now() - 12 * 3600e3).toISOString()
-    const [kitchen, kots, held, disp, ev] = await Promise.all([
+    const [kitchen, kots, held, fin, ev] = await Promise.all([
       supabase.from('kitchens').select('*').eq('id', kitchenId).maybeSingle(),
-      supabase.from('kots').select('*').eq('kitchen_id', kitchenId).eq('kind', 'order').neq('status', 'cancelled')
+      supabase.from('kots').select('*').eq('kitchen_id', kitchenId).eq('kind', 'order').eq('status', 'open')
         .neq('stage', 'dispatched').is('served_at', null).gte('created_at', since).order('created_at'),
       supabase.from('ms_items').select('name,qty,barker').eq('kitchen_id', kitchenId).eq('state', 'held'),
-      supabase.from('kots').select('stage,fired_at,ready_at,served_at').eq('kitchen_id', kitchenId).eq('kind', 'order').not('ready_at', 'is', null).gte('created_at', since),
+      // Done: handed over (or closed at the desk) this service, newest first
+      supabase.from('kots').select('*').eq('kitchen_id', kitchenId).eq('kind', 'order').eq('status', 'delivered')
+        .gte('created_at', since).order('dispatched_at', { ascending: false, nullsFirst: false }).limit(300),
       supabase.from('events').select('id,late_minutes,name').eq('id', event.id).maybeSingle(),
     ])
-    for (const r of [kitchen, kots, held]) if (r.error) throw r.error
-    const done = disp.data || []
-    const fr = done.filter(k => k.fired_at).map(k => new Date(k.ready_at) - new Date(k.fired_at)).filter(x => x >= 0)
+    for (const r of [kitchen, kots, held, fin]) if (r.error) throw r.error
+    const done = fin.data || []
+    const fr = [...done, ...(kots.data || [])].filter(k => k.fired_at && k.ready_at).map(k => new Date(k.ready_at) - new Date(k.fired_at)).filter(x => x >= 0)
     return {
-      kitchen: kitchen.data, kots: kots.data || [], held: held.data || [], ev: ev.data || event,
-      dispatched: done.filter(k => k.stage === 'dispatched' || k.served_at).length,
+      kitchen: kitchen.data, kots: kots.data || [], held: held.data || [], ev: ev.data || event, done,
+      dispatched: done.length,
       avgReady: fr.length ? fr.reduce((a, b) => a + b, 0) / fr.length : null,
     }
   }, { eventId: event.id, tables: ['kots', 'ms_items'], intervalMs: 2500 })
@@ -250,18 +255,30 @@ function KitchenScreen({ session, onSignOut }) {
     const from = k.stage
     try {
       // Both barkers can act on a KOT: if the other screen has just moved it, leave it be
-      const { data: cur } = await supabase.from('kots').select('stage').eq('id', k.id).maybeSingle()
-      if (cur && cur.stage !== from && !(from === 'new' && cur.stage === 'received')) {
+      const { data: cur } = await supabase.from('kots').select('stage,status').eq('id', k.id).maybeSingle()
+      if (cur && (cur.status !== 'open' || (cur.stage !== from && !(from === 'new' && cur.stage === 'received')))) {
         if (!quiet) setToast({ text: `${k.kot_no} was just moved by the other screen` })
         return
       }
-      await rpc('ms_kot_stage', { p_kot_id: k.id, p_stage: to, p_by: barker.name })
-      if (!quiet) setToast({ text: `${k.kot_no} · ${to === 'in_prep' ? 'in preparation' : to}`, undo: () => moveBack(k, from === 'new' ? 'received' : from) })
+      if (to === 'dispatched') {
+        // Handed over: the KOT is complete (served), nothing else to mark
+        await rpc('ms_serve', { p_kot_ids: [k.id], p_undo: false })
+        await supabase.from('kots').update({ stage_by: barker.name }).eq('id', k.id)
+      } else {
+        await rpc('ms_kot_stage', { p_kot_id: k.id, p_stage: to, p_by: barker.name })
+      }
+      if (!quiet) setToast({ text: `${k.kot_no} · ${to === 'in_prep' ? 'in preparation' : to === 'dispatched' ? 'handed over · done' : to}`, undo: () => moveBack(k, from === 'new' ? 'received' : from) })
     } catch (e) { setToast({ text: errText(e), err: true }) }
   }
+  // Undo a move; a KOT handed over by mistake goes back to Ready (open again)
   async function moveBack(k, stage) {
-    try { await rpc('ms_kot_stage', { p_kot_id: k.id, p_stage: stage, p_by: barker.name }); setToast({ text: `${k.kot_no} moved back` }); q.reload() }
-    catch (e) { setToast({ text: errText(e), err: true }) }
+    try {
+      const { data: cur } = await supabase.from('kots').select('status').eq('id', k.id).maybeSingle()
+      // Stage first: if the reopen then fails, the KOT is still in Done and can be tried again
+      await rpc('ms_kot_stage', { p_kot_id: k.id, p_stage: stage, p_by: barker.name })
+      if (cur?.status === 'delivered') await rpc('ms_serve', { p_kot_ids: [k.id], p_undo: true })
+      setToast({ text: `${k.kot_no} moved back` }); q.reload()
+    } catch (e) { setToast({ text: errText(e), err: true }) }
   }
   async function act(k) {
     const n = NEXT_ACTION[k.stage]
@@ -324,6 +341,16 @@ function KitchenScreen({ session, onSignOut }) {
       </div>
     )
   }
+  // Done: KOTs handed over this service, with their times
+  const doneAll = d?.done || []
+  const doneMine = doneAll.filter(mine)
+  const doneList = doneScope === 'whole' ? doneAll : doneMine
+  const tReady = k => (k.fired_at && k.ready_at ? new Date(k.ready_at) - new Date(k.fired_at) : null)
+  const tOut = k => { const t = k.dispatched_at || k.served_at; return k.fired_at && t ? new Date(t) - new Date(k.fired_at) : null }
+  const avgOf = xs => { const v = xs.filter(x => x != null && x >= 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null }
+  const wasLate = k => (tReady(k) ?? tOut(k) ?? 0) > late * 60000
+  const hhmm = iso => (iso ? clockText(new Date(iso)) : '–')
+
   const kname = String(kitchen?.name || barker.kitchen_name || '')
   const title = /kitchen$/i.test(kname.trim()) ? kname : `${kname} Kitchen`
 
@@ -334,11 +361,12 @@ function KitchenScreen({ session, onSignOut }) {
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <div className="brandmk"><div className="lt"><img src={logo} alt="" /></div></div>
           <div className="brandsep" style={{ margin: '0 12px' }} />
-          <h1>{title} <span>· {view === 'whole' ? 'Whole kitchen' : `Barker ${barker.side} · ${barker.name}`}</span></h1>
+          <h1>{title} <span>· {view === 'whole' ? 'Whole kitchen' : view === 'done' ? 'Done this service' : `Barker ${barker.side} · ${barker.name}`}</span></h1>
         </div>
         <div className="seg">
           <button className={view === 'mine' ? 'a' : ''} onClick={() => { setView('mine'); setPicked(new Set()) }}>My dishes ({barker.side})</button>
           <button className={view === 'whole' ? 'a' : ''} onClick={() => setView('whole')}>Whole kitchen</button>
+          <button className={view === 'done' ? 'a' : ''} onClick={() => { setView('done'); setPicked(new Set()) }}>Done · {doneMine.length}</button>
         </div>
         <div className="cnt">
           <div className="c"><b>{received.length}</b>Received</div>
@@ -366,7 +394,46 @@ function KitchenScreen({ session, onSignOut }) {
       )}
 
       {view === 'whole' && <div className="whint">Both barkers' KOTs. Use the buttons when the other barker is away: every change shows on both screens at once.</div>}
-      {!d ? <div style={{ color: '#AEB8D0', padding: 20 }}>Loading…</div> : view === 'mine' ? (
+      {!d ? <div style={{ color: '#AEB8D0', padding: 20 }}>Loading…</div> : view === 'done' ? (
+        <div className="donev">
+          <div className="dsum">
+            <div className="c"><b>{doneMine.length}</b>My dishes ({barker.side}) handed over</div>
+            <div className="c"><b>{doneAll.length}</b>Whole kitchen</div>
+            <div className="c"><b>{mmss(avgOf(doneList.map(tReady)))}</b>Avg firing → ready</div>
+            <div className="c"><b>{mmss(avgOf(doneList.map(tOut)))}</b>Avg firing → handed over</div>
+            <div className={'c' + (doneList.some(wasLate) ? ' r' : '')}><b>{doneList.filter(wasLate).length}</b>Late (over {late} min)</div>
+            <div className="seg sm" style={{ marginLeft: 'auto' }}>
+              <button className={doneScope === 'mine' ? 'a' : ''} onClick={() => setDoneScope('mine')}>Mine</button>
+              <button className={doneScope === 'whole' ? 'a' : ''} onClick={() => setDoneScope('whole')}>Whole kitchen</button>
+            </div>
+          </div>
+          <div className="dtw">
+            {doneList.length ? (
+              <table className="dtab">
+                <thead><tr><th>KOT</th><th>Table</th><th>Course</th><th>Dishes</th><th>Fired</th><th>Ready</th><th>Handed over</th><th>Total</th><th /></tr></thead>
+                <tbody>
+                  {doneList.map(k => (
+                    <tr key={k.id} className={wasLate(k) ? 'l' : ''}>
+                      <td><b>{k.kot_no}</b>{doneScope === 'whole' && <span className={'tag ' + ((k.barker || 'A') === 'A' ? 'ta' : 'tb')}>{k.barker || 'A'}</span>}{k.is_remake && <span className="rmk">REMAKE</span>}</td>
+                      <td>T{k.table_number} · C{k.cover_no}</td>
+                      <td>{k.course || ''}</td>
+                      <td className="dl">{(k.items || []).map(it => `${it.qty} × ${it.name}`).join(', ')}</td>
+                      <td>{hhmm(k.fired_at)}</td>
+                      <td>{hhmm(k.ready_at)}{tReady(k) != null && <small> · {mmss(tReady(k))}</small>}</td>
+                      <td>{hhmm(k.dispatched_at || k.served_at)}{k.stage_by ? <small> · {k.stage_by}</small> : null}</td>
+                      <td><b>{mmss(tOut(k))}</b></td>
+                      <td className="ac"><div>
+                        <button className="kbtn rp" disabled={busy} onClick={() => reprint(k)}>Reprint</button>
+                        <BackToReady busy={busy} onBack={() => moveBack(k, 'ready')} />
+                      </div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <div className="empty" style={{ color: '#AEB8D0', padding: 30, textAlign: 'center' }}>Nothing handed over yet this service.</div>}
+          </div>
+        </div>
+      ) : view === 'mine' ? (
         <div className="cols">
           {[[received, 'Received'], [by('in_prep'), 'In preparation'], [by('ready'), 'Ready · hand to a steward']].map(([list, label]) => (
             <div className="col" key={label}>
@@ -388,9 +455,9 @@ function KitchenScreen({ session, onSignOut }) {
 
       <div className="foot">
         <span>{view === 'whole'
-          ? 'Blue = Barker A · gold = Barker B · tap cards to move several at once · dispatched KOTs clear from the screen automatically'
+          ? 'Blue = Barker A · gold = Barker B · tap cards to move several at once · handed over KOTs move to Done'
           : `Each KOT is for one table and one cover · the timer runs from firing · red after ${late} minutes`}</span>
-        <span>{d?.avgReady != null ? `Avg. firing to ready ${mmss(d.avgReady)} · ` : ''}Dispatched this service: {d?.dispatched ?? 0}</span>
+        <span>{d?.avgReady != null ? `Avg. firing to ready ${mmss(d.avgReady)} · ` : ''}Handed over this service: {d?.dispatched ?? 0}</span>
       </div>
 
       {sheet === 'menu' && (
@@ -410,6 +477,15 @@ function KitchenScreen({ session, onSignOut }) {
       {toast && <KdToast toast={toast} onClose={() => setToast(null)} />}
     </div>
   )
+}
+
+// Back to Ready from Done: a second tap, so a stray click does not reopen a KOT
+function BackToReady({ busy, onBack }) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 4000); return () => clearTimeout(t) }, [armed])
+  return armed
+    ? <button className="kbtn b2" disabled={busy} onClick={() => { setArmed(false); onBack() }}>Reopen?</button>
+    : <button className="kbtn rp" disabled={busy} onClick={() => setArmed(true)} title="Handed over by mistake: back to Ready">Back to Ready</button>
 }
 
 function KdToast({ toast, onClose }) {

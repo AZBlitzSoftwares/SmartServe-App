@@ -552,7 +552,7 @@ const btnRetry   = { borderColor:'#DC2626', color:'#B91C1C' }
 /* KOT row                                                             */
 /* ------------------------------------------------------------------ */
 
-const KotRow = memo(function KotRow({ k, nowS, kitchens, own, act, confirming, onReprint, onDeliver, onTable }) {
+const KotRow = memo(function KotRow({ k, nowS, kitchens, own, act, confirming, onReprint, onDeliver, onTable, maestro }) {
   const open = k.status === 'open'
   const created = ms(k.created_at)
   const ageMin = open && nowS ? Math.max(0, Math.floor((nowS - created) / 60000)) : null
@@ -576,7 +576,16 @@ const KotRow = memo(function KotRow({ k, nowS, kitchens, own, act, confirming, o
   } else ageCell = <span style={{ color:'#9CA3AF' }}>{'–'}</span>
 
   let dlv
-  if (k.status === 'delivered') {
+  if (maestro && k.status === 'delivered') {
+    dlv = (
+      <div style={{ lineHeight:1.25, minWidth:0 }}>
+        <div style={{ fontSize:12, fontWeight:800, color:'#15803D', whiteSpace:'nowrap' }}>{'✓ Handed over ' + clockTime(k.dispatched_at || k.served_at || k.delivered_at)}</div>
+        <div style={{ fontSize:11, color:'var(--ink2)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{'by ' + (k.stage_by || k.barker_name || '–')}</div>
+      </div>
+    )
+  } else if (maestro && k.status === 'open') {
+    dlv = <Chip tone={k.stage === 'ready' ? 'amber' : 'grey'}>{MS_STAGE[k.stage] || 'Received'}</Chip>
+  } else if (k.status === 'delivered') {
     dlv = (
       <div style={{ lineHeight:1.25, minWidth:0 }}>
         <div style={{ fontSize:12, fontWeight:800, color:'#15803D', whiteSpace:'nowrap' }}>{'✓ Delivered ' + clockTime(k.delivered_at)}</div>
@@ -621,7 +630,7 @@ const KotRow = memo(function KotRow({ k, nowS, kitchens, own, act, confirming, o
                 title={rp ? rp.text : "Print this KOT again on its kitchen's printer"}
                 style={{ ...btnGhost, width:112, ...(rp ? btnRetry : null) }}>{rp ? '↻ Not sent' : '🖨 Reprint'}</button>
             : <span style={{ width:112 }} />)}
-        {open && (dl && dl.tone !== 'red'
+        {open && !maestro && (dl && dl.tone !== 'red'
           ? <Chip tone={dl.tone} style={{ width:112, justifyContent:'center', padding:'3px 6px' }}>{dl.text}</Chip>
           : <button className="kb-btn" onClick={() => onDeliver(k)}
               title={confirming ? 'Click again to confirm' : dl ? dl.text : 'Mark this KOT delivered from the desk'}
@@ -776,10 +785,14 @@ function KitchenTile({ k, stats, nowList, nowLive, selected, stale, onClick }) {
 export default function KitchenBoard({ eventData }) {
   if (!eventData?.id) return null
   // Keyed by event, so switching events starts from a clean slate.
-  return <Board key={eventData.id} eventId={eventData.id} />
+  return <Board key={eventData.id} eventId={eventData.id} maestro={!!eventData.maestro} />
 }
 
-function Board({ eventId }) {
+// Smart Serve Maestro: the barker's Handed over completes a KOT, so this list shows the
+// kitchen stage instead of a separate "Mark delivered"
+const MS_STAGE = { new: 'Not on a screen yet', received: 'Received', in_prep: 'In preparation', ready: 'Ready at the pass', dispatched: 'Handed over' }
+
+function Board({ eventId, maestro }) {
   const [kots, setKots] = useState(() => new Map())
   const [kitchens, setKitchens] = useState([])
   const [loaded, setLoaded] = useState(false)
@@ -1264,7 +1277,7 @@ function Board({ eventId }) {
             <div style={{ overflowY: fixed ? 'auto' : 'visible', overflowX:'hidden', flex:1, minHeight:0, WebkitOverflowScrolling:'touch' }}>
               <div className="kb-grid kb-head">
                 <div>KOT</div><div>Kitchen</div><div>Table</div><div>Items</div><div>Captain</div>
-                <div>Age</div><div>Print</div><div>Delivery</div><div style={{ textAlign:'right' }}>Actions</div>
+                <div>Age</div><div>Print</div><div>{maestro ? 'Stage' : 'Delivery'}</div><div style={{ textAlign:'right' }}>Actions</div>
               </div>
               {list.rows.length === 0 ? (
                 <div style={{ padding:'34px 20px', textAlign:'center', color:'var(--ink2)', fontWeight:700, fontSize:14 }}>
@@ -1276,7 +1289,7 @@ function Board({ eventId }) {
                 return (
                   <KotRow key={k.id} k={k} nowS={live ? listNowS : 0} kitchens={kitchens} own={kitchenById.get(k.kitchen_id)}
                     act={p ? actionStateRow(k, p, now, nowS) : null} confirming={confirmId === k.id}
-                    onReprint={onRowReprint} onDeliver={onDeliverClick} onTable={onTable} />
+                    onReprint={onRowReprint} onDeliver={onDeliverClick} onTable={onTable} maestro={maestro} />
                 )
               })}
             </div>

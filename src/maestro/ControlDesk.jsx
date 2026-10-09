@@ -1,12 +1,14 @@
 /* Smart Serve Maestro - Control Desk (operations head, laptop at the desk).
 
-   The whole service at a glance: every kitchen's queue and printer, a list
-   of what needs attention (sorted by urgency, each with its action) and the
-   progress of every table. The same laptop runs the Print Hub. */
+   The whole service at a glance: every kitchen's queue and printer, the
+   progress of every table (click one to see its covers and every order, as
+   the captain sees it) and what needs attention (sorted by urgency, each
+   with its action). The same laptop runs the Print Hub. */
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
+import TableView from './TableView'
 import { lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, ago, tc, eventDishes, captainsForCover } from './msData'
 
 const WAIT_MS = 2 * 60000      // a plate Ready this long without a steward is an alert
@@ -15,6 +17,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
   const ev = eventData
   const now = useNow(1000)
   const [acked, setAcked] = useState({})   // alert key -> until (ms)
+  const [openTable, setOpenTable] = useState(null)
   const [toast, setToast] = useState(null)
   useEffect(() => {
     if (!toast) return
@@ -195,6 +198,8 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
       if (i.served_at) t.served++
     }
     for (const k of orders) if (isLate(k)) (m[k.table_number] ||= { ordered: 0, served: 0, late: false }).late = true
+    for (const c of d?.covers || []) if (c.seated_at) { const t = (m[c.table_number] ||= { ordered: 0, served: 0, late: false }); t.seated = (t.seated || 0) + 1 }
+    for (const s of d?.sos || []) { const n = s.tables?.table_number ?? s.table_number; if (n) (m[n] ||= { ordered: 0, served: 0, late: false }).help = true }
     return m
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d, now])
@@ -247,6 +252,20 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
             })}
           </div>
           <div className="lo">
+            <div className="pan"><h4>Tables <span>click a table to see its covers and every order · plates served / ordered</span></h4>
+              <div className="tg">
+                {Array.from({ length: tables }, (_, i) => i + 1).map(t => {
+                  const s = tableStats[t] || { ordered: 0, served: 0, late: false }
+                  return (
+                    <button className={'tb' + (s.late ? ' l' : '') + (s.help ? ' h' : '')} key={t} onClick={() => setOpenTable(t)} title={`Open table T${t}`}>
+                      <b>T{t}{s.help && <i className="hdot" title="Help requested" />}</b>{s.served}/{s.ordered} served
+                      <small>{s.seated || 0} seated{s.late ? ' · late' : ''}</small>
+                      <div className="pbar"><i style={{ width: (s.ordered ? Math.round(100 * s.served / s.ordered) : 0) + '%', background: s.late ? 'var(--red)' : undefined }} /></div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
             <div className="pan"><h4>Needs attention <span>sorted by urgency</span></h4>
               <div style={{ overflowY: 'auto', minHeight: 0 }}>
                 {shown.length ? shown.map(a => (
@@ -258,22 +277,10 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
                 )) : <div className="empty">All clear. Late dishes, printer problems, waiting plates, pacing, help requests and sold-out dishes appear here.</div>}
               </div>
             </div>
-            <div className="pan"><h4>Tables <span>plates served / ordered</span></h4>
-              <div className="tg">
-                {Array.from({ length: tables }, (_, i) => i + 1).map(t => {
-                  const s = tableStats[t] || { ordered: 0, served: 0, late: false }
-                  return (
-                    <div className={'tb' + (s.late ? ' l' : '')} key={t}>
-                      <b>T{t}</b>{s.served}/{s.ordered}
-                      <div className="pbar"><i style={{ width: (s.ordered ? Math.round(100 * s.served / s.ordered) : 0) + '%', background: s.late ? 'var(--red)' : undefined }} /></div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
           </div>
         </>
       )}
+      {openTable != null && <TableView ev={E} table={openTable} caps={d?.caps || []} kitchens={d?.kitchens || []} onClose={() => setOpenTable(null)} />}
       {toast && (
         <div className={'toast' + (toast.err ? ' err' : '')}>
           {toast.text}<button onClick={() => setToast(null)}>OK</button>

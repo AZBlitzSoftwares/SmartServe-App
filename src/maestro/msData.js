@@ -18,7 +18,8 @@ export const NEXT_ACTION = {
   new: { to: 'in_prep', label: 'Start preparing', cls: 'b2' },
   received: { to: 'in_prep', label: 'Start preparing', cls: 'b2' },
   in_prep: { to: 'ready', label: 'Ready', cls: 'b3' },
-  ready: { to: 'dispatched', label: 'Dispatched', cls: 'b2' },
+  // Handing the plate to a steward completes the KOT (no separate delivered / served step)
+  ready: { to: 'dispatched', label: 'Handed over', cls: 'b2' },
 }
 export const DEFAULT_COURSES = ['First Course', 'Soup', 'Starters', 'Mains', 'Dessert']
 export const NOTE_CHIPS = ['Jain', 'No onion-garlic', 'Less spicy', 'Allergy']
@@ -133,7 +134,8 @@ export function dishStatus(item, kot, now, lateMin) {
   if (item.state === 'held') return { cls: 'hd', label: 'Held', rank: 0 }
   if (item.served_at || kot?.served_at) return { cls: 'sv', label: 'Served', rank: 5 }
   const stage = kot?.stage || 'new'
-  if (stage === 'dispatched') return { cls: 'ow', label: 'On the way', rank: 4 }
+  // Handed over at the pass = done for the guest too
+  if (stage === 'dispatched' || kot?.status === 'delivered') return { cls: 'sv', label: 'Served', rank: 5 }
   if (stage === 'ready') return { cls: 'rd', label: 'Ready', rank: 3 }
   const fired = new Date(kot?.fired_at || item.fired_at || now).getTime()
   if (now - fired > lateMin * 60000) return { cls: 'lt', label: 'Late ' + mmss(now - fired), rank: 2, late: true }
