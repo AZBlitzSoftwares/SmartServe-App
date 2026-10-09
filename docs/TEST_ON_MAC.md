@@ -104,8 +104,8 @@ It creates four events dated **today** and prints every login. They are also sav
 | | Waiters (assigned at the desk) | Ganesh (21), Harish (22), Javed (23) |
 | Demo · Multi-Kitchen (10 tables x 10 chairs) | Captains | `Rahul` / `1111` (table 1), `Imran` / `2222` (table 1), `Sameer` / `3333` (table 2), `Ayesha` / `4444` (table 3) |
 | | Waiter phones (`/waiter`) | `Arjun` 5101 Indian, `Salim` 5102 Arabic, `Kiran` 5103 Chinese, `Ravi` 5104 Italian, `Manoj` 5105 Mexican, `Tariq` 5106 Turkish |
-| Demo · Smart Serve Maestro (15 tables x 10 covers) | Captains | `Neha` / `7071` and `Arjun` / `7072` (table 7), `Rahul` / `1111`, `Imran` / `2222` (table 1), `Sameer` / `3333`, `Ayesha` / `4444` (table 2), `Faiz` / `8081` (8), `Priya` / `3131` (3) |
-| | Kitchen Display (`/kitchen`) | First Course `Sanjay` 6100; Italian `Ajay` 6201 / `Vijay` 6202; Asian `Rohit` 6301 / `Kunal` 6302; Modern Indian `Farhan` 6401 / `Sunil` 6402; Desserts `Pooja` 6501 / `Meena` 6502 |
+| Demo · Smart Serve Maestro (15 tables x 10 covers) | Captains | `Neha` / `7071` and `Arjun` / `7072` (table 7), `Rahul` / `1111`, `Imran` / `2222` (table 1), `Sameer` / `3333`, `Ayesha` / `4444` (table 2), `Faiz` / `8081` (8), `Priya` / `3131` (3); one captain on every other table (all in `demo-logins.txt`) |
+| | Kitchen Display (`/kitchen`) | Italian `Ajay` 6201 / `Vijay` 6202; Oriental `Rohit` 6301 / `Kunal` 6302; Indian `Farhan` 6401 / `Sunil` 6402; Desserts `Pooja` 6501 / `Meena` 6502 |
 
 \* With 4a your real admin is copied from the cloud, so use your usual admin PIN (the demo prints which).
 
@@ -113,8 +113,8 @@ Multi-kitchen kitchens: Indian IN (default), Arabic AR, Chinese CH, Italian IT, 
 printers `127.0.0.1` ports 9101-9106 (in that order). **Desserts** and **Beverages** have no kitchen on
 purpose: they print in the default kitchen (Indian).
 
-Maestro kitchens: First Course FC 9101, Italian IT 9102, Asian AS 9103 (default), Modern Indian MI 9104,
-Desserts DS 9105, with the sample menu (Italian, Asian, Modern Indian; seven courses).
+Maestro kitchens: Italian IT 9101, Oriental OR 9102 (default), Indian IN 9103, Desserts DS 9104, with the
+demo menu: Soup, Appetizer, Entrée, Palate Cleanser, Main Course 1, Main Course 2 from each cuisine, and Dessert.
 
 ## 6. Start the Virtual Printers (Terminal window 2: Cmd+N)
 
@@ -178,10 +178,11 @@ Phone/tablet on the **same Wi-Fi** as the Mac, browser to `http://<mac-ip>:8080`
 - [ ] Desk: Control -> **Kitchens** lists the six kitchens with their printers.
 
 **D. Smart Serve Maestro**
-- [ ] Device: **Captain** -> `Neha` / `7071` -> table 7 -> **Mark C1 seated**: a First Course KOT prints on 9101.
-- [ ] **By course** -> Canapés: add one Italian and one Modern Indian canapé; Soup: add one Asian soup -> **Save & fire Canapés**.
-- [ ] Two KOTs print: Italian (9102) and Modern Indian (9104); the soup waits (held) until it is fired.
-- [ ] Kitchen PC: `http://<mac-ip>:8080/kitchen` -> `Ajay` / `6201` -> the Italian KOT -> Received -> Send to chef -> Ready.
+- [ ] Device: **Captain** -> `Neha` / `7071` -> table 7 -> **Mark C1 seated** (nothing prints yet: the guest chooses every course).
+- [ ] **By course**: Soup from Oriental, Appetizer from Indian, Entrée from Italian, and so on to Dessert -> **Save & fire Soup**.
+- [ ] One KOT prints: the soup on Oriental (9102); every later course waits (held) until it is fired.
+- [ ] Kitchen PC: `http://<mac-ip>:8080/kitchen` -> `Rohit` / `6301` -> the Oriental KOT -> Received -> Send to chef -> Ready.
+- [ ] Captain: **Course board** -> tap the **Appetizer** heading -> **Fire** -> the Indian KOT prints on 9103.
 - [ ] Desk: **Demo · Smart Serve Maestro** -> **Control Desk**: kitchens, table 7, nothing late.
 
 ## 10. Offline test (the important one)

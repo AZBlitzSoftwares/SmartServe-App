@@ -251,14 +251,16 @@ export function menuRows(rows) {
 /* A template people can fill in, as CSV text */
 export function menuTemplateCsv(courses) {
   const c = courses.length ? courses : ['Soup', 'Starters', 'Mains', 'Dessert']
-  const pick = i => c[Math.min(i, c.length - 1)]
+  // the event's own course names for a soup, a starter, a main and a dessert
+  const pick = (names, i) => names.map(n => matchCourse(n, c)).find(Boolean) || c[Math.min(i, c.length - 1)]
+  const soup = pick(['Soup'], 0), starter = pick(['Starters', 'Appetizer'], 1), main = pick(['Main Course', 'Mains'], 2), sweet = pick(['Dessert'], c.length - 1)
   const lines = [
     ['Cuisine', 'Course', 'Dish', 'Description', 'Veg', 'Barker'],
-    ['Continental', pick(1), 'Cream of Tomato', 'Basil, croutons', 'Veg', ''],
-    ['Asian', pick(1), 'Tom Yum', 'Lemongrass, galangal', 'Non-Veg', ''],
-    ['Modern Indian', pick(2), 'Paneer Tikka', 'Mint chutney', 'Veg', 'A'],
-    ['Asian', pick(3), 'Thai Green Curry', 'Jasmine rice', 'Veg', 'B'],
-    ['Italian', pick(4), 'Tiramisu', '', 'Veg', ''],
+    ['Continental', soup, 'Cream of Tomato', 'Basil, croutons', 'Veg', ''],
+    ['Oriental', soup, 'Tom Yum', 'Lemongrass, galangal', 'Veg', ''],
+    ['Indian', starter, 'Paneer Tikka', 'Mint chutney', 'Veg', 'A'],
+    ['Oriental', main, 'Thai Green Curry', 'Jasmine rice', 'Veg', 'B'],
+    ['Italian', sweet, 'Tiramisu', '', 'Veg', ''],
   ]
   return lines.map(l => l.map(v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v).join(',')).join('\r\n') + '\r\n'
 }

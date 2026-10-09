@@ -215,7 +215,7 @@ node ss-local.mjs demo [--remove]                four demo events dated today (l
 - `demo` (test mode only) deletes and recreates, in one transaction, four events dated today with
   fixed ids (`...de301` guest self-service, `...de302` captain service, `...de303` captain
   multi-kitchen with six kitchens on the Virtual Printers `127.0.0.1:9101-9106`, `...de304` Smart
-  Serve Maestro with five kitchens on `9101-9105` and the sample menu from
+  Serve Maestro with four kitchens on `9101-9104` and the demo menu from
   `../db/demo_maestro_menu.sql`), their menus,
   tables, captains, waiters, supervisor `Demo Supervisor`/9090 and help items; child rows get ids
   derived from the event, so cached sessions on tablets stay valid. Only columns that exist are

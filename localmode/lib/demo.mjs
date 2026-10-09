@@ -186,53 +186,55 @@ const MENU_MULTI = [
   ]],
 ]
 
-// Smart Serve Maestro: kitchens by cuisine and by course, two barkers each.
+// Smart Serve Maestro: the client's sit-down dinner menu - one kitchen per cuisine plus a
+// separate Desserts kitchen, two barkers each. The full menu comes from
+// ../db/demo_maestro_menu.sql (sampleMaestroMenu below); this copy is the fallback.
 // [key, name, port, courses (course rule), barkers, default]
 const KITCHENS_MAESTRO = [
-  { key: 'FC', name: 'First Course', port: 9101, courses: ['First Course'], barkers: 1 },
-  { key: 'IT', name: 'Italian', port: 9102 },
-  { key: 'AS', name: 'Asian', port: 9103, isDefault: true },
-  { key: 'MI', name: 'Modern Indian', port: 9104 },
-  { key: 'DS', name: 'Desserts', port: 9105, courses: ['Dessert'] },
+  { key: 'IT', name: 'Italian', port: 9101 },
+  { key: 'OR', name: 'Oriental', port: 9102, isDefault: true },
+  { key: 'IN', name: 'Indian', port: 9103 },
+  { key: 'DS', name: 'Desserts', port: 9104, courses: ['Dessert'] },
 ]
+const COURSES_MAESTRO = ['Soup', 'Appetizer', 'Entrée', 'Palate Cleanser', 'Main Course 1', 'Main Course 2', 'Dessert']
 // [category (cuisine), kitchen, dishes: [name, description, veg, course, barker]]
-// Desserts of every cuisine go to the Desserts kitchen by the course rule.
 const MENU_MAESTRO = [
-  ["Chef's Welcome", 'FC', [
-    ['Amuse trio', 'Three bites to begin, served to every guest', V, 'First Course', 'A'],
-  ]],
   ['Italian', 'IT', [
-    ['Minestrone', 'Vegetable and bean soup, basil oil', V, 'Soup', 'A'],
-    ['Burrata', 'Heirloom tomato, pesto, sourdough', V, 'Starters', 'A'],
-    ['Bruschetta', 'Tomato, garlic, olive oil', V, 'Starters', 'B'],
-    ['Truffle Risotto', 'Arborio rice, parmesan, truffle', V, 'Mains', 'A'],
-    ['Penne Arrabbiata', 'Spicy tomato, garlic', V, 'Mains', 'B'],
-    ['Wild Mushroom Ravioli', 'Sage butter, parmesan', V, 'Mains', 'B'],
-    ['Tiramisu', 'Coffee, mascarpone', V, 'Dessert', 'A'],
-    ['Panna Cotta', 'Vanilla, berry compote', V, 'Dessert', 'B'],
+    ['Funghi Tea Soup', 'Truffle foam', V, 'Soup', 'A'],
+    ['Cream of Asparagus Soup (Jain)', 'Jain preparation', V, 'Soup', 'B'],
+    ['Spinach Gnudi Butter Sage', '', V, 'Appetizer', 'A'],
+    ['Margherita Pizza', '', V, 'Entrée', 'B'],
+    ['Giardino Pizza (Jain)', 'Jain preparation', V, 'Entrée', 'A'],
+    ['Beetroot Sorbet', 'Cucumber granita', V, 'Palate Cleanser', 'B'],
+    ['Spaghetti Arrabiata', '', V, 'Main Course 1', 'A'],
+    ['Asparagus Barley Truffle Risotto', '', V, 'Main Course 2', 'B'],
   ]],
-  ['Asian', 'AS', [
-    ['Hot & Sour Soup', 'Tofu, mushroom, pepper', V, 'Soup', 'A'],
-    ['Crystal Veg Dim Sum', 'Water chestnut, greens, chilli oil', V, 'Starters', 'A'],
-    ['Szechuan Eggplant', 'Crisp aubergine, Szechuan pepper glaze', V, 'Starters', 'A'],
-    ['Thai Green Curry', 'Coconut, basil, jasmine rice', V, 'Mains', 'A'],
-    ['Kimchi Bao', 'Steamed bao, house kimchi, sesame', V, 'Starters', 'B'],
-    ['Tofu Satay', 'Charred tofu, peanut sauce', V, 'Starters', 'B'],
-    ['Burnt Garlic Fried Rice', 'Wok-tossed, spring onion', V, 'Mains', 'B'],
-    ['Hakka Noodles', 'Wok-tossed noodles, vegetables', V, 'Mains', 'B'],
+  ['Oriental', 'OR', [
+    ['Siamese Noodle Soup', '', V, 'Soup', 'A'],
+    ['Crispy Kale & Asparagus Uramaki', 'Crispy kale uramaki, asparagus uramaki', V, 'Appetizer', 'B'],
+    ['Baked Yasai Umami', '', V, 'Entrée', 'A'],
+    ['Lemongrass Granita', '', V, 'Palate Cleanser', 'B'],
+    ['Grilled Tofu', 'Snow peas, baby pak choy, nut butter espuma', V, 'Main Course 1', 'A'],
+    ['Blue Pea Flower Edamame Fried Rice', '', V, 'Main Course 2', 'B'],
+    ['Exotic Veggies in Chili Basil Sauce', '', V, 'Main Course 2', 'A'],
   ]],
-  ['Modern Indian', 'MI', [
-    ['Tomato Shorba', 'Spiced tomato broth', V, 'Soup', 'A'],
-    ['Paneer Tikka', 'Clay-oven cottage cheese, mint chutney', V, 'Starters', 'A'],
-    ['Galouti Kebab', 'Melt-in-the-mouth lamb, saffron', N, 'Starters', 'B'],
-    ['Dal Makhani', 'Slow-cooked black lentils, butter', V, 'Mains', 'A'],
-    ['Veg Dum Biryani', 'Layered basmati, vegetables, saffron', V, 'Mains', 'B'],
-    ['Butter Chicken', 'Tandoori chicken in makhani gravy', N, 'Mains', 'B'],
-    ['Rasmalai', 'Cottage cheese discs in saffron milk', V, 'Dessert', 'A'],
+  ['Indian', 'IN', [
+    ['Tamatar Dhaniya Shorba', '', V, 'Soup', 'A'],
+    ['Potato Gratin Chaat', '', V, 'Appetizer', 'B'],
+    ['Dabeli Bao', '', V, 'Appetizer', 'A'],
+    ['Ajmer Style Kadhi Kachori', '', V, 'Entrée', 'B'],
+    ['Sugarcane Sorbet', '', V, 'Palate Cleanser', 'A'],
+    ['Stracciatella Palak Saag', 'Truffle chili oil, makai di roti', V, 'Main Course 1', 'B'],
+    ['Amritsari Chole Kulcha', 'Amritsari chole, Amritsari kulcha, paneer makhani, onion chutney', V, 'Main Course 2', 'A'],
+    ['Dal Bukhara & Pyaz Ka Pulao', 'Dal Bukhara, pyaz ka pulao, papad roll', V, 'Main Course 2', 'B'],
   ]],
   ['Desserts', 'DS', [
-    ['Baked Cheesecake', 'New York style, berry coulis', V, 'Dessert', 'A'],
-    ['Chocolate Fondant', 'Warm centre, vanilla ice cream', V, 'Dessert', 'B'],
+    ['Tiramisu', 'Eggless, mascarpone, espresso', V, 'Dessert', 'A'],
+    ['Pistachio Panna Cotta', 'Berry compote', V, 'Dessert', 'B'],
+    ['Mango Sticky Rice', 'Coconut cream, sesame', V, 'Dessert', 'A'],
+    ['Dark Chocolate Mousse', 'Eggless, cocoa nib crumble', V, 'Dessert', 'B'],
+    ['Rasmalai Tres Leches', 'Saffron milk, pistachio', V, 'Dessert', 'A'],
+    ['Kesar Pista Kulfi', 'Falooda, rose syrup', V, 'Dessert', 'B'],
   ]],
 ]
 
@@ -261,15 +263,16 @@ const EVENTS = [
     key: 'maestro', id: DEMO_IDS.maestro, name: 'Demo · Smart Serve Maestro', service_mode: 'captain', multi: true, maestro: true,
     tables: 15, chairs: 10, venue: 'Demo Banquet Hall',
     welcome: 'Demo event: Smart Serve Maestro, course-paced multi-kitchen service.',
-    menu: MENU_MAESTRO, kitchens: KITCHENS_MAESTRO,
+    menu: MENU_MAESTRO, kitchens: KITCHENS_MAESTRO, courses: COURSES_MAESTRO,
     // [name, pin, table]
     captains: [['Neha', '7071', 7], ['Arjun', '7072', 7], ['Rahul', '1111', 1], ['Imran', '2222', 1],
-      ['Sameer', '3333', 2], ['Ayesha', '4444', 2], ['Faiz', '8081', 8], ['Priya', '3131', 3]],
+      ['Sameer', '3333', 2], ['Ayesha', '4444', 2], ['Faiz', '8081', 8], ['Priya', '3131', 3],
+      ['Kabir', '4404', 4], ['Zoya', '5505', 5], ['Dev', '6606', 6], ['Ishaan', '9909', 9], ['Tanvi', '1010', 10],
+      ['Rohan', '1101', 11], ['Sara', '1202', 12], ['Vivek', '1303', 13], ['Anaya', '1404', 14], ['Yusuf', '1505', 15]],
     waiters: [],
     // [name, kitchen, side, pin]
-    barkers: [['Sanjay', 'FC', 'A', '6100'], ['Ajay', 'IT', 'A', '6201'], ['Vijay', 'IT', 'B', '6202'],
-      ['Rohit', 'AS', 'A', '6301'], ['Kunal', 'AS', 'B', '6302'], ['Farhan', 'MI', 'A', '6401'], ['Sunil', 'MI', 'B', '6402'],
-      ['Pooja', 'DS', 'A', '6501'], ['Meena', 'DS', 'B', '6502']],
+    barkers: [['Ajay', 'IT', 'A', '6201'], ['Vijay', 'IT', 'B', '6202'], ['Rohit', 'OR', 'A', '6301'], ['Kunal', 'OR', 'B', '6302'],
+      ['Farhan', 'IN', 'A', '6401'], ['Sunil', 'IN', 'B', '6402'], ['Pooja', 'DS', 'A', '6501'], ['Meena', 'DS', 'B', '6502']],
   },
 ]
 
@@ -363,7 +366,7 @@ async function createDemo(db, cols, today) {
       id: ev.id, name: ev.name, date: today, venue: ev.venue, catering_company: CATERER, number_of_tables: ev.tables,
       max_orders_per_table: 5, call_waiter_enabled: true, service_mode: ev.service_mode, welcome_note: ev.welcome,
       is_closed: false, ai_enabled: false, multi_kitchen: ev.multi, ...(ev.chairs ? { chairs_per_table: ev.chairs } : {}),
-      ...(ev.maestro ? { maestro: true } : {}),
+      ...(ev.maestro ? { maestro: true } : {}), ...(ev.courses ? { courses: ev.courses, first_course_auto: false } : {}),
     }, st)
     const k = (s) => demoId(`${ev.key}/${s}`)
 
@@ -466,7 +469,7 @@ function summary({ today, port, st, running }) {
   L.push(`   Printers: the Virtual Printers on this laptop, ports ${KITCHENS[0].port}-${KITCHENS[KITCHENS.length - 1].port}.`)
   L.push('')
   L.push(`4) ${maestro.name}   ${maestro.tables} tables x ${maestro.chairs} covers`)
-  if (st.sampleMenu) L.push('   Menu: the sample menu - Italian, Asian, Modern Indian; seven courses; desserts from the Desserts kitchen.')
+  if (st.sampleMenu) L.push('   Menu: Italian, Oriental, Indian (Soup to Main Course 2) and Dessert from the Desserts kitchen.')
   L.push(`   Tablet link -> "Captain" -> ${maestro.captains.map(([n, p, t]) => `${n} ${p} (table ${t})`).join(', ')}`)
   L.push(`   Kitchen Display ${base}/kitchen  (barker name + PIN):`)
   for (const kt of maestro.kitchens) {
@@ -479,7 +482,7 @@ function summary({ today, port, st, running }) {
   return L.join('\n')
 }
 
-// The Maestro demo gets the full sample menu (three cuisines, seven courses): the same
+// The Maestro demo gets the full demo menu (three cuisines, seven courses): the same
 // ../db/demo_maestro_menu.sql that sets up the cloud demo, run inside this transaction.
 // Without that file (or if it fails) the short menu above stays.
 async function sampleMaestroMenu(db) {
