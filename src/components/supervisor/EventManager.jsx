@@ -1003,8 +1003,8 @@ export default function EventManager({ onEventChange }) {
                   <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
                     {[['self','📱 Self-Service','A tablet sits on every table. Guests order for themselves.'],
                       ['captain','🧑‍💼 Captain Service','No tablet on the tables. Captains carry a tablet and take orders.'],
-                      // ss-multi-kitchen: captain service where every cuisine has its own kitchen and KOT printer
-                      ['multi','🍳 Captain + Multi-Kitchen','Captains fixed to a table, order by chair. Each cuisine KOT prints in its own kitchen.'],
+                      // ss-multi-kitchen (captain service, one KOT per cuisine kitchen, waiter phones) is kept in the
+                      // app for later but not offered for new events: Smart Serve Maestro covers multi-kitchen service.
                       // ss-maestro
                       ['maestro','🎼 Smart Serve Maestro','Plated banquet service. Captains hold orders per cover and fire them course by course. One KOT per cover per kitchen, with barkers and a Control Desk.']].map(([val,title,desc]) => (
                       <button key={val} type="button" onClick={()=>setNewEvent(p=>({...p,service_mode:val}))}
@@ -1428,7 +1428,9 @@ export default function EventManager({ onEventChange }) {
               <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12 }}>
                 <div style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', marginBottom:8, textTransform:'uppercase' }}>🍽️ Service Mode</div>
                 <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                  {[['self','📱 Self-Service'],['captain','🧑‍💼 Captain Service'],['multi','🍳 Captain + Multi-Kitchen'],['maestro','🎼 Smart Serve Maestro']].map(([val,title]) => {
+                  {[['self','📱 Self-Service'],['captain','🧑‍💼 Captain Service'],['multi','🍳 Captain + Multi-Kitchen'],['maestro','🎼 Smart Serve Maestro']]
+                    // Multi-Kitchen only shows on an event that already uses it
+                    .filter(([val]) => val !== 'multi' || (ev.multi_kitchen && !ev.maestro)).map(([val,title]) => {
                     const cur = ev.maestro ? 'maestro' : ev.multi_kitchen ? 'multi' : (ev.service_mode||'self')
                     return (
                     <button key={val} type="button"
