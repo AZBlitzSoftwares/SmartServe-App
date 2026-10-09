@@ -17,6 +17,8 @@ import {
 } from './msData'
 
 const FOODS = ['#7DAA6A', '#7A3B2A', '#D5532F', '#A66A2C', '#C9A15B', '#B5582A', '#8E6BBF', '#3F8F8A', '#C98B2E']
+const ALL = '__all'
+
 function hash(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h }
 
 function DishPhoto({ dish }) {
@@ -32,6 +34,21 @@ function DishPhoto({ dish }) {
       <div className="food" style={{ width: 17, height: 17, margin: '-23px 0 0 6px', background: '#fff8' }} />
     </div>
   )
+}
+
+// Fire one course of the cover from the order panel. The next course in the service order
+// fires on one tap; firing a course out of order asks for a second tap.
+function FireCourse({ course, next, disabled, onFire }) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const t = setTimeout(() => setArmed(false), 4000)
+    return () => clearTimeout(t)
+  }, [armed])
+  if (next) return <button className="firec nx" disabled={disabled} onClick={onFire} title={`Fire the ${course} now`}>Fire · next</button>
+  return armed
+    ? <button className="firec arm" disabled={disabled} onClick={() => { setArmed(false); onFire() }}>Fire {course} now?</button>
+    : <button className="firec" disabled={disabled} onClick={() => setArmed(true)} title={`Fire the ${course} out of order`}>Fire</button>
 }
 
 function Veg({ veg }) { return <span className={'veg' + (veg === false ? ' nv' : '')} /> }
@@ -61,14 +78,9 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   })
   const [view, setView] = useState('take')
   const [cover, setCover] = useState(1)
-  const [catId, setCatId] = useState(null)
-  const [courseF, setCourseF] = useState(null)
-  // The menu is browsed course first (Soup, Starters, ...) with cuisines as filters, or
-  // cuisine first with courses as filters. Long menus are searched instead.
-  const [browse, setBrowseRaw] = useState(() => { try { return localStorage.getItem('ms_browse') || 'course' } catch { return 'course' } })
-  const setBrowse = b => { setBrowseRaw(b); try { localStorage.setItem('ms_browse', b) } catch { /* private mode */ } }
-  const [courseTab, setCourseTab] = useState(null)
-  const [cuisineF, setCuisineF] = useState(null)
+  // The menu is one row of tabs: All, then the courses in service order. Inside a course the
+  // dishes are grouped by cuisine; "All" shows the whole menu course by course. Search covers it all.
+  const [courseTab, setCourseTab] = useState(ALL)
   const [q, setQ] = useState('')
   const [drafts, setDrafts] = useState({})          // cover -> { menu_item_id: {qty, note} }
   const [sel, setSel] = useState(() => new Set())    // ms_items ids picked on the board
@@ -209,8 +221,10 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
     return all.sort((a, b) => courseRank(courses, a) - courseRank(courses, b))[0] || null
   }
 
-  async function onSaveAndFire() {
-    const nc = nextCourse(cover, draft)
+  // Saves whatever is new for the cover, then fires one course: the next one by default,
+  // or any course the captain picks (a guest may want the mains before the entrée)
+  async function onSaveAndFire(course) {
+    const nc = typeof course === 'string' ? course : nextCourse(cover, draft)
     if (!nc) return
     setBusy(true)
     try {
@@ -286,24 +300,21 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const autoFirst = ev.first_course_auto !== false
   const visibleCat = new Set(cats.map(c => c.id))
   const dishesShown = (menu?.dishes || []).filter(d => visibleCat.has(d.category_id) && !(autoFirst && d.course === firstCourse))
-  const catsWithDishes = cats.filter(c => dishesShown.some(d => d.category_id === c.id))
-  const activeCat = catsWithDishes.find(c => c.id === catId) || catsWithDishes[0]
-  const catDishes = dishesShown.filter(d => d.category_id === activeCat?.id)
-  const catCourses = courses.filter(c => catDishes.some(d => d.course === c))
-  // course first
   const courseOf = d => courses.includes(d.course) ? d.course : 'Other'
   const courseTabs = [...courses, 'Other'].filter(c => dishesShown.some(d => courseOf(d) === c))
-  const activeCourse = courseTabs.includes(courseTab) ? courseTab : courseTabs[0]
-  const courseDishes = dishesShown.filter(d => courseOf(d) === activeCourse)
-  const courseCats = cats.filter(c => courseDishes.some(d => d.category_id === c.id))
+  const activeCourse = courseTabs.includes(courseTab) ? courseTab : ALL
   const catName = id => menu?.catsById?.[id]?.name || ''
+  const catRank = id => { const i = cats.findIndex(c => c.id === id); return i < 0 ? 999 : i }
   const query = q.trim().toLowerCase()
   const shown = query
     ? dishesShown.filter(d => `${d.name} ${d.description || ''} ${catName(d.category_id)} ${d.course || ''}`.toLowerCase().includes(query))
-    : browse === 'course'
-      ? courseDishes.filter(d => !cuisineF || d.category_id === cuisineF)
-      : catDishes.filter(d => !courseF || d.course === courseF)
-  const countIn = (list, f) => list.filter(f).length
+    : dishesShown.filter(d => activeCourse === ALL || courseOf(d) === activeCourse)
+  // "All" has a heading per course; inside one course the dishes sit side by side, cuisine by
+  // cuisine, each card naming its cuisine (so the captain sees every soup at a glance)
+  const byCuisine = list => [...list].sort((a, b) => catRank(a.category_id) - catRank(b.category_id))
+  const groupsShown = query || activeCourse !== ALL ? []
+    : courseTabs.map(c => ({ key: c, title: c, list: byCuisine(shown.filter(d => courseOf(d) === c)) })).filter(g => g.list.length)
+  const headed = groupsShown.length > 1
 
   const coverItems = itemsOf(cover)
   const draftRows = Object.entries(draft).map(([id, v]) => ({ id, ...v, dish: dishById[id] })).filter(r => r.dish)
@@ -316,7 +327,6 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const ncKitchens = [...new Set(ncDishes.map(d => d.kitchen))].filter(Boolean)
   const heldCount = coverItems.filter(i => i.state === 'held').length + draftRows.length
 
-  const grouped = !query && browse === 'course' && !cuisineF && courseCats.length > 1
   const dishCard = d => {
     const q = draft[d.id]?.qty || 0
     const off = d.is_available === false
@@ -325,13 +335,13 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
         <DishPhoto dish={d} />
         <div className="di">
           <div className="dn"><Veg veg={d.is_veg} />{d.name}</div>
-          <div className="dd">{d.description || (browse === 'course' && !query ? catName(d.category_id) : d.course) || ''}</div>
-          {query && <div className="dq">{d.course} · {catName(d.category_id)}</div>}
+          {d.description && <div className="dd">{d.description}</div>}
+          {query && <div className="dq">{d.course}</div>}
           <div className="add">
-            <span className="k">{off ? 'Sold out' : `${d.kitchenName} kitchen`}</span>
+            <span className="k">{off ? 'Sold out' : catName(d.category_id)}</span>
             {off ? null : q ? (
               <div className="st"><button className="m" onClick={() => addDish(d.id, -1)}>−</button><span>{q}</span><button className="m" onClick={() => addDish(d.id, 1)}>+</button></div>
-            ) : <button className="btn btn-amber" style={{ padding: '5px 12px' }} onClick={() => addDish(d.id, 1)}>ADD +</button>}
+            ) : <button className="btn btn-amber addb" onClick={() => addDish(d.id, 1)}>ADD +</button>}
           </div>
         </div>
       </div>
@@ -348,57 +358,20 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
                 <input value={q} onChange={e => setQ(e.target.value)} placeholder={`Search ${dishesShown.length} dishes…`} aria-label="Search dishes" />
                 {q && <button className="clr" onClick={() => setQ('')} title="Clear">✕</button>}
               </div>
-              <div className="seg" role="group" aria-label="Browse the menu by">
-                <button className={browse === 'course' ? 'a' : ''} onClick={() => setBrowse('course')}>By course</button>
-                <button className={browse === 'cuisine' ? 'a' : ''} onClick={() => setBrowse('cuisine')}>By cuisine</button>
-              </div>
             </div>
             {query ? (
-              <div className="courses"><span className="cc a">{shown.length} {shown.length === 1 ? 'dish' : 'dishes'} matching “{q.trim()}”</span></div>
-            ) : browse === 'course' ? (
-              <>
-                <div className="tabs">
-                  {courseTabs.map(c => (
-                    <button key={c} className={'tab' + (c === activeCourse ? ' a' : '')} onClick={() => { setCourseTab(c); setCuisineF(null) }}>
-                      {c} <span className="n">{countIn(dishesShown, d => courseOf(d) === c)}</span></button>
-                  ))}
-                </div>
-                {courseCats.length > 1 && (
-                  <div className="courses">
-                    <button className={'cc' + (!cuisineF ? ' a' : '')} onClick={() => setCuisineF(null)}>All {courseDishes.length}</button>
-                    {courseCats.map(c => (
-                      <button key={c.id} className={'cc' + (cuisineF === c.id ? ' a' : '')} onClick={() => setCuisineF(cuisineF === c.id ? null : c.id)}>
-                        {c.name} {countIn(courseDishes, d => d.category_id === c.id)}</button>
-                    ))}
-                  </div>
-                )}
-              </>
+              <div className="found">{shown.length} {shown.length === 1 ? 'dish' : 'dishes'} matching “{q.trim()}”</div>
             ) : (
-              <>
-                <div className="tabs">
-                  {catsWithDishes.map(c => (
-                    <button key={c.id} className={'tab' + (c.id === activeCat?.id ? ' a' : '')} onClick={() => { setCatId(c.id); setCourseF(null) }}>
-                      {c.name} <span className="n">{countIn(dishesShown, d => d.category_id === c.id)}</span></button>
-                  ))}
-                </div>
-                {catCourses.length > 1 && (
-                  <div className="courses">
-                    {catCourses.map(c => (
-                      <button key={c} className={'cc' + (courseF === c ? ' a' : '')} onClick={() => setCourseF(courseF === c ? null : c)}>
-                        {c} {countIn(catDishes, d => d.course === c)}</button>
-                    ))}
-                  </div>
-                )}
-              </>
+              <div className="tabs">
+                {[ALL, ...courseTabs].map(c => (
+                  <button key={c} className={'tab' + (c === activeCourse ? ' a' : '')} onClick={() => setCourseTab(c)}>{c === ALL ? 'All' : c}</button>
+                ))}
+              </div>
             )}
-            {grouped && <div className="mixhint">Guests can mix cuisines in every course: one from each is fine, and every dish goes to its own kitchen on its own KOT.</div>}
             <div className="grid">
-              {grouped
-                ? courseCats.flatMap(c => {
-                    const list = shown.filter(d => d.category_id === c.id)
-                    return list.length ? [<div key={'h' + c.id} className="ghead">{c.name}<span>{list.length} · {list[0].kitchenName} kitchen</span></div>, ...list.map(dishCard)] : []
-                  })
-                : shown.map(dishCard)}
+              {headed
+                ? groupsShown.flatMap(g => [<div key={'h' + g.key} className="ghead">{g.title}</div>, ...g.list.map(dishCard)])
+                : (query ? shown : byCuisine(shown)).map(dishCard)}
               {!shown.length && <div className="empty">{query ? 'No dish matches that search.' : 'No dishes here.'}</div>}
             </div>
           </>
@@ -419,8 +392,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
             const its = coverItems.filter(i => i.course === c)
             const drs = draftRows.filter(r => r.dish.course === c)
             const anyHeld = its.some(i => i.state === 'held') || drs.length
-            const tag = c === nc ? <span className="tagF">Fire first</span>
-              : anyHeld ? <span className="tagH">Hold</span>
+            const tag = anyHeld ? <FireCourse course={c || 'Other'} next={c === nc} disabled={busy} onFire={() => onSaveAndFire(c)} />
               : its.length && its.every(i => statusOf(i).cls === 'sv') ? <span className="tagF">Served</span>
               : <span className="tagK">Fired</span>
             return (

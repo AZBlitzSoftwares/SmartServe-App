@@ -473,6 +473,7 @@ export default function GuestApp() {
   // them in the database. The incoming captain sees what every other captain
   // sees, with the name of whoever took it down.
   function switchCaptain() {
+    captainRef.current = null
     localStorage.removeItem('ss_captain_session')
     localStorage.removeItem('ss_captain_event')
     setCaptain(null); setCart([]); setCaptainTable(null)
@@ -620,6 +621,11 @@ export default function GuestApp() {
     setCaptainTable(n)
     setCartOpen(false)
     setMkLand(false)
+    // The held cart is read from the server first. If the captain is signed
+    // out meanwhile (the desk changed the PIN or removed them, or the tablet
+    // was handed over), the menu must not open behind the sign-in screen.
+    const who = captainRef.current?.id
+    const stillSignedIn = () => !!captainRef.current && captainRef.current.id === who
 
     // ss-multi-kitchen: two captains can share a table there, each ordering
     // for their own chairs. A held cart is picked up only by the captain who
@@ -633,6 +639,7 @@ export default function GuestApp() {
           .select('items, captain_id').eq('event_id', eventData.id).eq('table_number', n).maybeSingle()
         if (data && Array.isArray(data.items) && data.captain_id === captain?.id) mine = data.items
       } catch (e) { /* start empty rather than guess */ }
+      if (!stillSignedIn()) return
       setCart(mine)
       goTo('menu')
       return
@@ -646,6 +653,7 @@ export default function GuestApp() {
         .select('items').eq('event_id', eventData.id).eq('table_number', n).maybeSingle()
       if (data && Array.isArray(data.items)) items = data.items
     } catch (e) { /* fall back to what the grid had */ }
+    if (!stillSignedIn()) return
 
     setCart(items)
     goTo('menu')
