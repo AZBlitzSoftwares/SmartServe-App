@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import MaestroSetup, { MaestroPreService } from '../../maestro/MaestroSetup'
 import { supabase } from '../../lib/supabase'
+import { tableRanges } from '../../maestro/msData'
 
 /* Kitchens set-up for a Captain + Multi-Kitchen event.
 
@@ -374,7 +375,7 @@ export default function KitchenSetup({ eventData, onEventChange }) {
             + '#' + cats.map(c => c.id + ':' + (c.kitchen_id || '')).join('|')} />
       )}
       <CaptainsSection eventId={eventId} step={4} captains={captains} setCaptains={setCaptains} tableCount={tableCount}
-        coverCount={Math.max(1, Number(eventData?.chairs_per_table) || 10)} />
+        coverCount={Math.max(1, Number(eventData?.chairs_per_table) || 10)} maestro={!!eventData?.maestro} />
       {!eventData?.maestro && <WaitersSection eventId={eventId} waiters={waiters} setWaiters={setWaiters} kitchens={sortedKitchens} />}
     </div>
   )
@@ -1386,7 +1387,7 @@ function capRange(c, coverCount) {
 const capRangeText = r => r ? (r.from === r.to ? 'C' + r.from : 'C' + r.from + '–C' + r.to) : 'all covers'
 const COVER_SQL_HINT = 'Run 2026-10-10_maestro_covers.sql in Supabase (maestro-sql folder) first, then try again.'
 
-function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount, coverCount = 10 }) {
+function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount, coverCount = 10, maestro = false }) {
   const [ticks, tick] = useTicks()
   const [msg, setMsg] = useState(null)
   const [add, setAdd] = useState({ name:'', pin:'', table:'' })
@@ -1406,6 +1407,13 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount,
   const [splitting, setSplitting] = useState(false)
   // Cover split needs 2026-10-10_maestro_covers.sql: until it has run, no cover boxes
   const hasCovers = !captains.length || captains.some(c => 'cover_from' in c)
+  // Maestro: a shared table with no split set is split evenly in captain order (as the tablets do)
+  const autoOf = c => {
+    if (!maestro || !c.table_number || capRange(c, coverCount)) return null
+    const r = tableRanges(captains, c.table_number, coverCount).get(c.id)
+    return r?.auto ? r : null
+  }
+  const rangeLabel = c => { const r = capRange(c, coverCount); if (r) return capRangeText(r); const a = autoOf(c); return a ? capRangeText(a) + ' (automatic)' : 'all covers' }
   // Captains whose covers overlap another captain's at the same table
   const overlapOf = c => {
     const r = capRange(c, coverCount)
@@ -1511,7 +1519,7 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount,
             <div style={{ marginTop:4 }}>
               <span style={{ fontWeight:800, color:'var(--ink)' }}>Shared tables:</span>{' '}
               {shared.map((t, i) => (
-                <span key={t}>{i ? '  ·  ' : ''}T{t} {capsByCover(t).map(c => c.name + ' ' + capRangeText(capRange(c, coverCount))).join(', ')}</span>
+                <span key={t}>{i ? '  ·  ' : ''}T{t} {capsByCover(t).map(c => c.name + ' ' + rangeLabel(c)).join(', ')}</span>
               ))}
               {unsplit.length > 0 && (
                 <button onClick={splitEvenly} disabled={splitting}
@@ -1527,7 +1535,7 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount,
         <div className="ks-caps" style={{ marginBottom:12 }}>
           {byTable(captains).map(c => (
             <CaptainRow key={c.id + ':' + (c.table_number ?? '') + ':' + (c.pin ?? '')}
-              c={c} tableCount={tableCount} coverCount={hasCovers ? coverCount : 0}
+              c={c} tableCount={tableCount} coverCount={hasCovers ? coverCount : 0} autoLabel={rangeLabel(c)}
               onSave={save} onRemove={remove} saved={!!ticks[c.id]}
               crowd={c.table_number ? perTable[c.table_number] : 0} overlap={overlapOf(c)} />
           ))}
@@ -1557,7 +1565,7 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount,
   )
 }
 
-function CaptainRow({ c, tableCount, coverCount = 10, onSave, onRemove, saved, crowd, overlap }) {
+function CaptainRow({ c, tableCount, coverCount = 10, onSave, onRemove, saved, crowd, overlap, autoLabel }) {
   const [draft, setDraft] = useState(c.table_number ? String(c.table_number) : '')
   const [pin, setPin] = useState(c.pin || '')
   const [cf, setCf] = useState(c.cover_from ? String(c.cover_from) : '')
@@ -1620,7 +1628,7 @@ function CaptainRow({ c, tableCount, coverCount = 10, onSave, onRemove, saved, c
         <div style={{ flex:1, minWidth:0 }}>
           <div title={c.name} style={{ fontSize:14, fontWeight:800, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.name}</div>
           <div style={{ fontSize:11.5, fontWeight:700, color: tone || 'var(--ink2)', minHeight:16 }}>
-            {warn || 'Table ' + c.table_number + (covers ? ' · ' + capRangeText(range) : '')}
+            {warn || 'Table ' + c.table_number + ' · ' + (covers ? capRangeText(range) === 'all covers' && autoLabel ? autoLabel : capRangeText(range) : autoLabel || 'all covers')}
             <Saved show={saved} />
           </div>
         </div>

@@ -245,9 +245,6 @@
 .ms.kd .ta{background:#9DB8F2}.ms.kd .tb{background:#E9C98A}
 .ms.kd .foot{margin-top:8px;font-size:12px;color:#7E8AA6;display:flex;justify-content:space-between;flex:none;gap:12px;flex-wrap:wrap}
 .ms.kd .pick{position:absolute;top:8px;right:8px}
-.ms.kd .whole .tr b{font-size:15.5px}.ms.kd .whole .tm{font-size:15.5px}
-.ms.kd .whole .tl{padding:8px 9px;margin-bottom:7px}
-.ms.kd .whole .dd{font-size:13px;margin-top:4px}
 .ms.kd .bulk{display:flex;align-items:center;gap:10px;background:#F2A516;color:#1b1300;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-weight:800;flex:none}
 .ms.kd .bulk button{border:0;border-radius:8px;padding:6px 12px;font-weight:800;background:#1b1300;color:#fff}
 .ms.kd .bulk button.g{background:rgba(0,0,0,.12);color:#1b1300}
@@ -396,22 +393,98 @@
 .ms .tvi .r3 .btn:first-of-type{margin-left:auto}
 @media (max-width:1000px){.ms .tvb{flex-direction:column}.ms .tvr{width:auto;border-left:0;border-top:1px solid var(--line);max-height:45vh}}
 
-/* Upright tablet or narrow window: menu on top, the cover's full order in the bottom panel
-   (about 40% of the screen), courses side by side, Save and Fire next to each other */
+/* Upright tablet or narrow window: menu on top, the cover's order across the bottom, as tall
+   as the whole order needs (the menu scrolls, the order does not), Save and Fire next to each other */
 @media screen and (max-width:700px), screen and (orientation:portrait) and (max-width:1100px){
   .ms .body:not(.bd){flex-direction:column}
-  .ms .body:not(.bd) .menu{flex:1 1 auto;min-height:0}
-  .ms .body:not(.bd) .cart{width:auto;flex:0 0 40%;max-height:46%;min-height:220px;border-left:0;border-top:2px solid var(--line);box-shadow:0 -6px 18px rgba(23,41,91,.08)}
-  .ms .body:not(.bd) .cart .ch{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 14px}
-  .ms .body:not(.bd) .cart .ch .hint{display:none}
-  .ms .body:not(.bd) .cart .ch > div{margin-top:0 !important}
-  .ms .body:not(.bd) .cart .ch .helpout{margin-top:0}
-  .ms .body:not(.bd) .cart .scroll{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));align-content:start;column-gap:14px;padding:0 14px}
-  .ms .body:not(.bd) .cart .scroll .empty{grid-column:1/-1}
-  .ms .body:not(.bd) .cart .crs{padding:7px 0}
-  .ms .body:not(.bd) .acts{flex-direction:row;padding:8px 14px 10px}
+  .ms .body:not(.bd) .menu{flex:1 1 0;min-height:0}
+  .ms .body:not(.bd) .cart{width:auto;flex:none;max-height:64%;min-height:0;border-left:0;border-top:2px solid var(--line);box-shadow:0 -6px 18px rgba(23,41,91,.08)}
+  .ms .body:not(.bd) .acts{flex-direction:row;padding:8px 12px 10px}
   .ms .body:not(.bd) .acts > *{flex:1}
   .ms .body:not(.bd) .acts .save{padding:8px}
   .ms .body:not(.bd) .acts .firebtn{padding:9px}
   .ms .dlist{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
 }
+
+/* ---------- Captain: My covers | Whole table ---------- */
+.ms .scope{display:flex;background:var(--slatel);border-radius:10px;padding:3px;flex:none}
+.ms .scope button{border:0;background:transparent;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:800;color:var(--slate);white-space:nowrap}
+.ms .scope button.a{background:var(--navy);color:#fff}
+
+/* ---------- Captain: order panel, one line per course ---------- */
+.ms .cart .ch{padding:8px 12px}
+.ms .cart .cht{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ms .cart .cht b{font-size:15px;color:var(--navy)}
+.ms .minib{border:1px solid var(--line);background:#fff;border-radius:7px;padding:3px 9px;font-size:11.5px;font-weight:700;color:var(--ink)}
+.ms .pin{border:1px solid var(--line);background:#fff;border-radius:7px;padding:3px 9px;font-size:11.5px;font-weight:800;color:var(--slate);white-space:nowrap;flex:none}
+.ms .pin.pd{background:var(--navy);border-color:var(--navy);color:#fff}
+.ms .sum{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;font-size:11.5px;font-weight:700;color:var(--muted)}
+.ms .sum span{border-radius:5px;padding:1px 7px;background:var(--bg)}
+.ms .sum .s-d{background:var(--amberl);color:#8A5A00}
+.ms .sum .s-h{background:#EEF1F5;color:#475569}
+.ms .sum .s-k{background:var(--bluel);color:var(--navy2)}
+.ms .sum .s-s{background:var(--greenl);color:var(--green)}
+.ms .olist{padding:0}
+.ms .orow{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:6px;align-items:start;padding:6px 12px;border-bottom:1px dashed var(--line)}
+.ms .orow .oc{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding-top:4px;line-height:1.2}
+.ms .orow .oi{min-width:0}
+.ms .orow .of{padding-top:1px}
+.ms .oit{display:flex;align-items:center;gap:6px;min-height:26px;font-size:13px}
+.ms .oit .nm{flex:1;min-width:0;font-weight:600;line-height:1.25}
+.ms .oit .chip{flex:none;font-size:10.5px;font-weight:800;border-radius:5px;padding:1px 7px;white-space:nowrap}
+.ms .oit .x{flex:none;border:0;background:var(--slatel);color:var(--slate);border-radius:6px;font-weight:800;font-size:12px;padding:3px 8px}
+.ms .oit .x.arm{background:var(--red);color:#fff}
+.ms .oit.dr{background:#FFF8E8;border-radius:6px;padding:0 4px;margin:1px -4px}
+.ms .oit .nbtn{flex:none;border:0;background:none;color:var(--blue);font-size:11.5px;font-weight:800;padding:3px 4px}
+.ms .tagH{font-size:10.5px;font-weight:800;border-radius:5px;padding:1px 6px;background:#EEF1F5;color:#475569}
+/* collapsed (not pinned): one bar at the bottom with the summary and the buttons */
+.ms .body.collapsed{flex-direction:column}
+.ms .body.collapsed .menu{flex:1 1 auto;min-height:0}
+.ms .body.collapsed .cart.mini{width:auto;flex:none;border-left:0;border-top:2px solid var(--line);flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:6px 12px;box-shadow:0 -6px 18px rgba(23,41,91,.08)}
+.ms .cart.mini .obar{flex:1 1 220px;min-width:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:0;background:transparent;text-align:left;padding:4px 0}
+.ms .cart.mini .obar b{font-size:14px;color:var(--navy)}
+.ms .cart.mini .obar .sum{margin:0}
+.ms .cart.mini .obar .show{margin-left:auto;font-size:12px;font-weight:800;color:var(--navy2);white-space:nowrap}
+.ms .body.collapsed .cart.mini .acts{flex-direction:row;border-top:0;padding:0;flex:none;margin-left:auto}
+.ms .body.collapsed .cart.mini .acts .save{padding:6px 12px;font-size:13px}
+.ms .body.collapsed .cart.mini .acts .firebtn{padding:7px 14px;width:auto}
+
+/* ---------- Captain: course board status key and colours ---------- */
+.ms .bdtop{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;flex:none}
+.ms .key{display:flex;gap:6px;flex-wrap:wrap}
+.ms .kk{display:inline-flex;align-items:center;gap:5px;border-radius:7px;padding:3px 9px;font-size:11.5px;font-weight:700}
+.ms .kk b{font-size:13px}
+.ms .pp{background:#DCE5FF;color:#1E3A8A}
+.ms table.board{table-layout:fixed}
+.ms table.board th:first-child,.ms table.board td.cvc{width:70px}
+.ms table.board td.c b{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:none;line-height:1.2}
+.ms table.board td.c{height:52px}
+.ms table.board th{white-space:normal;line-height:1.15;vertical-align:bottom;padding-bottom:3px}
+
+/* ---------- Kitchen display: compact cards, as many as the screen holds ----------
+   Each stage column lays its KOT cards out in a grid that adds columns as the screen gets
+   wider. Card size (S / M / L / XL, in the menu) scales everything for the screen and distance. */
+.ms.kd{--kz:1}
+.ms.kd.sz-S{--kz:.86}.ms.kd.sz-L{--kz:1.18}.ms.kd.sz-XL{--kz:1.4}
+/* Medium follows the screen: a little smaller on 1366-wide screens, bigger on very large ones */
+@media (max-width:1500px){.ms.kd.sz-M{--kz:.89}}
+@media (max-width:1300px){.ms.kd.sz-M{--kz:.83}}
+@media (min-width:2300px){.ms.kd.sz-M{--kz:1.3}}
+.ms.kd .cols .tl{margin:0}
+.ms.kd .cols .colb{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(205px * var(--kz)),1fr));gap:calc(6px * var(--kz));align-content:start}
+.ms.kd .cols.whole{grid-template-columns:repeat(3,minmax(0,1fr))}
+.ms.kd .tl{margin:0;padding:calc(6px * var(--kz)) calc(7px * var(--kz));border-left-width:5px;border-radius:8px}
+.ms.kd .tr{gap:calc(4px * var(--kz));justify-content:flex-start;flex-wrap:nowrap;min-width:0}
+.ms.kd .tr b{font-size:calc(13.5px * var(--kz));flex:none;letter-spacing:-.01em}
+.ms.kd .tr b.ka{color:#9DB8F2}.ms.kd .tr b.kb{color:#E9C98A}
+.ms.kd .tr .tm{margin-left:auto;font-size:calc(14px * var(--kz));flex:none}
+.ms.kd .tr .cvb{margin:0;font-size:calc(12px * var(--kz));padding:0 calc(6px * var(--kz));flex:none}
+.ms.kd .tr .crs{margin:0;font-size:calc(9.5px * var(--kz));letter-spacing:.01em;padding:1px calc(4px * var(--kz));min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
+.ms.kd .tr .tag{margin:0;font-size:calc(10px * var(--kz))}
+.ms.kd .tl .rmk{font-size:calc(9.5px * var(--kz));margin:3px 4px 0 0}
+.ms.kd .dd{font-size:calc(13px * var(--kz));margin-top:calc(4px * var(--kz));line-height:1.3}
+.ms.kd .jn{font-size:calc(10px * var(--kz))}
+.ms.kd .kact{margin-top:calc(5px * var(--kz))}
+.ms.kd .kact .kbtn{margin:0;padding:calc(5px * var(--kz)) calc(6px * var(--kz));font-size:calc(12.5px * var(--kz));border-radius:6px}
+.ms.kd .kact .kbtn.rp{padding:calc(5px * var(--kz)) calc(8px * var(--kz));font-size:calc(11px * var(--kz))}
+.ms.kd .colh{font-size:calc(12px * var(--kz));margin-bottom:6px}

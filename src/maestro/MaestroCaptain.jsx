@@ -16,7 +16,7 @@ import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
 import {
   coursesOf, courseRank, lateMinutes, dishStatus, useLive, useNow, loadMenu, rpc, errText, newRef,
-  NOTE_CHIPS, ago, shortName, tc, coverRange, servesCover, rangeText, coversText,
+  NOTE_CHIPS, ago, shortName, tc, coverRange, rangeText, tableRanges, capOrder,
 } from './msData'
 
 const FOODS = ['#7DAA6A', '#7A3B2A', '#D5532F', '#A66A2C', '#C9A15B', '#B5582A', '#8E6BBF', '#3F8F8A', '#C98B2E']
@@ -60,6 +60,17 @@ function CancelFired({ disabled, onCancel }) {
 
 function Veg({ veg }) { return <span className={'veg' + (veg === false ? ' nv' : '')} /> }
 
+// My covers | Whole table (like My dishes | Whole kitchen on the kitchen screen)
+function Scope({ myRange, showAll, onToggle }) {
+  if (!myRange) return null
+  return (
+    <div className="scope">
+      <button className={showAll ? '' : 'a'} onClick={() => showAll && onToggle()}>My covers · {rangeText(myRange)}</button>
+      <button className={showAll ? 'a' : ''} onClick={() => !showAll && onToggle()}>Whole table</button>
+    </div>
+  )
+}
+
 function Toast({ toast, onClose }) {
   // Timed on the toast alone: the screen re-renders on every poll, and a new
   // onClose each time would keep restarting the timer.
@@ -102,7 +113,11 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const [sheet, setSheet] = useState(null)
   const [pickTable, setPickTable] = useState(false)
   const [noteOpen, setNoteOpen] = useState(null)   // draft row whose note chips are showing
-  const [showAll, setShowAll] = useState(false)     // the other captain's covers opened as well
+  const [showAll, setShowAll] = useState(false)     // Whole table: the other captain's covers as well
+  // Order panel: pinned = always shown; unpinned = a one-line bar that opens on a tap and hides again
+  // while the captain picks dishes. Remembered on the tablet.
+  const [pinned, setPinned] = useState(() => { try { return localStorage.getItem('ms_order_pinned') !== '0' } catch { return true } })
+  const [orderOpen, setOrderOpen] = useState(false)
   const now = useNow(1000)
 
   useEffect(() => { if (table) localStorage.setItem(tableKey, String(table)) }, [table, tableKey])
@@ -127,8 +142,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
     ])
     for (const r of [items, kots, covers]) if (r.error) throw r.error
     // Table Captain 1, 2 ... in cover order (C1-C5 first), then in the order they were added
-    const capList = [...(caps.data || [])].sort((a, b) => (Number(a.cover_from) || 99) - (Number(b.cover_from) || 99)
-      || String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.name).localeCompare(String(b.name)))
+    const capList = [...(caps.data || [])].sort(capOrder)
     return { items: items.data || [], kots: kots.data || [], covers: covers.data || [], captains: capList }
   }, { eventId: ev.id, tables: ['ms_items', 'kots', 'ms_covers'], intervalMs: 3000, deps: [table] })
   const live = liveQ.data || { items: [], kots: [], covers: [], captains: [] }
@@ -138,14 +152,16 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const dishById = useMemo(() => Object.fromEntries((menu?.dishes || []).map(d => [d.id, d])), [menu])
   const seated = useMemo(() => new Set(live.covers.filter(c => c.seated_at).map(c => c.cover_no)), [live.covers])
 
-  // This captain's covers, read live so a split changed at the desk reaches the tablet
-  const me = live.captains.find(c => c.id === captain.id) || (Number(captain.table_number) === Number(table) ? captain : null)
-  const myRange = coverRange(me, coverCount)
+  // This captain's covers, read live so a split changed at the desk reaches the tablet. Two captains
+  // at a table with no split set share it evenly: Table Captain 1 C1-C5, TC2 C6-C10.
+  const ranges = tableRanges(live.captains, table, coverCount)
+  // until the table's captains have loaded, the range set on this captain (if any)
+  const myRange = (liveQ.data ? ranges.get(captain.id) : coverRange(captain, coverCount)) || null
   const allCovers = Array.from({ length: coverCount }, (_, i) => i + 1)
   const isMine = c => !myRange || (c >= myRange.from && c <= myRange.to)
   const myCovers = allCovers.filter(isMine)
-  const visibleCovers = showAll ? [...myCovers, ...allCovers.filter(c => !isMine(c))] : myCovers
-  const ownerOf = c => live.captains.filter(x => x.id !== captain.id && coverRange(x, coverCount) && servesCover(x, c, coverCount)).map(x => x.name).join(', ')
+  const visibleCovers = showAll ? allCovers : myCovers
+  const ownerOf = c => live.captains.filter(x => { const r = ranges.get(x.id); return x.id !== captain.id && r && c >= r.from && c <= r.to }).map(x => x.name).join(', ')
   // A cover outside the captain's own falls back to their first cover once the others are closed
   const cover = myRange && !showAll && !isMine(coverPick) ? myRange.from : coverPick
   // Open or close the other covers: stay on the cover in view (or the captain's first), nothing left selected
@@ -225,6 +241,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
       await saveDraft(cover)
       if (!seated.has(cover)) await rpc('ms_seat', { p_event_id: ev.id, p_table_number: table, p_covers: [cover], p_captain_id: captain.id, p_seated: true })
       setToast({ text: `Order saved for C${cover} · ${n} ${n === 1 ? 'dish' : 'dishes'} held` })
+      setOrderOpen(false)
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
     setBusy(false)
@@ -237,7 +254,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
       const r = await rpc('ms_fire', { p_event_id: ev.id, p_table_number: table, p_item_ids: ids, p_captain_id: captain.id, p_client_ref: newRef() })
       const k = r?.kots || []
       setToast({ text: `${label || 'Fired'} · ${k.length} KOT${k.length === 1 ? '' : 's'}: ${k.map(x => x.kot_no).join(', ')}` })
-      setSel(new Set())
+      setSel(new Set()); setOrderOpen(false)
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }); liveQ.reload() }
     setBusy(false)
@@ -389,6 +406,16 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const ncKots = new Set(ncDishes.map(d => d.kitchen + d.barker)).size
   const ncKitchens = [...new Set(ncDishes.map(d => d.kitchen))].filter(Boolean)
   const heldCount = coverItems.filter(i => i.state === 'held').length + draftRows.length
+  // What is pending for this cover, at a glance
+  const nDraft = draftRows.length
+  const nHeld = coverItems.filter(i => i.state === 'held').length
+  const nServed = coverItems.filter(i => i.state === 'fired' && statusOf(i).cls === 'sv').length
+  const nKitchen = coverItems.filter(i => i.state === 'fired').length - nServed
+  const nLate = coverItems.filter(i => i.state === 'fired' && statusOf(i).late).length
+  const summary = [nDraft && <span key="d" className="s-d">{nDraft} not saved</span>, nHeld && <span key="h" className="s-h">{nHeld} not fired</span>,
+    nKitchen && <span key="k" className="s-k">{nKitchen} in kitchen{nLate ? ` (${nLate} late)` : ''}</span>, nServed && <span key="s" className="s-s">{nServed} served</span>].filter(Boolean)
+  const panelOpen = pinned || orderOpen
+  const togglePin = () => { const v = !pinned; setPinned(v); setOrderOpen(v ? false : true); try { localStorage.setItem('ms_order_pinned', v ? '1' : '0') } catch { /* private mode */ } }
 
   // One compact row per dish, like the guest menu: photo, name, description, ADD
   const dishCard = d => {
@@ -411,8 +438,10 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   }
 
   const takeOrder = (
-    <div className="body">
-      <div className="menu">
+    <div className={'body' + (panelOpen ? '' : ' collapsed')}>
+      {/* Unpinned: picking a dish folds the order away. On click (not pointer down), so the tap
+          lands on the dish under the finger before the menu widens */}
+      <div className="menu" onClickCapture={() => { if (!pinned && orderOpen) setOrderOpen(false) }}>
         {!menu ? <div className="empty">Loading the menu…</div> : (
           <>
             <div className="msearch">
@@ -452,69 +481,80 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
           </>
         )}
       </div>
-      <div className="cart">
-        <div className="ch">
-          <b>Full order · {tc(table, cover)}</b>
-          <small className="hint">Taken once, saved for the cover and fired course by course</small>
-          {!isMine(cover) && <div className="helpout">Helping out: C{cover} is {ownerOf(cover) || 'another captain'}'s cover</div>}
-          <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {seated.has(cover)
-              ? <span className="tagF">Seated</span>
-              : <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 12 }} disabled={busy} onClick={() => seat(cover)}>Mark C{cover} seated{autoFirst ? ` · fires ${firstCourse}` : ''}</button>}
-          </div>
-        </div>
-        <div className="scroll">
-          {[...groupCourses, ...otherCourse].map(c => {
-            const its = coverItems.filter(i => i.course === c)
-            const drs = draftRows.filter(r => r.dish.course === c)
-            const anyHeld = its.some(i => i.state === 'held') || drs.length
-            const tag = anyHeld ? (c ? <FireCourse course={c} next={c === nc} disabled={busy} onFire={() => onSaveAndFire(c)} /> : <span className="tagH">Held · fire from the course board</span>)
-              : its.length && its.every(i => statusOf(i).cls === 'sv') ? <span className="tagF">Served</span>
-              : <span className="tagK">Fired</span>
-            return (
-              <div className="crs" key={c || 'none'}>
-                <div className="h"><span>{c || 'Other'}</span>{tag}</div>
-                {its.map(i => {
-                  const s = statusOf(i)
-                  return (
-                    <div className="it" key={i.id}>
-                      <div className="l1">
-                        <Veg veg={i.veg} /><span className="nm">{i.qty > 1 ? `${i.qty} × ` : ''}{i.name}</span>
-                        {i.state === 'held'
-                          ? <button className="x" disabled={busy} onClick={() => removeHeld(i)} title="Remove this dish">✕</button>
-                          : <>
-                              <span className={'chip ' + s.cls}>{s.label}</span>
-                              {canCancelFired(i) && <CancelFired disabled={busy} onCancel={() => cancelItems([i.id], i.name)} />}
-                            </>}
-                      </div>
-                      <div className="l2">{kitchenById[i.kitchen_id]?.name || ''}{i.note && <span className="note">{i.note}</span>}</div>
-                    </div>
-                  )
-                })}
-                {drs.map(r => (
-                  <div className="it dr" key={'d' + r.id}>
-                    <div className="l1">
-                      <Veg veg={r.dish.is_veg} /><span className="nm">{r.dish.name}</span>
-                      <div className="st"><button className="m" onClick={() => setDraft(cover, cur => { cur[r.id] = { ...cur[r.id], qty: cur[r.id].qty - 1 } })}>−</button><span>{r.qty}</span><button className="m" onClick={() => addDish(r.id, 1)}>+</button></div>
-                    </div>
-                    <div className="l2">
-                      <span className="tagN">Not saved</span>{r.dish.kitchenName}
-                      {r.note && <span className="note">{r.note}</span>}
-                      <button className="nbtn" onClick={() => setNoteOpen(o => o === r.id ? null : r.id)}>{noteOpen === r.id ? 'Done' : r.note ? 'Edit note' : '+ Note'}</button>
-                    </div>
-                    {noteOpen === r.id && <div className="notes">{NOTE_CHIPS.map(ch => <button key={ch} className={String(r.note || '').split(',').map(s => s.trim()).includes(ch) ? 'a' : ''} onClick={() => toggleNote(r.id, ch)}>{ch}</button>)}</div>}
-                  </div>
-                ))}
+      <div className={'cart' + (panelOpen ? '' : ' mini')}>
+        {panelOpen ? (
+          <>
+            <div className="ch">
+              <div className="cht">
+                <b>{tc(table, cover)} · order</b>
+                {seated.has(cover)
+                  ? <span className="tagF">Seated</span>
+                  : <button className="minib" disabled={busy} onClick={() => seat(cover)}>Mark seated{autoFirst ? ` · fires ${firstCourse}` : ''}</button>}
+                <span style={{ flex: 1 }} />
+                {!pinned && <button className="minib" onClick={() => setOrderOpen(false)}>Hide</button>}
+                <button className={'pin' + (pinned ? ' pd' : '')} onClick={togglePin}
+                  title={pinned ? 'Always shown. Tap to let it hide while you pick dishes' : 'Keep the order always shown'}>{pinned ? '📌 Pinned' : '📌 Pin'}</button>
               </div>
-            )
-          })}
-          {!groupCourses.length && !otherCourse.length && (
-            <div className="empty">Nothing ordered for C{cover} yet.<br />Add every course the guest wants, then Save.</div>
-          )}
-        </div>
+              <div className="sum">{summary.length ? summary : <span>Nothing ordered for C{cover} yet</span>}</div>
+              {!isMine(cover) && <div className="helpout">Helping out: C{cover} is {ownerOf(cover) || 'another captain'}'s cover</div>}
+            </div>
+            <div className="scroll olist">
+              {[...groupCourses, ...otherCourse].map(c => {
+                const its = coverItems.filter(i => i.course === c)
+                const drs = draftRows.filter(r => r.dish.course === c)
+                const anyHeld = its.some(i => i.state === 'held') || drs.length
+                return (
+                  <div className="orow" key={c || 'none'}>
+                    <div className="oc">{c || 'Other'}</div>
+                    <div className="oi">
+                      {its.map(i => {
+                        const st = statusOf(i)
+                        return (
+                          <div className="oit" key={i.id}>
+                            <Veg veg={i.veg} />
+                            <span className="nm">{i.qty > 1 ? `${i.qty} × ` : ''}{i.name}{i.note && <span className="note">{i.note}</span>}</span>
+                            {i.state === 'held'
+                              ? <button className="x" disabled={busy} onClick={() => removeHeld(i)} title="Remove this dish">✕</button>
+                              : <>
+                                  <span className={'chip ' + st.cls}>{st.label}</span>
+                                  {canCancelFired(i) && <CancelFired disabled={busy} onCancel={() => cancelItems([i.id], i.name)} />}
+                                </>}
+                          </div>
+                        )
+                      })}
+                      {drs.map(r => (
+                        <div key={'d' + r.id}>
+                          <div className="oit dr">
+                            <Veg veg={r.dish.is_veg} />
+                            <span className="nm">{r.qty > 1 ? `${r.qty} × ` : ''}{r.dish.name}{r.note && <span className="note">{r.note}</span>}</span>
+                            <button className="nbtn" onClick={() => setNoteOpen(o => o === r.id ? null : r.id)}>{noteOpen === r.id ? 'Done' : r.note ? 'Note' : '+ Note'}</button>
+                            <button className="x" onClick={() => setDraft(cover, cur => { delete cur[r.id] })} title="Take this dish off">✕</button>
+                          </div>
+                          {noteOpen === r.id && <div className="notes">{NOTE_CHIPS.map(ch => <button key={ch} className={String(r.note || '').split(',').map(x => x.trim()).includes(ch) ? 'a' : ''} onClick={() => toggleNote(r.id, ch)}>{ch}</button>)}</div>}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="of">
+                      {anyHeld ? (c ? <FireCourse course={c} next={c === nc} disabled={busy} onFire={() => onSaveAndFire(c)} /> : <span className="tagH">Board</span>) : null}
+                    </div>
+                  </div>
+                )
+              })}
+              {!groupCourses.length && !otherCourse.length && (
+                <div className="empty">Add every course the guest wants, then Save.</div>
+              )}
+            </div>
+          </>
+        ) : (
+          <button className="obar" onClick={() => setOrderOpen(true)}>
+            <b>{tc(table, cover)} · order</b>
+            <span className="sum">{summary.length ? summary : <span>Nothing ordered yet</span>}</span>
+            <span className="show">Show order ▴</span>
+          </button>
+        )}
         <div className="acts">
           <button className="save" disabled={busy || !draftRows.length} onClick={onSave}>
-            Save order for C{cover}<small>{draftRows.length ? `All ${heldCount} ${heldCount === 1 ? 'dish' : 'dishes'} held for C${cover}` : 'Add dishes to save'}</small>
+            Save order for C{cover}<small>{draftRows.length ? `${nDraft} new · ${heldCount} ${heldCount === 1 ? 'dish' : 'dishes'} held for C${cover}` : 'Add dishes to save'}</small>
           </button>
           <button className="btn btn-amber firebtn" disabled={busy || !nc} onClick={onSaveAndFire}>
             {draftRows.length ? `Save & fire ${nc || ''} now` : `Fire ${nc || 'next course'} now`}
@@ -581,18 +621,28 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
     else if (lastFired && !ready.length && !late.length) pace.push({ c, t: `${lastFired.course?.toLowerCase() || 'course'} fired ${ago(lastFired.fired_at, now)}`, w: 0 })
   }
   pace.sort((a, b) => b.w - a.w)
-  const lateMin = lateMinutes(null, ev)
+
+  // Status key with counts for the covers shown: what is done and what is pending
+  const shownItems = live.items.filter(i => i.state !== 'cancelled' && boardCovers.includes(i.cover_no) && courses.includes(i.course))
+  const tally = cls => shownItems.filter(i => statusOf(i).cls === cls).length
+  const KEY = [['hd', 'Not fired'], ['fi', 'Sent to kitchen'], ['pp', 'Preparing'], ['rd', 'Ready at pass'], ['sv', 'Served'], ['lt', `Late (over ${lateMinutes(null, ev)} min)`]]
 
   const board = (
     <div className="body bd">
       <div className="main">
+        <div className="bdtop">
+          <Scope myRange={myRange} showAll={showAll} onToggle={toggleOthers} />
+          <div className="key">
+            {KEY.map(([cls, label]) => <span key={cls} className={'kk ' + cls}><b>{tally(cls)}</b>{label}</span>)}
+          </div>
+        </div>
         <div className="boardwrap">
           <table className="board">
             <thead><tr><th />{courses.map(c => <th key={c} style={{ cursor: 'pointer' }} onClick={() => onCourseHead(c)}>{c}</th>)}</tr></thead>
             <tbody>
               {boardCovers.map(c => (
                 <tr key={c}>
-                  <td className={'cvc' + (isMine(c) ? '' : ' oth')} style={{ cursor: 'pointer' }} onClick={() => onCoverHead(c)}>C{c}<small>{selCovers.includes(c) ? 'selected' : seated.has(c) ? 'seated' : itemsOf(c).length ? 'ordered' : 'empty'}</small></td>
+                  <td className={'cvc' + (isMine(c) ? '' : ' oth')} style={{ cursor: 'pointer' }} onClick={() => onCoverHead(c)}>C{c}<small>{selCovers.includes(c) ? 'selected' : !isMine(c) ? ownerOf(c) || 'other' : seated.has(c) ? 'seated' : itemsOf(c).length ? 'ordered' : 'empty'}</small></td>
                   {courses.map(course => {
                     const its = cellItems(c, course)
                     if (!its.length) return <td key={course} className="c na"><b>—</b></td>
@@ -602,7 +652,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
                     const st = late || worst
                     const isSel = its.some(i => sel.has(i.id))
                     const kitchens = new Set(its.map(i => i.kitchen_id)).size
-                    const name = its.length === 1 ? its[0].name : `${its.length} ${course.toLowerCase()} · ${kitchens} kitchen${kitchens === 1 ? '' : 's'}`
+                    const name = its.length === 1 ? its[0].name : `${its.length} dishes · ${kitchens} kitchen${kitchens === 1 ? '' : 's'}`
                     return (
                       <td key={course} className={'c ' + (isSel ? 'sel' : st.cls)} onClick={() => onCell(c, course)} title={its.map(i => i.name).join(', ')}>
                         <b>{name}</b><span>{isSel ? 'Fire' : st.label}</span>
@@ -628,20 +678,11 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
         </div>
       </div>
       <div className="side">
-        <h5>Status</h5>
-        <div className="lgd">
-          <div><i className="hd" />Held · saved, not fired</div>
-          <div><i className="fi" />Fired · in the kitchen</div>
-          <div><i className="rd" />Ready at the pass</div>
-          <div><i className="sv" />Served · handed over at the pass</div>
-          <div><i className="lt" />Late · over {lateMin} min</div>
-        </div>
-        <h5 style={{ marginTop: 6 }}>Pace</h5>
+        <h5>Pace</h5>
         <div className="pace">
           {pace.length ? pace.slice(0, 8).map((p, i) => <div key={i}><b>C{p.c}</b> {p.t}</div>) : <span className="muted">Seat covers and fire the first course to see the pace here.</span>}
         </div>
         <div className="pace" style={{ background: '#FFF8E6' }}><b>Flexible sequence:</b> fire one dish, a whole course, or two courses together, for one cover or several.</div>
-        {myRange && <button className="btn btn-ghost" onClick={toggleOthers}>{showAll ? `Only my covers (${rangeText(myRange)})` : `Show the other covers too`}</button>}
         <button className="btn btn-ghost" disabled={busy || visibleCovers.every(c => seated.has(c))} onClick={seatAll}>{myRange && !showAll ? `Seat my covers (${rangeText(myRange)})` : 'Seat all covers'}{autoFirst ? ` · fires ${firstCourse}` : ''}</button>
       </div>
     </div>
@@ -653,7 +694,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
         title={view === 'take' ? `Table T${table} · ${captain.name}${myRange ? ` · ${rangeText(myRange)}` : ''}` : `Table T${table} · Course board`}
         sub={view === 'take'
           ? `${capNo >= 0 ? `Table Captain ${capNo + 1} · ` : ''}${myRange ? `your covers ${rangeText(myRange)} · ${seatedMine} seated` : `${coverCount} covers · ${seated.size} seated`}`
-          : `${live.captains.map((c, i) => `${c.name} (TC${i + 1}${coverRange(c, coverCount) ? ' · ' + rangeText(coverRange(c, coverCount)) : ''})`).join(' · ') || captain.name} · ${seated.size} covers seated · tap dishes to fire`}
+          : `${live.captains.map((c, i) => `${c.name} (TC${i + 1}${ranges.get(c.id) ? ' · ' + rangeText(ranges.get(c.id)) : ''})`).join(' · ') || captain.name} · ${seated.size} covers seated · tap dishes to fire`}
         right={<>
           <div className="tabsw">
             <button className={view === 'take' ? 'a' : ''} onClick={() => setView('take')}>Take order</button>
@@ -666,22 +707,20 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
         </>} />
       {view === 'take' && (
         <div className="covers">
-          <span className="l">{myRange ? 'My covers' : 'Cover'}</span>
+          {!myRange && <span className="l">Cover</span>}
           {visibleCovers.map((c, i) => {
             const s = coverState(c)
-            const first = !isMine(c) && (i === 0 || isMine(visibleCovers[i - 1]))
+            // a label before each run of covers: "My covers", or the captain who looks after them
+            const grp = x => (isMine(x) ? '' : ownerOf(x) || 'Other covers')
+            const head = myRange && (i === 0 || grp(c) !== grp(visibleCovers[i - 1]))
             return [
-              first && <span key={'o' + c} className="l oth">{ownerOf(c) || 'Other covers'}</span>,
+              head && <span key={'o' + c} className={'l' + (grp(c) ? ' oth' : '')}>{grp(c) || 'My covers'}</span>,
               <button key={c} className={'cv' + (isMine(c) ? '' : ' oth') + (c === cover ? ' sel' : s === 'ordered' || s === 'served' ? ' done' : s === 'seated' ? ' seat' : '')}
                 onClick={() => setCover(c)}><b>C{c}</b><small>{c === cover ? 'taking now' : s}{drafts[c] && c !== cover ? ' *' : ''}</small></button>,
             ]
           })}
-          {myRange && (
-            <button className="cvmore" onClick={toggleOthers}
-              title={showAll ? 'Back to your own covers' : 'Open the other covers of this table to take an order or fire for them'}>
-              {showAll ? `Only my covers` : `Other covers (${coversText(allCovers.filter(c => !isMine(c)))})`}
-            </button>
-          )}
+          <span style={{ flex: 1 }} />
+          <Scope myRange={myRange} showAll={showAll} onToggle={toggleOthers} />
         </div>
       )}
       {view === 'take' ? takeOrder : board}

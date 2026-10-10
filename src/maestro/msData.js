@@ -51,11 +51,35 @@ export function coversText(nums) {
   }
   return out.join(', ')
 }
-// The captains of a table who look after one cover (all of the table's captains if none has it)
+// Table Captain 1, 2 ...: by the covers set, then in the order they were added
+export const capOrder = (a, b) => (Number(a.cover_from) || 99) - (Number(b.cover_from) || 99)
+  || String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.name || '').localeCompare(String(b.name || ''))
+
+/* The covers each captain of a table looks after: id -> {from, to, auto?} or null (all).
+   Ranges set in Event set-up win. A table with two or more captains and no range set is
+   split evenly in captain order: of 10 covers, Table Captain 1 gets C1-C5, TC2 C6-C10. */
+export function tableRanges(caps, table, coverCount) {
+  const n = Math.max(1, Number(coverCount) || 10)
+  const at = (caps || []).filter(c => c.is_active !== false && Number(c.table_number) === Number(table)).sort(capOrder)
+  const out = new Map()
+  // one captain, a range set by hand, or more captains than covers: no automatic split
+  if (at.length < 2 || at.length > n || at.some(c => coverRange(c, n))) { at.forEach(c => out.set(c.id, coverRange(c, n))); return out }
+  at.forEach((c, i) => {
+    const from = Math.floor(i * n / at.length) + 1, to = Math.floor((i + 1) * n / at.length)
+    out.set(c.id, from <= to ? { from, to, auto: true } : null)
+  })
+  return out
+}
+
+// The captains of a table who look after one cover: those whose range has it; else those with
+// no range (all covers); else every captain of the table
 export function captainsForCover(caps, table, c, coverCount) {
-  const at = (caps || []).filter(x => x.is_active !== false && Number(x.table_number) === Number(table))
-  const mine = at.filter(x => servesCover(x, c, coverCount))
-  return mine.length ? mine : at
+  const at = (caps || []).filter(x => x.is_active !== false && Number(x.table_number) === Number(table)).sort(capOrder)
+  const ranges = tableRanges(caps, table, coverCount)
+  const own = at.filter(x => { const r = ranges.get(x.id); return r && c >= r.from && c <= r.to })
+  if (own.length) return own
+  const free = at.filter(x => !ranges.get(x.id))
+  return free.length ? free : at
 }
 
 export function newRef() {
@@ -65,6 +89,21 @@ export function newRef() {
 
 export function coursesOf(ev) {
   return Array.isArray(ev?.courses) && ev.courses.length ? ev.courses : DEFAULT_COURSES
+}
+
+// Course labels for the kitchen cards, the way kitchens say them: the word "Course" goes
+// (Main Course 1 -> Main 1, Main Course -> Main), only when the short form stays unique among the
+// courses given. Nothing else is cut; the printed KOT and the card's tooltip keep the full name.
+export function shortCourses(list) {
+  const short = c => {
+    const s = String(c || '').trim()
+    const t = s.replace(/\s+course\b/i, '').replace(/\s+/g, ' ').trim()
+    return t && s.length > 9 ? t : s
+  }
+  const all = [...new Set((list || []).filter(Boolean).map(c => String(c).trim()))]
+  const n = {}
+  all.forEach(c => { const s = short(c); n[s] = (n[s] || 0) + 1 })
+  return c => { const s = short(c); return n[s] > 1 ? String(c || '').trim() : s }
 }
 
 export function courseRank(courses, c) {
@@ -131,7 +170,7 @@ export async function rpc(name, args) {
    board. kot: its KOT row (or undefined). */
 export function dishStatus(item, kot, now, lateMin) {
   if (item.state === 'cancelled') return { cls: 'cx', label: 'Cancelled', rank: 9 }
-  if (item.state === 'held') return { cls: 'hd', label: 'Held', rank: 0 }
+  if (item.state === 'held') return { cls: 'hd', label: 'Not fired', rank: 0 }
   if (item.served_at || kot?.served_at) return { cls: 'sv', label: 'Served', rank: 5 }
   const stage = kot?.stage || 'new'
   // Handed over at the pass = done for the guest too
@@ -139,7 +178,9 @@ export function dishStatus(item, kot, now, lateMin) {
   if (stage === 'ready') return { cls: 'rd', label: 'Ready', rank: 3 }
   const fired = new Date(kot?.fired_at || item.fired_at || now).getTime()
   if (now - fired > lateMin * 60000) return { cls: 'lt', label: 'Late ' + mmss(now - fired), rank: 2, late: true }
-  return { cls: 'fi', label: 'In kitchen', rank: 1 }
+  // Sent: the kitchen has it, not started yet. Preparing: the barker pressed Start preparing.
+  if (stage === 'in_prep') return { cls: 'pp', label: 'Preparing', rank: 1.5 }
+  return { cls: 'fi', label: 'Sent', rank: 1 }
 }
 
 /* Live data: run load() now, again whenever one of the watched tables

@@ -19,7 +19,7 @@ import { todayISO, sessionStillCurrent } from '../components/guest/deviceEntry'
 import { setSignOutReason, takeSignOutReason, setUnsavedCheck } from '../lib/appUpdate'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
-import { NEXT_ACTION, lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, loadMenu, shortName } from './msData'
+import { NEXT_ACTION, lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, loadMenu, shortName, coursesOf, shortCourses } from './msData'
 
 const SESSION = 'ms_barker_session'
 
@@ -112,6 +112,10 @@ function KitchenScreen({ session, onSignOut }) {
   const kitchenId = barker.kitchen_id
   const [view, setView] = useState('mine')           // mine | whole | done
   const [doneScope, setDoneScope] = useState('mine')  // Done view: my KOTs or the whole kitchen
+  // Card size for this screen: small cards fit more KOTs on a monitor up close, large ones read
+  // from across the kitchen on a TV. Remembered on this screen.
+  const [size, setSize] = useState(() => { try { return localStorage.getItem('ms_kd_size') || 'M' } catch { return 'M' } })
+  const pickSize = v => { setSize(v); try { localStorage.setItem('ms_kd_size', v) } catch { /* private mode */ } }
   const [picked, setPicked] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
@@ -171,7 +175,7 @@ function KitchenScreen({ session, onSignOut }) {
       // Done: handed over (or closed at the desk) this service, newest first
       supabase.from('kots').select('*').eq('kitchen_id', kitchenId).eq('kind', 'order').eq('status', 'delivered')
         .gte('created_at', since).order('dispatched_at', { ascending: false, nullsFirst: false }).limit(300),
-      supabase.from('events').select('id,late_minutes,name').eq('id', event.id).maybeSingle(),
+      supabase.from('events').select('id,late_minutes,name,courses').eq('id', event.id).maybeSingle(),
     ])
     for (const r of [kitchen, kots, held, fin]) if (r.error) throw r.error
     const done = fin.data || []
@@ -185,6 +189,7 @@ function KitchenScreen({ session, onSignOut }) {
   const d = q.data
   const kitchen = d?.kitchen
   const late = lateMinutes(kitchen, d?.ev || event)
+  const crsLabel = shortCourses([...coursesOf(d?.ev), ...(d?.kots || []).map(k => k.course)])
   const mine = k => (k.barker || 'A') === barker.side
 
   const kots = useMemo(() => {
@@ -321,13 +326,15 @@ function KitchenScreen({ session, onSignOut }) {
       <div key={k.id} className={'tl ' + cls(k) + (picked.has(k.id) ? ' pk' : '')}
         onClick={e => { if (e.target.tagName !== 'BUTTON') pick(k) }} style={{ cursor: 'pointer' }}>
         <div className="tr">
-          <b>{k.kot_no}{whole && <span className={'tag ' + ((k.barker || 'A') === 'A' ? 'ta' : 'tb')}>{k.barker || 'A'}</span>}</b>
+          {/* Whole kitchen: the KOT number in the barker's colour (blue A, gold B) */}
+          <b className={whole ? ((k.barker || 'A') === 'A' ? 'ka' : 'kb') : undefined}>{k.kot_no}</b>
+          <span className="cvb">T{k.table_number}·C{k.cover_no}</span>
+          {k.course && <span className="crs" title={k.course}>{crsLabel(k.course)}</span>}
           <span className="tm">{mmss(age(k))}</span>
         </div>
-        <span className="cvb">T{k.table_number} · C{k.cover_no}</span>
-        {k.course && <span className="crs">{k.course}</span>}
-        {k.is_remake && <span className="rmk">REMAKE</span>}
-        {k.print_status === 'failed' && <span className="rmk">NOT PRINTED</span>}
+        {(k.is_remake || k.print_status === 'failed') && (
+          <div>{k.is_remake && <span className="rmk">REMAKE</span>}{k.print_status === 'failed' && <span className="rmk">NOT PRINTED</span>}</div>
+        )}
         <div className="dd">
           {(k.items || []).map((it, i) => (
             <div key={i}>{it.qty} × {it.name}{it.note && String(it.note).split(',').map(x => x.trim()).filter(Boolean).map(x => <span key={x} className="jn">{x}</span>)}</div>
@@ -355,7 +362,7 @@ function KitchenScreen({ session, onSignOut }) {
   const title = /kitchen$/i.test(kname.trim()) ? kname : `${kname} Kitchen`
 
   return (
-    <div className="ms kd" onClick={() => { unlockChime(); if (chimeReady()) setSoundOn(true) }}>
+    <div className={'ms kd sz-' + size} onClick={() => { unlockChime(); if (chimeReady()) setSoundOn(true) }}>
       {!soundOn && <div style={{ background: '#7A4B00', color: '#FFE3A3', fontWeight: 800, fontSize: 14, padding: '8px 14px', textAlign: 'center', cursor: 'pointer' }}>Tap anywhere to turn on the sound for new KOTs</div>}
       <div className="top">
         <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -445,9 +452,9 @@ function KitchenScreen({ session, onSignOut }) {
       ) : (
         <div className="cols whole">
           <div className="col"><div className="colh"><span>Received</span><span>oldest first</span></div>
-            <div className="colb g2">{[...received].sort((a, b) => age(b) - age(a)).map(k => card(k, true))}</div></div>
+            <div className="colb">{[...received].sort((a, b) => age(b) - age(a)).map(k => card(k, true))}</div></div>
           <div className="col"><div className="colh"><span>In preparation</span><span>red = over {late} min</span></div>
-            <div className="colb g2">{by('in_prep').map(k => card(k, true))}</div></div>
+            <div className="colb">{by('in_prep').map(k => card(k, true))}</div></div>
           <div className="col"><div className="colh"><span>Ready · to dispatch</span></div>
             <div className="colb">{by('ready').map(k => card(k, true))}</div></div>
         </div>
@@ -465,6 +472,12 @@ function KitchenScreen({ session, onSignOut }) {
           <div className="sheet" onClick={e => e.stopPropagation()}>
             <h3>{barker.name} · Barker {barker.side}</h3>
             <p>{kitchen?.name} kitchen · {event.name}</p>
+            <div className="row" style={{ alignItems: 'center', marginBottom: 10 }}>
+              <b style={{ fontSize: 13 }}>Card size</b>
+              {[['S', 'Small'], ['M', 'Medium'], ['L', 'Large'], ['XL', 'Extra large']].map(([v, label]) => (
+                <button key={v} className={'btn ' + (size === v ? 'btn-navy' : 'btn-ghost')} onClick={() => pickSize(v)}>{label}</button>
+              ))}
+            </div>
             <div className="row">
               <button className="btn btn-ghost" onClick={() => setSheet('soldout')}>Sold out dishes</button>
               <button className="btn btn-ghost" onClick={() => { setSheet(null); q.reload() }}>Refresh</button>

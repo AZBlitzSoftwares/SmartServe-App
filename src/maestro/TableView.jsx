@@ -10,7 +10,7 @@
    only until the kitchen starts it); the kitchen gets a CANCEL slip. */
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { coursesOf, lateMinutes, dishStatus, useLive, useNow, rpc, errText, mmss, clockText, coverRange, rangeText } from './msData'
+import { coursesOf, lateMinutes, dishStatus, useLive, useNow, rpc, errText, mmss, clockText, rangeText, tableRanges, capOrder, captainsForCover } from './msData'
 
 export default function TableView({ ev, table, caps = [], kitchens = [], onClose }) {
   const now = useNow(1000)
@@ -40,13 +40,10 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
   const seatedAt = c => d.covers.find(x => x.cover_no === c)?.seated_at
 
   // The table's captains, in cover order, and who looks after each cover
-  const tcaps = caps.filter(c => Number(c.table_number) === Number(table))
-    .sort((a, b) => (Number(a.cover_from) || 99) - (Number(b.cover_from) || 99) || String(a.name).localeCompare(String(b.name)))
-  const ownerOf = c => {
-    const split = tcaps.filter(x => coverRange(x, coverCount))
-    const who = split.filter(x => { const r = coverRange(x, coverCount); return c >= r.from && c <= r.to })
-    return (who.length ? who : tcaps.filter(x => !coverRange(x, coverCount))).map(x => x.name).join(', ')
-  }
+  const tcaps = caps.filter(c => c.is_active !== false && Number(c.table_number) === Number(table)).sort(capOrder)
+  // Who looks after each cover: the split set in Event set-up, or an even split by captain order
+  const ranges = tableRanges(caps, table, coverCount)
+  const ownerOf = c => captainsForCover(caps, table, c, coverCount).map(x => x.name).join(', ')
   const covers = Array.from({ length: coverCount }, (_, i) => i + 1)
   const cover = pick ?? (covers.find(c => itemsOf(c).length) || 1)
   const extra = [...new Set(live.map(i => i.course).filter(c => !courses.includes(c)))]
@@ -96,7 +93,7 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
           <div>
             <h3>Table T{table}</h3>
             <p>
-              {tcaps.length ? tcaps.map(c => `${c.name} · ${rangeText(coverRange(c, coverCount))}`).join('   |   ') : 'No table captain'}
+              {tcaps.length ? tcaps.map(c => `${c.name} · ${rangeText(ranges.get(c.id))}`).join('   |   ') : 'No table captain'}
               {'   ·   '}{seatedN}/{coverCount} covers seated · {served}/{live.length} plates served
             </p>
           </div>
