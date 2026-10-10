@@ -53,6 +53,22 @@ export function eposCommandXml(bytes) {
     '</epos-print></s:Body></s:Envelope>'
 }
 
+/** The same KOT as ePOS text lines (alignment, bold, double size kept): used when a printer
+    does not take raw ESC/POS in <command>. lines = decodeEscPos(bytes).lines */
+export function eposLinesXml(lines) {
+  const body = lines.map(l => {
+    const big = (l.w || 1) > 1 || (l.h || 1) > 1
+    return `<text align="${l.align === 'center' ? 'center' : l.align === 'right' ? 'right' : 'left'}" em="${l.bold ? 'true' : 'false'}"` +
+      ` reverse="${l.reverse ? 'true' : 'false'}" dw="${(l.w || 1) > 1 && big ? 'true' : 'false'}" dh="${(l.h || 1) > 1 && big ? 'true' : 'false'}">` +
+      esc(l.text || '') + '&#10;</text>'
+  }).join('')
+  return '<?xml version="1.0" encoding="utf-8"?>' +
+    '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+    '<epos-print xmlns="http://www.epson-pos.com/schemas/2011/03/epos-print">' +
+    '<text lang="en" smooth="true"/>' + body + '<feed line="3"/><cut type="feed"/>' +
+    '</epos-print></s:Body></s:Envelope>'
+}
+
 /** "http://192.168.0.201" for a printer on the usual port 9100 (its web printing is on port 80),
     "http://host:port" for anything else (a test printer). */
 export function eposBase(host, port, secure = false) {

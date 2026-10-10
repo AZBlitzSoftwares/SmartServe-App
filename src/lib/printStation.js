@@ -11,7 +11,7 @@
    and this page open. Only one printer of the event's KOTs should be running: a Print Hub
    elsewhere would take KOTs too (the desk warns about two). */
 import { supabase } from './supabase'
-import { eposBase, eposCommandXml, eposSend } from './eposPrint'
+import { eposBase, eposCommandXml, eposLinesXml, eposSend } from './eposPrint'
 
 const KEY = 'ss_print_station'
 const NAME_KEY = 'ss_print_station_name'
@@ -80,11 +80,16 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 async function printOn(ep, job, backup) {
   const bytes = await kotBytes(job, `${ep.host}:${ep.port}`, backup)
-  const xml = eposCommandXml(bytes)
+  let xml = eposCommandXml(bytes)
   let r
   for (let i = 0; i < 2; i++) {
     if (i) await sleep(1500)
     r = await eposSend(eposBase(ep.host, ep.port), xml)
+    if (!r.ok && (r.code === 'SchemaError' || r.kind === 'notepos') && !xml.includes('<text ')) {
+      // the printer did not take the raw KOT: send the same lines as plain ePOS text
+      xml = eposLinesXml(escpos.decodeEscPos(bytes).lines)
+      r = await eposSend(eposBase(ep.host, ep.port), xml)
+    }
     if (r.ok || r.kind === 'printer') break // paper out / cover open: a second try will not help
   }
   return r
