@@ -5,8 +5,10 @@
             held, in the kitchen, ready, served, late.
      Right  the cover picked on the left: each dish with its kitchen, KOT,
             barker and times (fired, ready, served), and Reprint for its KOT.
-   Covers carry the captain who looks after them (cover split). */
-import { useMemo, useState } from 'react'
+   Covers carry the captain who looks after them (cover split).
+   The desk can cancel a fired dish at any stage before it is served (a captain
+   only until the kitchen starts it); the kitchen gets a CANCEL slip. */
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { coursesOf, lateMinutes, dishStatus, useLive, useNow, rpc, errText, mmss, clockText, coverRange, rangeText } from './msData'
 
@@ -55,6 +57,17 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
   async function reprint(k) {
     setBusy(true)
     try { await rpc('ms_reprint', { p_kot_id: k.id, p_printer_ip: null }); setMsg({ text: `${k.kot_no} sent to the printer again (marked REPRINT)` }); q.reload() }
+    catch (e) { setMsg({ text: errText(e), err: true }) }
+    setBusy(false)
+  }
+
+  async function cancelDish(i, k) {
+    setBusy(true)
+    try {
+      await rpc('ms_cancel', { p_item_ids: [i.id], p_by: 'Control Desk' })
+      setMsg({ text: `${i.name} cancelled for C${i.cover_no}${['printing', 'printed'].includes(k?.print_status) ? ' · a CANCEL slip prints in the kitchen' : ' · taken off the kitchen screen'}` })
+      q.reload()
+    }
     catch (e) { setMsg({ text: errText(e), err: true }) }
     setBusy(false)
   }
@@ -139,6 +152,7 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
                           {done && <span>Served {t(done)}{k.stage_by ? ` by ${k.stage_by}` : ''}</span>}
                           {!done && !k.ready_at && <span>{k.stage === 'in_prep' ? 'In preparation' : 'Received'} · {mmss(now - new Date(k.fired_at))}</span>}
                           <button className="btn btn-ghost" disabled={busy} onClick={() => reprint(k)}>Reprint KOT</button>
+                          {i.state === 'fired' && !done && k.status === 'open' && <DeskCancel disabled={busy} onCancel={() => cancelDish(i, k)} />}
                         </div>
                       )}
                     </div>
@@ -151,4 +165,13 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
       </div>
     </div>
   )
+}
+
+// Cancel needs a second tap: it takes the dish off the kitchen screen and prints a CANCEL slip
+function DeskCancel({ disabled, onCancel }) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 4000); return () => clearTimeout(t) }, [armed])
+  return armed
+    ? <button className="btn btn-red" disabled={disabled} onClick={() => { setArmed(false); onCancel() }}>Cancel dish?</button>
+    : <button className="btn btn-ghost" style={{ color: 'var(--red)' }} disabled={disabled} onClick={() => setArmed(true)}>Cancel</button>
 }

@@ -38,19 +38,24 @@ function DishThumb({ dish }) {
   )
 }
 
-// Fire one course of the cover from the order panel. The next course in the service order
-// fires on one tap; firing a course out of order asks for a second tap.
+// Fire one course of the cover from the order panel: one tap, any course, in any order.
+// The next course in the service order is the highlighted one.
 function FireCourse({ course, next, disabled, onFire }) {
+  return <button className={'firec' + (next ? ' nx' : '')} disabled={disabled} onClick={onFire} title={`Fire the ${course} now`}>{next ? 'Fire · next' : 'Fire'}</button>
+}
+
+// Cancel a dish the kitchen has received but not started: a second tap, because it
+// prints a CANCEL slip in the kitchen. Everything else on the captain screen is one tap.
+function CancelFired({ disabled, onCancel }) {
   const [armed, setArmed] = useState(false)
   useEffect(() => {
     if (!armed) return
     const t = setTimeout(() => setArmed(false), 4000)
     return () => clearTimeout(t)
   }, [armed])
-  if (next) return <button className="firec nx" disabled={disabled} onClick={onFire} title={`Fire the ${course} now`}>Fire · next</button>
   return armed
-    ? <button className="firec arm" disabled={disabled} onClick={() => { setArmed(false); onFire() }}>Fire {course} now?</button>
-    : <button className="firec" disabled={disabled} onClick={() => setArmed(true)} title={`Fire the ${course} out of order`}>Fire</button>
+    ? <button className="x arm" disabled={disabled} onClick={() => { setArmed(false); onCancel() }}>Cancel?</button>
+    : <button className="x" disabled={disabled} onClick={() => setArmed(true)} title="Cancel this dish (the kitchen has not started it)">✕</button>
 }
 
 function Veg({ veg }) { return <span className={'veg' + (veg === false ? ' nv' : '')} /> }
@@ -61,11 +66,16 @@ function Toast({ toast, onClose }) {
   const closeRef = useRef(onClose); closeRef.current = onClose
   useEffect(() => {
     if (!toast) return
-    const t = setTimeout(() => closeRef.current(), toast.err ? 6000 : 3500)
+    const t = setTimeout(() => closeRef.current(), toast.err ? 6000 : toast.undo ? 6000 : 3500)
     return () => clearTimeout(t)
   }, [toast])
   if (!toast) return null
-  return <div className={'toast' + (toast.err ? ' err' : '')}>{toast.text}<button onClick={onClose}>OK</button></div>
+  return (
+    <div className={'toast' + (toast.err ? ' err' : '')}>{toast.text}
+      {toast.undo && <button onClick={() => { const u = toast.undo; onClose(); u() }}>Undo</button>}
+      <button onClick={onClose}>OK</button>
+    </div>
+  )
 }
 
 export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, onChat, chatUnread = 0 }) {
@@ -268,6 +278,31 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
     setBusy(false)
   }
 
+  // A held dish never reached the kitchen: one tap removes it, Undo puts it back.
+  // Only while it is still held - if it was fired meanwhile (another tablet), nothing changes.
+  async function removeHeld(i) {
+    setBusy(true)
+    try {
+      const { data, error } = await supabase.from('ms_items').update({ state: 'cancelled', cancelled_at: new Date().toISOString() })
+        .eq('id', i.id).eq('state', 'held').select('id')
+      if (error) throw error
+      if (!data?.length) { setToast({ text: `${i.name} was just sent to the kitchen - not removed` }); liveQ.reload(); setBusy(false); return }
+      const canUndo = i.menu_item_id && dishById[i.menu_item_id]?.is_available !== false
+      setToast({ text: `${i.name} removed from C${i.cover_no}`, undo: canUndo ? async () => {
+        try {
+          await rpc('ms_hold', { p_event_id: ev.id, p_table_number: table, p_cover_no: i.cover_no, p_captain_id: captain.id,
+            p_items: [{ menu_item_id: i.menu_item_id, qty: i.qty, note: i.note || null }], p_client_ref: newRef() })
+          setToast({ text: `${i.name} is back on C${i.cover_no}` }); liveQ.reload()
+        } catch (e) { setToast({ text: errText(e), err: true }) }
+      } : null })
+      liveQ.reload()
+    } catch (e) { setToast({ text: errText(e), err: true }) }
+    setBusy(false)
+  }
+  // The captain cancels a fired dish while the kitchen has not started it (Received);
+  // once it is in preparation, only the Control Desk can cancel it
+  const canCancelFired = i => i.state === 'fired' && !i.served_at && ['new', 'received'].includes(kotById[i.kot_id]?.stage || 'new') && kotById[i.kot_id]?.status !== 'delivered'
+
   async function serveKots(kotIds) {
     setBusy(true)
     try {
@@ -420,7 +455,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
       <div className="cart">
         <div className="ch">
           <b>Full order · {tc(table, cover)}</b>
-          <small>Taken once, saved for the cover and fired course by course</small>
+          <small className="hint">Taken once, saved for the cover and fired course by course</small>
           {!isMine(cover) && <div className="helpout">Helping out: C{cover} is {ownerOf(cover) || 'another captain'}'s cover</div>}
           <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {seated.has(cover)
@@ -433,7 +468,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
             const its = coverItems.filter(i => i.course === c)
             const drs = draftRows.filter(r => r.dish.course === c)
             const anyHeld = its.some(i => i.state === 'held') || drs.length
-            const tag = anyHeld ? <FireCourse course={c || 'Other'} next={c === nc} disabled={busy} onFire={() => onSaveAndFire(c)} />
+            const tag = anyHeld ? (c ? <FireCourse course={c} next={c === nc} disabled={busy} onFire={() => onSaveAndFire(c)} /> : <span className="tagH">Held · fire from the course board</span>)
               : its.length && its.every(i => statusOf(i).cls === 'sv') ? <span className="tagF">Served</span>
               : <span className="tagK">Fired</span>
             return (
@@ -443,19 +478,27 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
                   const s = statusOf(i)
                   return (
                     <div className="it" key={i.id}>
-                      <Veg veg={i.veg} />{i.qty > 1 ? `${i.qty} × ` : ''}{i.name}{i.note && <span className="note">{i.note}</span>}
-                      <span className="k">{kitchenById[i.kitchen_id]?.name || ''}{i.state !== 'held' ? ` · ${s.label}` : ''}</span>
-                      {i.state === 'held' && <button className="x" disabled={busy} onClick={() => setSheet({ kind: 'cancelHeld', item: i })}>✕</button>}
+                      <div className="l1">
+                        <Veg veg={i.veg} /><span className="nm">{i.qty > 1 ? `${i.qty} × ` : ''}{i.name}</span>
+                        {i.state === 'held'
+                          ? <button className="x" disabled={busy} onClick={() => removeHeld(i)} title="Remove this dish">✕</button>
+                          : <>
+                              <span className={'chip ' + s.cls}>{s.label}</span>
+                              {canCancelFired(i) && <CancelFired disabled={busy} onCancel={() => cancelItems([i.id], i.name)} />}
+                            </>}
+                      </div>
+                      <div className="l2">{kitchenById[i.kitchen_id]?.name || ''}{i.note && <span className="note">{i.note}</span>}</div>
                     </div>
                   )
                 })}
                 {drs.map(r => (
                   <div className="it dr" key={'d' + r.id}>
-                    <Veg veg={r.dish.is_veg} /><span className="tagN">New</span>
-                    <span className="nm">{r.dish.name}</span>
-                    <span className="k">{r.dish.kitchenName}</span>
-                    <div className="st"><button className="m" onClick={() => setDraft(cover, cur => { cur[r.id] = { ...cur[r.id], qty: cur[r.id].qty - 1 } })}>−</button><span>{r.qty}</span><button className="m" onClick={() => addDish(r.id, 1)}>+</button></div>
-                    <div className="nline">
+                    <div className="l1">
+                      <Veg veg={r.dish.is_veg} /><span className="nm">{r.dish.name}</span>
+                      <div className="st"><button className="m" onClick={() => setDraft(cover, cur => { cur[r.id] = { ...cur[r.id], qty: cur[r.id].qty - 1 } })}>−</button><span>{r.qty}</span><button className="m" onClick={() => addDish(r.id, 1)}>+</button></div>
+                    </div>
+                    <div className="l2">
+                      <span className="tagN">Not saved</span>{r.dish.kitchenName}
                       {r.note && <span className="note">{r.note}</span>}
                       <button className="nbtn" onClick={() => setNoteOpen(o => o === r.id ? null : r.id)}>{noteOpen === r.id ? 'Done' : r.note ? 'Edit note' : '+ Note'}</button>
                     </div>
@@ -643,14 +686,8 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
       )}
       {view === 'take' ? takeOrder : board}
 
-      {sheet?.kind === 'cancelHeld' && (
-        <Sheet onClose={() => setSheet(null)} title={`Remove ${sheet.item.name}?`} text={`It is held for ${tc(table, sheet.item.cover_no)} and has not reached the kitchen.`}>
-          <button className="btn btn-red" disabled={busy} onClick={() => cancelItems([sheet.item.id], sheet.item.name)}>Remove dish</button>
-          <button className="btn btn-ghost" onClick={() => setSheet(null)}>Keep</button>
-        </Sheet>
-      )}
       {sheet?.kind === 'cell' && (
-        <CellSheet sheet={sheet} table={table} statusOf={statusOf} kotById={kotById} kitchenById={kitchenById} busy={busy}
+        <CellSheet sheet={sheet} table={table} statusOf={statusOf} kotById={kotById} kitchenById={kitchenById} busy={busy} canCancel={canCancelFired}
           onClose={() => setSheet(null)} onServe={serveKots} onRemake={remake} onCancel={cancelItems} />
       )}
       {sheet?.kind === 'menu' && (
@@ -690,7 +727,7 @@ export function Sheet({ title, text, children, onClose }) {
   )
 }
 
-function CellSheet({ sheet, table, statusOf, kotById, kitchenById, busy, onClose, onServe, onRemake, onCancel }) {
+function CellSheet({ sheet, table, statusOf, kotById, kitchenById, busy, canCancel, onClose, onServe, onRemake, onCancel }) {
   const its = sheet.items
   const toServe = [...new Set(its.filter(i => i.state === 'fired' && !i.served_at).map(i => i.kot_id).filter(Boolean))]
   // Remake and Cancel reach the kitchen at once, so each takes a second tap.
@@ -714,7 +751,7 @@ function CellSheet({ sheet, table, statusOf, kotById, kitchenById, busy, onClose
                   {i.state === 'fired' && (sure(i, 'remake')
                     ? <button className="btn btn-amber" style={{ padding: '4px 9px', fontSize: 12 }} disabled={busy} onClick={() => onRemake([i.id])}>Send remake</button>
                     : <button className="btn btn-ghost" style={{ padding: '4px 9px', fontSize: 12 }} disabled={busy} onClick={() => setAsk({ id: i.id, kind: 'remake' })}>Remake</button>)}
-                  {i.state === 'fired' && !i.served_at && (sure(i, 'cancel')
+                  {canCancel(i) && (sure(i, 'cancel')
                     ? <button className="btn btn-red" style={{ padding: '4px 9px', fontSize: 12 }} disabled={busy} onClick={() => onCancel([i.id], i.name)}>Cancel dish</button>
                     : <button className="btn btn-ghost" style={{ padding: '4px 9px', fontSize: 12, color: 'var(--red)' }} disabled={busy} onClick={() => setAsk({ id: i.id, kind: 'cancel' })}>Cancel</button>)}
                 </span>
@@ -722,7 +759,10 @@ function CellSheet({ sheet, table, statusOf, kotById, kitchenById, busy, onClose
             )
           })}
         </div>
-        {ask && <p style={{ fontSize: 12.5, color: ask.kind === 'cancel' ? 'var(--red)' : 'var(--ink)', margin: '0 0 10px' }}>
+        {its.some(i => i.state === 'fired' && !i.served_at && ['in_prep', 'ready'].includes(kotById[i.kot_id]?.stage) && kotById[i.kot_id]?.status === 'open') && !ask && (
+          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>A dish the kitchen is already preparing can be cancelled by the Control Desk.</p>
+        )}
+        {ask && its.some(i => i.id === ask.id && (ask.kind !== 'cancel' || canCancel(i))) && <p style={{ fontSize: 12.5, color: ask.kind === 'cancel' ? 'var(--red)' : 'var(--ink)', margin: '0 0 10px' }}>
           {ask.kind === 'cancel'
             ? 'Tap Cancel dish to confirm. The kitchen screen updates at once, and a CANCEL slip prints if the KOT was already printed.'
             : 'Tap Send remake to confirm. A new KOT marked REMAKE - PRIORITY goes to the kitchen.'}</p>}
