@@ -10,11 +10,15 @@ import path from 'node:path'
 import pg from 'pg'
 import {
   P, UserError, plural, loadConfig, requireCloudApi, requireCloudDb, cloudDbOptions, ensureLocal, readJson, writeJson,
-  isPrepared, serverRunning, eventLabel, fmtDateTime, isDevSnapshot,
+  isPrepared, serverRunning, eventLabel, fmtDateTime, isDevSnapshot, hasCloudDb,
 } from './common.mjs'
 import { refuseRoot, pgBins, ensureVcRuntime, ensurePostgrest, initCluster, withPostgres, connectLocal } from './runtime.mjs'
 import { readCloudSchema, buildLocalDatabase, tableColumns, schemaDrift, freshDatabase, grantAll, setupStatements } from './schema.mjs'
-import { chooseEvents, eventsById, downloadEventData, mediaUrls, downloadMedia, applyData, kitchensOf, prepareApp } from './data.mjs'
+import {
+  chooseEvents, eventsById, sqlUpcoming, downloadEventData, downloadEventDataApi, addCloudColumns, mediaUrls, downloadMedia,
+  applyData, kitchensOf, prepareApp,
+} from './data.mjs'
+import { CloudReader } from './cloudrest.mjs'
 import { countPending, uploadAll, describeUpload } from './upload.mjs'
 import { applyDbFiles, describeDbFiles, runSqlFile, STANDIN_SQL, DB_DIR } from './devdb.mjs'
 
@@ -96,6 +100,8 @@ export async function prepareCommand({ refresh = false, force = false, dev = fal
   }
   if (standin) return prepareStandin({ force })
   const cfg = loadConfig()
+  // No database connection string (the Offline Kit): everything through the API.
+  if (!dev && !hasCloudDb(cfg)) return prepareViaApi({ refresh, force, cfg })
   if (!dev) requireCloudApi(cfg) // the anon key is only used to upload, which test mode never does
   requireCloudDb(cfg)
   if (await serverRunning(cfg)) {
@@ -139,7 +145,7 @@ export async function prepareCommand({ refresh = false, force = false, dev = fal
     // This program only ever reads the cloud database. Make the connection
     // itself read-only, so not even a mistake here could change the cloud.
     await cloud.query('set default_transaction_read_only = on')
-    events = refresh ? await eventsById(cloud, snapBefore.events.map((e) => e.id)) : await chooseEvents(cloud, cfg, { optional: dev })
+    events = refresh ? await eventsById(cloud, snapBefore.events.map((e) => e.id)) : await chooseEvents(sqlUpcoming(cloud), cfg, { optional: dev })
     if (!events.length && !dev) throw new UserError('The prepared event no longer exists in the cloud. Run Prepare Event to choose again.')
     const ids = events.map((e) => e.id)
     for (const e of events) console.log(`  Event: ${eventLabel(e)}`)
@@ -285,6 +291,163 @@ export async function prepareCommand({ refresh = false, force = false, dev = fal
   console.log(refresh
     ? '\nNext: double-click "Start Local Server".'
     : '\nAt the venue, if the internet is bad: double-click "Refresh Event Data" (if there is any internet),\nthen "Start Local Server". See README.md, "Plan B".')
+}
+
+// Prepare Event / Refresh Event Data without the database password (Offline Kit).
+// The structure is the one this kit carries (dev/standin-schema.sql, kept in step
+// with the cloud, + the dated ../db updates); columns the cloud has gained since
+// are added from what it sends. The rows come through the API with the anon key.
+async function prepareViaApi({ refresh, force, cfg }) {
+  requireCloudApi(cfg)
+  if (await serverRunning(cfg)) {
+    throw new UserError('The Local Server is running. Stop it first (press Ctrl+C in its window), then run this again.')
+  }
+  if (refresh && !isPrepared()) {
+    throw new UserError('Nothing has been downloaded to this laptop yet. Run "Prepare Event" first (with internet).')
+  }
+  const snapBefore = readJson(P.snapshot, null)
+  if (refresh && isDevSnapshot(snapBefore)) {
+    throw new UserError('This laptop holds a TEST database, not an event.\nRun "Prepare Event" to download the real event first.')
+  }
+  const api = new CloudReader(cfg.cloud)
+  const t0 = Date.now()
+  const R = reporter()
+  const rep = R.rep
+  const step = stepper(6)
+  console.log(refresh
+    ? '\nREFRESH EVENT DATA - getting the latest orders and settings from the cloud\n'
+    : '\nPREPARE EVENT - downloading the event to this laptop\n')
+
+  step('Checking the programs...')
+  fs.mkdirSync(P.data, { recursive: true })
+  const pgb = await pgBins()
+  await ensureVcRuntime()
+  await ensurePostgrest(pgb)
+  const local = ensureLocal()
+  if (await initCluster(pgb, local)) console.log('  Local database created.')
+
+  step('Connecting to the cloud...')
+  const events = refresh
+    ? await api.eventsById(snapBefore.events.map((e) => e.id))
+    : await chooseEvents((from, to) => api.upcomingEvents(from, to), cfg)
+  if (!events.length) throw new UserError('The prepared event no longer exists in the cloud. Run Prepare Event to choose again.')
+  const ids = events.map((e) => e.id)
+  for (const e of events) console.log(`  Event: ${eventLabel(e)}`)
+
+  rep("JANU'S SMART SERVE - LOCAL SERVER - PREPARE REPORT")
+  rep(`Run:       ${refresh ? 'refresh (data only)' : 'full prepare'} through the cloud API (no database password)  ${fmtDateTime(new Date())}`)
+  rep(`Cloud:     ${cfg.cloud.url}`)
+  for (const e of events) rep(`Event:     ${eventLabel(e)}  id ${e.id}`)
+  rep()
+
+  let plan, media, kitchens, added = [], dbRes = []
+  await withPostgres(pgb, local, async () => {
+    await protectLocalChanges(local, cfg, snapBefore, force)
+    let localDbExists = true
+    try { const c = await connectLocal(local); await c.end() } catch { localDbExists = false }
+    rep('DATABASE STRUCTURE')
+    if (!refresh || !localDbExists) {
+      step('Building the database on this laptop...')
+      if (!fs.existsSync(STANDIN_SQL)) throw new UserError(`The kit's database structure is missing: ${STANDIN_SQL}\nDownload the offline kit again.`)
+      await freshDatabase(local)
+      const db = await connectLocal(local)
+      try {
+        for (const s of setupStatements()) await db.query(s.sql)
+        const base = await runSqlFile(db, STANDIN_SQL)
+        if (!base.ok) {
+          describeDbFiles([base], rep, () => {})
+          R.write()
+          throw new UserError(`The database structure could not be created (see ${P.report}).`, 1)
+        }
+        dbRes = await applyDbFiles(db, { migrationsOnly: true })
+        await grantAll(db)
+      } finally {
+        await db.end().catch(() => {})
+      }
+      rep('  Smart Serve structure from this kit, then its database updates:')
+      describeDbFiles(dbRes, rep, () => {})
+      const bad = dbRes.filter((r) => !r.ok)
+      if (bad.length) {
+        R.write()
+        throw new UserError(`The database on this laptop could not be completed: ${bad.map((r) => r.file).join(', ')} had errors.\n` +
+          `Details: ${P.report}\nDownload the offline kit again; if it happens again, send the report to the technical team.`, 1)
+      }
+      console.log('  Done.')
+    } else {
+      step('Checking the database structure...')
+      rep('  Kept from the last full prepare (refresh).')
+    }
+    rep()
+
+    step(refresh ? 'Downloading the latest data...' : 'Downloading the event data...')
+    const downloadedAt = new Date().toISOString()
+    const db = await connectLocal(local)
+    try {
+      plan = await downloadEventDataApi(api, ids, await tableColumns(db))
+      plan.downloadedAt = downloadedAt
+      added = await addCloudColumns(db, plan, api)
+      if (added.length) await grantAll(db)
+    } finally {
+      await db.end().catch(() => {})
+    }
+    if (added.length) {
+      rep('  Columns added on the laptop (new in the cloud since this kit was made):')
+      for (const a of added) rep(`    - ${a}`)
+    }
+
+    step('Downloading pictures and videos...')
+    media = await downloadMedia(mediaUrls(plan), { budgetMs: refresh ? 90000 : 0 })
+    console.log(`  ${media.total - media.failed.length} of ${media.total} on the laptop${media.failed.length ? ` (${media.failed.length} failed - see the report)` : ''}.`)
+
+    const db2 = await connectLocal(local)
+    try {
+      await applyData(db2, plan, media.map, ids)
+      kitchens = await kitchensOf(db2, ids)
+      rep('DATA (rows copied from the cloud)')
+      rep('  ' + plan.copy.map((p) => `${p.table} ${p.n}`).join(', '))
+      if (plan.notCopied.length) rep(`  Not copied: ${plan.notCopied.join(', ')}`)
+      if (kitchens.length) rep('  Kitchens: ' + kitchens.map((k) => `${k.name} (${k.prefix}) last KOT no. ${k.kot_seq}`).join(', '))
+      rep()
+    } finally {
+      await db2.end().catch(() => {})
+    }
+  })
+
+  rep('PICTURES AND VIDEOS')
+  rep(`  ${media.total - media.failed.length} of ${media.total} on the laptop (data/media), ${media.fetched} downloaded now.`)
+  for (const f of media.failed) rep(`    - FAILED ${f.url}: ${f.reason}  (the app keeps the internet address for this one)`)
+  rep()
+
+  step('Getting the app ready...')
+  const appInfo = prepareApp()
+  rep('APP')
+  rep(`  Build from ${fmtDateTime(appInfo.builtAt)} copied to localmode/app${appInfo.note ? ` - NOTE: ${appInfo.note}` : ''}`)
+  rep()
+  rep(`Finished in ${Math.round((Date.now() - t0) / 1000)} s.`)
+  R.write()
+
+  const counts = Object.fromEntries(plan.copy.map((p) => [p.table, p.n]))
+  writeJson(P.snapshot, {
+    downloadedAt: plan.downloadedAt,
+    kind: refresh ? 'refresh' : 'full',
+    mode: 'event',
+    source: 'api',
+    cloudUrl: cfg.cloud.url,
+    events: events.map((e) => ({ id: e.id, name: e.name, date: e.date, service_mode: e.service_mode, multi_kitchen: e.multi_kitchen, maestro: !!e.maestro })),
+    rowCounts: counts,
+    kitchens,
+    media: { total: media.total, failed: media.failed.length },
+    app: appInfo,
+  })
+
+  const n = (t) => counts[t] ?? 0
+  console.log(`\nDONE${refresh ? ' - data refreshed' : ''}: ${events.map((e) => e.name).join(' and ')} ${events.length > 1 ? 'are' : 'is'} on this laptop.`)
+  console.log(`  ${n('menu_items')} dishes, ${n('kitchens')} kitchens, ${n('captains')} captains, ${n('waiters')} waiters, ${n('orders')} orders so far.`)
+  console.log(`  Report: ${P.report}`)
+  if (isDevSnapshot(snapBefore)) console.log('  (The test database that was on this laptop has been replaced by the event.)')
+  console.log(refresh
+    ? '\nNext: start the Local Server.'
+    : '\nAt the venue, if the internet is bad: "Refresh Event Data" (if there is any internet),\nthen "Start Local Server" and "Start Print Hub".')
 }
 
 // "prepare --dev --standin": a test database without any cloud connection,

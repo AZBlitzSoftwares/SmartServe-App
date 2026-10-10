@@ -178,8 +178,8 @@ Phone/tablet on the **same Wi-Fi** as the Mac, browser to `http://<mac-ip>:8080`
 - [ ] Desk: Control -> **Kitchens** lists the six kitchens with their printers.
 
 **D. Smart Serve Maestro**
-- [ ] Device: **Captain** -> `Neha` / `7071` -> table 7 -> **Mark C1 seated** (nothing prints yet: the guest chooses every course).
-- [ ] **By course**: Soup from Oriental, Appetizer from Indian, Entrée from Italian, and so on to Dessert -> **Save & fire Soup**.
+- [ ] Device: **Captain** -> `Neha` / `7071` -> table 7 -> **Mark seated** on C1 (nothing prints yet: the guest chooses every course).
+- [ ] **By course**: Soup from Oriental, Appetizer from Indian, Entrée from Italian, and so on to Dessert -> **Save & fire Soup now**.
 - [ ] One KOT prints: the soup on Oriental (9102); every later course waits (held) until it is fired.
 - [ ] Kitchen PC: `http://<mac-ip>:8080/kitchen` -> `Rohit` / `6301` -> the Oriental KOT arrives already Received -> Start preparing -> Ready -> Handed over (that completes it; it moves to Done). Reprint prints it again; Entire kitchen shows (and can move) Barker B's KOTs too.
 - [ ] Captain: **Course board** -> tap the **Appetizer** heading -> **Fire** -> the Indian KOT prints on 9103.

@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { P, UserError, loadConfig, loadLocal, hasCloudApi, serverRunning } from './common.mjs'
+import { P, UserError, loadConfig, loadLocal, hasCloudApi, serverRunning, LAUNCHER } from './common.mjs'
 
 // Writes servers.local = { url, anonKey } into printhub/config.json and keeps
 // everything else. Only creates the file when asked to (create: true).
@@ -41,7 +41,7 @@ export async function printhubCommand(args) {
   const r = updatePrinthubConfig(local, cfg.port, { create: true, cloudAnonKey: hasCloudApi(cfg) ? cfg.cloud.anonKey : null })
   if (r.status === 'unreadable') throw new UserError(`printhub/config.json could not be read (${r.error}). Fix or delete it, then try again.`)
   if (!(await serverRunning(cfg))) {
-    console.log('Note: the Local Server is not running yet. Start it too ("Start Local Server");')
+    console.log(`Note: the Local Server is not running yet. Start it too ("${LAUNCHER.start}");`)
     console.log('the Print Hub keeps retrying until it answers.\n')
   }
   const child = spawn(process.execPath, [hub, '--server', 'local', ...args], { cwd: P.printhub, stdio: 'inherit' })

@@ -28,6 +28,10 @@ export const UPLOAD_TABLES = [
   ['table_carts', EVENT],
 ]
 
+// Tables where one row per thing is enforced besides the id (a cover is seated
+// once, a table has one cart).
+const NATURAL_KEYS = { ms_covers: 'event_id,table_number,cover_no', table_carts: 'event_id,table_number' }
+
 export const SKIPPED_NOTE = 'printed locally / not printed — uploaded from local server'
 
 const fingerprint = 'md5(row_to_json(t)::text)'
@@ -36,13 +40,17 @@ const fingerprint = 'md5(row_to_json(t)::text)'
 async function localInfo(db) {
   const { rows } = await db.query(`
     select c.relname as tbl, array_agg(a.attname::text) filter (where a.attgenerated = 's') as gen,
+           array_agg(a.attname::text order by a.attnum) as cols,
            bool_or(a.attname = 'id') as has_id, bool_or(a.attname = 'print_status') as has_print_status
       from pg_class c join pg_namespace n on n.oid = c.relnamespace
       join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
      where n.nspname = 'public' and c.relkind = 'r' and c.relname = any($1::text[])
      group by c.relname`, [UPLOAD_TABLES.map((t) => t[0])])
   const m = new Map()
-  for (const r of rows) if (r.has_id) m.set(r.tbl, { gen: r.gen || [], hasPrintStatus: r.has_print_status })
+  for (const r of rows) if (r.has_id) m.set(r.tbl, { gen: r.gen || [], cols: r.cols || [], hasPrintStatus: r.has_print_status, added: [] })
+  if ((await db.query("select to_regclass('ss_local.added_columns') as r")).rows[0].r) {
+    for (const r of (await db.query('select tbl, col from ss_local.added_columns')).rows) m.get(r.tbl)?.added.push(r.col)
+  }
   return m
 }
 
@@ -50,17 +58,27 @@ const dependsOnMissing = (where, info) =>
   (where.includes('public.orders') && !info.has('orders')) || (where.includes('public.sos_requests') && !info.has('sos_requests'))
 
 // Rows of one table that the cloud does not have in this exact state.
-async function changedRows(db, table, where, events, info) {
-  const { gen, hasPrintStatus } = info.get(table)
-  let json = 'to_jsonb(t) - $2::text[]'
+// drop: columns never sent (generated ones, and those the cloud does not have).
+// Columns this laptop added from the cloud (prepare without the database
+// password) are sent only when they hold a value: an explicit null would
+// override the cloud's default, or be refused where the column is NOT NULL.
+async function changedRows(db, table, where, events, info, drop = info.get(table).gen) {
+  const { hasPrintStatus, added } = info.get(table)
+  let base = 'to_jsonb(t) - $2::text[]'
+  if (added.length) {
+    const list = added.map((c) => `'${c.replace(/'/g, "''")}'`).join(', ')
+    base = `(to_jsonb(t) - $2::text[]) - coalesce((select array_agg(e.key) from jsonb_each(to_jsonb(t)) e
+              where e.key in (${list}) and e.value = 'null'::jsonb), '{}'::text[])`
+  }
+  let json = base
   let extra = ''
   if (table === 'kots' && hasPrintStatus) {
     // A KOT still waiting for the printer is sent once it is final. A failed
     // one goes up as "skipped" so no Print Hub on the cloud ever prints it.
     extra = " and t.print_status not in ('queued', 'printing')"
     json = `case when t.print_status = 'failed'
-                 then (to_jsonb(t) - $2::text[]) || jsonb_build_object('print_status', 'skipped', 'last_error', $3::text)
-                 else to_jsonb(t) - $2::text[] end`
+                 then (${base}) || jsonb_build_object('print_status', 'skipped', 'last_error', $3::text)
+                 else ${base} end`
   }
   const sql = `
     select t.id::text as id, ${fingerprint} as h, (${json})::text as j
@@ -68,7 +86,7 @@ async function changedRows(db, table, where, events, info) {
      where (${where})${extra}
        and not exists (select 1 from ss_local.uploaded u
                         where u.tbl = '${table}' and u.id = t.id::text and u.hash = ${fingerprint})`
-  const params = table === 'kots' && hasPrintStatus ? [events, gen, SKIPPED_NOTE] : [events, gen]
+  const params = table === 'kots' && hasPrintStatus ? [events, drop, SKIPPED_NOTE] : [events, drop]
   return (await db.query(sql, params)).rows
 }
 
@@ -113,7 +131,32 @@ async function markUploaded(db, table, rows) {
 }
 
 class CloudApi {
-  constructor(cloud) { this.base = cloud.url.replace(/\/+$/, '') + '/rest/v1/'; this.key = cloud.anonKey }
+  constructor(cloud) { this.base = cloud.url.replace(/\/+$/, '') + '/rest/v1/'; this.key = cloud.anonKey; this.missing = new Map() }
+
+  // Columns of the laptop's table that the cloud's table does not have (a
+  // column made only on the laptop, or one the cloud dropped). Asked by
+  // selecting them all: the cloud names the first unknown one; repeat.
+  // Anything unexpected = assume none missing (the rows say what is wrong).
+  async missingColumns(table, cols) {
+    if (this.missing.has(table)) return this.missing.get(table)
+    const missing = []
+    let rest = cols.slice()
+    for (let i = 0; i < 60 && rest.length; i++) {
+      try {
+        await this.call('GET', `${table}?select=${rest.map(encodeURIComponent).join(',')}&limit=0`, undefined, undefined, 15000)
+        break
+      } catch (e) {
+        if (e.offline) throw e
+        const m = /column\s+(?:"?[\w]+"?\.)?"?([\w]+)"?\s+does not exist/i.exec(e.message || '')
+        if (e.status !== 400 || !m || !rest.includes(m[1])) break
+        missing.push(m[1])
+        rest = rest.filter((c) => c !== m[1])
+      }
+    }
+    this.missing.set(table, missing)
+    if (missing.length) logLine('upload', `${table}: not in the cloud, not sent: ${missing.join(', ')}`)
+    return missing
+  }
 
   async call(method, pathq, body, prefer, timeoutMs = 30000) {
     let res
@@ -160,6 +203,18 @@ class CloudApi {
             ok.push(r)
           } catch (e2) {
             if (!e2.rowProblem) throw e2
+            // The same seat or cart was also made in the cloud (under another id),
+            // e.g. a cover seated there after the last refresh: merge on what it is.
+            const nk = NATURAL_KEYS[table]
+            if (nk && e2.status === 409 && mode === 'merge') {
+              try {
+                await this.call('POST', `${table}?on_conflict=${nk}`, '[' + r.j + ']', prefer)
+                ok.push(r)
+                continue
+              } catch (e3) {
+                if (!e3.rowProblem) throw e3
+              }
+            }
             failed.push({ table, id: r.id, error: e2.message })
           }
         }
@@ -188,7 +243,12 @@ export async function uploadAll(db, cloud, events, { all = false } = {}) {
     const has = (t) => info.has(t)
     const rowsOf = async (t) => {
       const where = UPLOAD_TABLES.find((x) => x[0] === t)[1]
-      return has(t) && !dependsOnMissing(where, info) ? changedRows(db, t, where, events, info) : []
+      if (!has(t) || dependsOnMissing(where, info)) return []
+      const rows = await changedRows(db, t, where, events, info)
+      if (!rows.length) return rows
+      // Never send a column the cloud does not have: it would refuse the whole row.
+      const missing = await api.missingColumns(t, info.get(t).cols.filter((c) => !info.get(t).gen.includes(c)))
+      return missing.length ? changedRows(db, t, where, events, info, [...info.get(t).gen, ...missing]) : rows
     }
     const send = async (t, rows, mode = 'merge') => {
       const ok = await api.push(t, rows, mode, result.failed)

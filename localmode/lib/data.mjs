@@ -9,6 +9,7 @@ import { P, REPO, qi, UserError, localDate, addDays, fmtDay, saveConfig } from '
 import { downloadFile } from './runtime.mjs'
 import { tableColumns } from './schema.mjs'
 import { resetUploadedBaseline } from './upload.mjs'
+import { missingTable, refused, inferType } from './cloudrest.mjs'
 
 const EV = 'event_id::text = any($1::text[])'
 const EVENT_COLS = `e.id::text as id, e.name, e.date::text as date, to_jsonb(e)->>'service_mode' as service_mode,
@@ -44,15 +45,21 @@ export async function eventsById(cloud, ids) {
   return rows
 }
 
+// The events dated from..to, read with the database connection (the
+// technical route; the Offline Kit reads them through the API instead).
+export const sqlUpcoming = (cloud) => async (from, to) =>
+  (await cloud.query(`select ${EVENT_COLS} from public.events e where e.date between $1 and $2 order by e.date, e.name`, [from, to])).rows
+
 // The operator picks the event(s) from the list of the coming days. The
 // choice is remembered in config.json and offered again (Enter keeps it), so
 // back-to-back events never download the wrong one by accident.
 // Test mode (optional = true): real events are an extra, Enter = none (the
 // demo events come from "ss-local.mjs demo"), and the choice is not remembered.
-export async function chooseEvents(cloud, cfg, { optional = false } = {}) {
+// listUpcoming(from, to): the events in that date range (database or API).
+export async function chooseEvents(listUpcoming, cfg, { optional = false } = {}) {
   const from = localDate(addDays(-1))
   const to = localDate(addDays(10))
-  const { rows } = await cloud.query(`select ${EVENT_COLS} from public.events e where e.date between $1 and $2 order by e.date, e.name`, [from, to])
+  const rows = await listUpcoming(from, to)
   if (!rows.length && optional) {
     console.log(`  No real events dated ${fmtDay(from)} to ${fmtDay(to)} in the cloud - fine for testing ("demo" makes test events).`)
     return []
@@ -175,6 +182,79 @@ export async function downloadEventData(cloud, eventIds, cloudTables) {
     throw e
   }
   return plan
+}
+
+// The same rows, read through the cloud's API with the anon key (Offline Kit:
+// no database password on the laptop). Each table is read on its own, so this
+// is not one snapshot like the database route; prepare runs before service,
+// and a refresh at the venue reads orders before their dishes and KOTs.
+const EVENT_TABLES = ['supervisors', 'tables', 'captains', 'waiters', 'kitchens', 'barkers', 'menu_categories', 'table_carts',
+  'orders', 'ms_covers', 'ms_firings', 'kots', 'ms_items', 'sos_requests', 'chat_messages', 'feedback']
+
+export async function downloadEventDataApi(api, eventIds, localTables) {
+  const copy = []
+  const notCopied = []
+  const got = {}
+  const ids = eventIds.join(',')
+  const read = async (t, fetchRows) => {
+    if (!localTables.has(t) || copy.some((p) => p.table === t)) return
+    let rows
+    try { rows = await fetchRows() } catch (e) {
+      if (missingTable(e)) { notCopied.push(`${t} (not in the cloud)`); return }
+      if (refused(e)) { notCopied.push(`${t} (the app's key may not read it)`); return }
+      throw new UserError(`Could not read ${t} from the cloud: ${e.message}`)
+    }
+    got[t] = rows
+    copy.push({ table: t, n: rows.length, json: JSON.stringify(rows), rows })
+  }
+  await read('admins', () => api.all('admins'))
+  await read('food_master', () => api.all('food_master'))
+  await read('events', () => api.all('events', `id=in.(${ids})`))
+  await read('help_items', () => api.all('help_items', `or=(event_id.in.(${ids}),event_id.is.null)`))
+  for (const t of EVENT_TABLES) await read(t, () => api.all(t, `event_id=in.(${ids})`))
+  await read('menu_items', () => api.allIn('menu_items', 'category_id', (got.menu_categories || []).map((r) => r.id)))
+  await read('order_items', () => api.allIn('order_items', 'order_id', (got.orders || []).map((r) => r.id)))
+  await read('sos_request_items', () => api.allIn('sos_request_items', 'sos_request_id', (got.sos_requests || []).map((r) => r.id)))
+  // Any newer table that belongs to an event
+  for (const [t, cols] of localTables) {
+    if (copy.some((p) => p.table === t) || notCopied.some((x) => x.startsWith(t + ' '))) continue
+    if (cols.some((c) => c.name === 'event_id')) await read(t, () => api.all(t, `event_id=in.(${ids})`))
+    else notCopied.push(t)
+  }
+  // Which columns the cloud sent, per table (a table with no rows: all local columns)
+  const cloudCols = {}
+  for (const p of copy) if (p.rows.length) cloudCols[p.table] = [...new Set(p.rows.flatMap((r) => Object.keys(r)))]
+  return { copy, notCopied, cloudCols, seqs: [] }
+}
+
+// Columns the cloud has and the laptop does not (added in the cloud after this
+// kit was made): add them here, typed from the values, so nothing is lost and
+// the app finds them. Uses the downloaded rows and one sample row per table.
+export async function addCloudColumns(db, plan, api) {
+  const local = await tableColumns(db)
+  const rowsOf = new Map()
+  for (const p of plan.copy) if (p.rows?.length) rowsOf.set(p.table, p.rows.slice(0, 2000))
+  for (const t of local.keys()) {
+    const s = await api.sample(t)
+    if (s?.length) rowsOf.set(t, [...(rowsOf.get(t) || []), ...s])
+  }
+  const added = []
+  // Remembered for the upload: an empty value in such a column is never sent,
+  // so the cloud keeps its own default (the laptop does not know it).
+  await db.query('create schema if not exists ss_local')
+  await db.query('create table if not exists ss_local.added_columns (tbl text not null, col text not null, primary key (tbl, col))')
+  for (const [t, rows] of rowsOf) {
+    if (!local.has(t)) continue
+    const have = new Set(local.get(t).map((c) => c.name))
+    for (const k of [...new Set(rows.flatMap((r) => Object.keys(r)))]) {
+      if (have.has(k)) continue
+      const type = inferType(rows.map((r) => r[k]))
+      await db.query(`alter table public.${qi(t)} add column if not exists ${qi(k)} ${type}`)
+      await db.query('insert into ss_local.added_columns (tbl, col) values ($1, $2) on conflict do nothing', [t, k])
+      added.push(`${t}.${k} (${type})`)
+    }
+  }
+  return added
 }
 
 // ---------------------------------------------------------------- pictures and videos
@@ -303,13 +383,18 @@ function runLogged(cmd, logName) {
 }
 
 // Copy the built app (repo/dist) to localmode/app, building it first if the
-// sources are newer than the last build.
+// sources are newer than the last build. The Offline Kit has no sources: its
+// dist is the ready-built app of the cloud it was downloaded from.
 export function prepareApp() {
   const dist = path.join(REPO, 'dist')
   const idx = path.join(dist, 'index.html')
-  const newest = Math.max(...['src', 'public', 'index.html', 'vite.config.js', 'package.json'].map((f) => newestMtime(path.join(REPO, f))))
+  const canBuild = fs.existsSync(path.join(REPO, 'src')) && fs.existsSync(path.join(REPO, 'package.json'))
+  const newest = canBuild ? Math.max(...['src', 'public', 'index.html', 'vite.config.js', 'package.json'].map((f) => newestMtime(path.join(REPO, f)))) : 0
   let note = ''
-  if (!fs.existsSync(idx) || fs.statSync(idx).mtimeMs < newest) {
+  if (!canBuild && !fs.existsSync(idx)) {
+    throw new UserError(`The app files are missing (${dist}).\nDownload the offline kit again (Control tab > Offline kit).`)
+  }
+  if (canBuild && (!fs.existsSync(idx) || fs.statSync(idx).mtimeMs < newest)) {
     if (!fs.existsSync(path.join(REPO, 'node_modules'))) {
       console.log('  Installing the app\'s parts (first time only, a few minutes)...')
       const r = runLogged('npm install --no-audit --no-fund', 'npm-install.log')
@@ -323,6 +408,8 @@ export function prepareApp() {
     }
   }
   fs.rmSync(P.app, { recursive: true, force: true })
-  fs.cpSync(dist, P.app, { recursive: true })
+  // dist/downloads holds the kits themselves: not needed on the laptop
+  const skip = path.join(dist, 'downloads')
+  fs.cpSync(dist, P.app, { recursive: true, filter: (src) => src !== skip && !src.startsWith(skip + path.sep) })
   return { builtAt: fs.statSync(idx).mtime.toISOString(), note }
 }
