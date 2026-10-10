@@ -27,9 +27,13 @@ Keep the Print Hub window open for the whole event. Closing it stops printing.
 
 ## The simple way: download it from the app
 
-Control Desk › Control tab › Event set-up › **Kitchens & printers** › **Print Hub: Download for Windows / Mac**.
-The download is built with every deploy and already carries the server address and key: install Node.js,
-unzip, double-click **Start Print Hub** (READ ME FIRST inside). Then **Find printers** lists every printer on
+Control Desk › Control tab › Event set-up › **Kitchens & printers** › **Print Hub: Download for Windows / Mac
+(Apple chip)**. The download is ONE program, built with every deploy (`tools/offline-kit.mjs`, Bun
+`--compile`), with the server address and key built in: nothing to install, double-click it and keep its window
+open (first start only: Windows "More info › Run anyway", Mac "Privacy & Security › Open Anyway" - the program is
+not code-signed). Logs go to `SmartServe Print Hub/logs` in the user's home folder. The same Print Hub for a
+laptop with Node.js (Intel Macs, or when the program is blocked) is offered next to it: unzip, double-click
+**Start Print Hub** (READ ME FIRST inside). Then **Find printers** lists every printer on
 that laptop's router; **Print a slip** shows which is which and **Use for a kitchen** assigns it, so no IP
 has to be typed. A printer on automatic addresses (DHCP) that comes back on a new address is followed by its
 MAC. Only one Print Hub may run per event (any running hub takes the event's KOTs); the desk warns when two

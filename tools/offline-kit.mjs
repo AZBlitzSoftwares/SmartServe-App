@@ -2,8 +2,10 @@
 // an event without internet into two downloads, served by the app itself:
 //   dist/downloads/SmartServe-Offline-Kit-Windows.zip
 //   dist/downloads/SmartServe-Offline-Kit-Mac.zip
-//   dist/downloads/SmartServe-Print-Hub-Windows.zip / -Mac.zip (the Print Hub
-//     alone, for every normal day: one laptop on the printers' router)
+//   dist/downloads/SmartServe-Print-Hub.exe / SmartServe-Print-Hub-Mac.zip (the Print
+//     Hub as one program, nothing to install: one laptop on the printers' router)
+//   dist/downloads/SmartServe-Print-Hub-Windows-Node.zip / -Mac-Node.zip (the same
+//     Print Hub for a laptop with Node.js: Intel Macs, or if the program is blocked)
 //   dist/downloads/offline-kit.json   (what the Control tab shows)
 // The laptop needs only Node.js: no Git, no build, no database password. The
 // kit carries the built app, the local server, the Print Hub, the database
@@ -13,6 +15,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
+import os from 'node:os'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -280,6 +284,52 @@ function hubEntries(os) {
   return [...[...dirs].sort().map((d) => ({ name: d, dir: true })), ...entries]
 }
 
+// ---------------------------------------------------------------- Print Hub as one program
+// Bun turns the Print Hub into a single program for Windows and for Macs with Apple chips,
+// with this cloud's address and public key built in: download, double-click, done. Built on
+// any machine (Bun cross-compiles). Without Bun, or if a build fails, only the Node.js
+// version is offered.
+const APP_TARGETS = [
+  { os: 'windows', target: 'bun-windows-x64', file: 'SmartServe-Print-Hub.exe' },
+  { os: 'mac', target: 'bun-darwin-arm64', file: 'SmartServe-Print-Hub-Mac.zip', inZip: 'SmartServe Print Hub' },
+]
+function bunBinary() {
+  const b = path.join(ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'bun.exe' : 'bun')
+  return fs.existsSync(b) ? b : null
+}
+function buildApps() {
+  const bun = bunBinary()
+  if (!bun) { console.warn('print hub app: Bun not installed - only the Node.js version'); return [] }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-printhub-'))
+  const out = []
+  try {
+    const ph = (f) => path.join(ROOT, 'printhub', f).split(path.sep).join('/')
+    const entry = path.join(tmp, 'entry.mjs')
+    fs.writeFileSync(entry, `import ${JSON.stringify(ph('app-flag.mjs'))}\n` +
+      `import { main } from ${JSON.stringify(ph('printhub.mjs'))}\n` +
+      `main({ embedded: ${JSON.stringify({ url: CLOUD_URL, anonKey: ANON_KEY })} })\n`)
+    for (const t of APP_TARGETS) {
+      const bin = path.join(tmp, t.target + (t.os === 'windows' ? '.exe' : ''))
+      const r = spawnSync(bun, ['build', '--compile', `--target=${t.target}`, entry, '--outfile', bin], { encoding: 'utf8', timeout: 600_000 })
+      if (r.status !== 0 || !fs.existsSync(bin)) {
+        console.warn(`print hub app: ${t.target} NOT built (${(r.stderr || r.error?.message || '').trim().split('\n').pop()})`)
+        continue
+      }
+      const data = t.inZip
+        ? makeZip([{ name: t.inZip, data: fs.readFileSync(bin), exec: true }])
+        : fs.readFileSync(bin)
+      fs.writeFileSync(path.join(OUT, t.file), data)
+      out.push({ os: t.os, kind: 'app', file: t.file, bytes: data.length })
+      console.log(`print hub app: ${t.file} ${(data.length / 1048576).toFixed(1)} MB`)
+    }
+  } catch (e) {
+    console.warn(`print hub app: NOT built (${e.message})`)
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+  return out
+}
+
 // ---------------------------------------------------------------- main
 // A problem with the kit never stops the app's own deploy: it only leaves the
 // kit out of this build (the Control tab then says so).
@@ -297,12 +347,13 @@ try {
       fs.writeFileSync(path.join(OUT, file), buf)
       info.kits.push({ os, file, bytes: buf.length })
       console.log(`offline kit: ${file} ${(buf.length / 1048576).toFixed(1)} MB`)
-      const hubFile = `SmartServe-Print-Hub-${label}.zip`
+      const hubFile = `SmartServe-Print-Hub-${label}-Node.zip`
       const hub = makeZip(hubEntries(os))
       fs.writeFileSync(path.join(OUT, hubFile), hub)
-      info.printhub.push({ os, file: hubFile, bytes: hub.length })
-      console.log(`print hub: ${hubFile} ${(hub.length / 1024).toFixed(0)} KB`)
+      info.printhub.push({ os, kind: 'node', file: hubFile, bytes: hub.length })
+      console.log(`print hub (Node.js): ${hubFile} ${(hub.length / 1024).toFixed(0)} KB`)
     }
+    info.printhub.unshift(...buildApps())
     fs.writeFileSync(path.join(OUT, 'offline-kit.json'), JSON.stringify(info, null, 2) + '\n')
   }
 } catch (e) {
