@@ -406,7 +406,7 @@
   .ms .dlist{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
 }
 
-/* ---------- Captain: My covers | Whole table ---------- */
+/* ---------- Captain: My covers | All covers ---------- */
 .ms .scope{display:flex;background:var(--slatel);border-radius:10px;padding:3px;flex:none}
 .ms .scope button{border:0;background:transparent;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:800;color:var(--slate);white-space:nowrap}
 .ms .scope button.a{background:var(--navy);color:#fff}

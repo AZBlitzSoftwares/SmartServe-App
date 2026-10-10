@@ -5,7 +5,7 @@
                     Received -> In Preparation -> Ready, then Handed over when
                     the plate leaves with a steward: that completes the KOT.
                     A KOT is marked received as soon as it reaches the screen.
-     Whole kitchen  every open KOT of both barkers, with the same buttons, so
+     Entire kitchen every open KOT of both barkers, with the same buttons, so
                     one barker can carry on for the other when needed.
      Done           KOTs handed over this service, with their times, and the
                     barker's counts (handed over, average time, late).
@@ -111,7 +111,7 @@ function KitchenScreen({ session, onSignOut }) {
   const { barker, event } = session
   const kitchenId = barker.kitchen_id
   const [view, setView] = useState('mine')           // mine | whole | done
-  const [doneScope, setDoneScope] = useState('mine')  // Done view: my KOTs or the whole kitchen
+  const [doneScope, setDoneScope] = useState('mine')  // Done view: my KOTs or the entire kitchen
   // Card size for this screen: small cards fit more KOTs on a monitor up close, large ones read
   // from across the kitchen on a TV. Remembered on this screen.
   const [size, setSize] = useState(() => { try { return localStorage.getItem('ms_kd_size') || 'M' } catch { return 'M' } })
@@ -200,10 +200,10 @@ function KitchenScreen({ session, onSignOut }) {
   }, [d, view, barker.side])
 
   // Chime when a KOT arrives that this screen shows (the barker's own, or the
-  // whole kitchen's while that view is open)
+  // entire kitchen's while that view is open)
   useEffect(() => {
     if (!d) return
-    // Every KOT of the kitchen counts as seen once loaded, so opening Whole kitchen later
+    // Every KOT of the kitchen counts as seen once loaded, so opening Entire kitchen later
     // does not chime for KOTs that were already there
     const all = (d.kots || []).map(k => k.id)
     if (seenKots.current) {
@@ -319,14 +319,14 @@ function KitchenScreen({ session, onSignOut }) {
 
   // A plain render function, not a component: a component declared in here
   // would be a new type on every one-second tick and remount every card.
-  // Whole kitchen has the same buttons: a barker can act on the other barker's KOTs.
+  // Entire kitchen has the same buttons: a barker can act on the other barker's KOTs.
   const card = (k, whole) => {
     const n = NEXT_ACTION[k.stage]
     return (
       <div key={k.id} className={'tl ' + cls(k) + (picked.has(k.id) ? ' pk' : '')}
         onClick={e => { if (e.target.tagName !== 'BUTTON') pick(k) }} style={{ cursor: 'pointer' }}>
         <div className="tr">
-          {/* Whole kitchen: the KOT number in the barker's colour (blue A, gold B) */}
+          {/* Entire kitchen: the KOT number in the barker's colour (blue A, gold B) */}
           <b className={whole ? ((k.barker || 'A') === 'A' ? 'ka' : 'kb') : undefined}>{k.kot_no}</b>
           <span className="cvb">T{k.table_number}·C{k.cover_no}</span>
           {k.course && <span className="crs" title={k.course}>{crsLabel(k.course)}</span>}
@@ -368,11 +368,11 @@ function KitchenScreen({ session, onSignOut }) {
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <div className="brandmk"><div className="lt"><img src={logo} alt="" /></div></div>
           <div className="brandsep" style={{ margin: '0 12px' }} />
-          <h1>{title} <span>· {view === 'whole' ? 'Whole kitchen' : view === 'done' ? 'Done this service' : `Barker ${barker.side} · ${barker.name}`}</span></h1>
+          <h1>{title} <span>· {view === 'whole' ? 'Both barkers' : view === 'done' ? 'Done this service' : `Barker ${barker.side} · ${barker.name}`}</span></h1>
         </div>
         <div className="seg">
           <button className={view === 'mine' ? 'a' : ''} onClick={() => { setView('mine'); setPicked(new Set()) }}>My dishes ({barker.side})</button>
-          <button className={view === 'whole' ? 'a' : ''} onClick={() => setView('whole')}>Whole kitchen</button>
+          <button className={view === 'whole' ? 'a' : ''} onClick={() => setView('whole')}>Entire kitchen</button>
           <button className={view === 'done' ? 'a' : ''} onClick={() => { setView('done'); setPicked(new Set()) }}>Done · {doneMine.length}</button>
         </div>
         <div className="cnt">
@@ -405,13 +405,13 @@ function KitchenScreen({ session, onSignOut }) {
         <div className="donev">
           <div className="dsum">
             <div className="c"><b>{doneMine.length}</b>My dishes ({barker.side}) handed over</div>
-            <div className="c"><b>{doneAll.length}</b>Whole kitchen</div>
+            <div className="c"><b>{doneAll.length}</b>Entire kitchen</div>
             <div className="c"><b>{mmss(avgOf(doneList.map(tReady)))}</b>Avg firing → ready</div>
             <div className="c"><b>{mmss(avgOf(doneList.map(tOut)))}</b>Avg firing → handed over</div>
             <div className={'c' + (doneList.some(wasLate) ? ' r' : '')}><b>{doneList.filter(wasLate).length}</b>Late (over {late} min)</div>
             <div className="seg sm" style={{ marginLeft: 'auto' }}>
               <button className={doneScope === 'mine' ? 'a' : ''} onClick={() => setDoneScope('mine')}>Mine</button>
-              <button className={doneScope === 'whole' ? 'a' : ''} onClick={() => setDoneScope('whole')}>Whole kitchen</button>
+              <button className={doneScope === 'whole' ? 'a' : ''} onClick={() => setDoneScope('whole')}>Entire kitchen</button>
             </div>
           </div>
           <div className="dtw">

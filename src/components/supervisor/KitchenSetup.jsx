@@ -1499,7 +1499,7 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount,
         sub={'Everything about captains is here: name, sign-in PIN, the table they serve'
           + (tableCount ? ' (1–' + tableCount + ')' : '') + ' and, when two captains share a table, the covers each one looks after (1–'
           + coverCount + '). On the tablet a captain signs in with name and PIN; the event, table and covers are found automatically.'
-          + ' A captain sees their own covers first and can open the other covers when needed.'} />
+          + ' A captain sees their own covers first and taps All covers when needed.'} />
 
       {msg && <Banner tone={msg.tone} onClose={() => setMsg(null)}>{msg.text}</Banner>}
 

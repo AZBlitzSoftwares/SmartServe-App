@@ -60,13 +60,13 @@ function CancelFired({ disabled, onCancel }) {
 
 function Veg({ veg }) { return <span className={'veg' + (veg === false ? ' nv' : '')} /> }
 
-// My covers | Whole table (like My dishes | Whole kitchen on the kitchen screen)
+// My covers | All covers (like My dishes | Entire kitchen on the kitchen screen)
 function Scope({ myRange, showAll, onToggle }) {
   if (!myRange) return null
   return (
     <div className="scope">
       <button className={showAll ? '' : 'a'} onClick={() => showAll && onToggle()}>My covers · {rangeText(myRange)}</button>
-      <button className={showAll ? 'a' : ''} onClick={() => !showAll && onToggle()}>Whole table</button>
+      <button className={showAll ? 'a' : ''} onClick={() => !showAll && onToggle()}>All covers</button>
     </div>
   )
 }
@@ -113,7 +113,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
   const [sheet, setSheet] = useState(null)
   const [pickTable, setPickTable] = useState(false)
   const [noteOpen, setNoteOpen] = useState(null)   // draft row whose note chips are showing
-  const [showAll, setShowAll] = useState(false)     // Whole table: the other captain's covers as well
+  const [showAll, setShowAll] = useState(false)     // All covers: the other captain's covers as well
   // Order panel: pinned = always shown; unpinned = a one-line bar that opens on a tap and hides again
   // while the captain picks dishes. Remembered on the tablet.
   const [pinned, setPinned] = useState(() => { try { return localStorage.getItem('ms_order_pinned') !== '0' } catch { return true } })
@@ -682,7 +682,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain, on
         <div className="pace">
           {pace.length ? pace.slice(0, 8).map((p, i) => <div key={i}><b>C{p.c}</b> {p.t}</div>) : <span className="muted">Seat covers and fire the first course to see the pace here.</span>}
         </div>
-        <div className="pace" style={{ background: '#FFF8E6' }}><b>Flexible sequence:</b> fire one dish, a whole course, or two courses together, for one cover or several.</div>
+        <div className="pace" style={{ background: '#FFF8E6' }}><b>Flexible sequence:</b> fire one dish, a full course, or two courses together, for one cover or several.</div>
         <button className="btn btn-ghost" disabled={busy || visibleCovers.every(c => seated.has(c))} onClick={seatAll}>{myRange && !showAll ? `Seat my covers (${rangeText(myRange)})` : 'Seat all covers'}{autoFirst ? ` · fires ${firstCourse}` : ''}</button>
       </div>
     </div>
