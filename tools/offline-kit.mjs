@@ -15,7 +15,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
-import os from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
@@ -300,7 +299,10 @@ function bunBinary() {
 function buildApps() {
   const bun = bunBinary()
   if (!bun) { console.warn('print hub app: Bun not installed - only the Node.js version'); return [] }
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-printhub-'))
+  // Bun writes the program next to its working folder and then renames it into place: keep the
+  // working folder, the entry and the output on the project's own disk (on Vercel /tmp is another
+  // disk and the rename fails)
+  const tmp = fs.mkdtempSync(path.join(ROOT, '.printhub-build-'))
   const out = []
   try {
     const ph = (f) => path.join(ROOT, 'printhub', f).split(path.sep).join('/')
@@ -310,7 +312,7 @@ function buildApps() {
       `main({ embedded: ${JSON.stringify({ url: CLOUD_URL, anonKey: ANON_KEY })} })\n`)
     for (const t of APP_TARGETS) {
       const bin = path.join(tmp, t.target + (t.os === 'windows' ? '.exe' : ''))
-      const r = spawnSync(bun, ['build', '--compile', `--target=${t.target}`, entry, '--outfile', bin], { encoding: 'utf8', timeout: 600_000 })
+      const r = spawnSync(bun, ['build', '--compile', `--target=${t.target}`, entry, '--outfile', bin], { cwd: tmp, encoding: 'utf8', timeout: 600_000 })
       if (r.status !== 0 || !fs.existsSync(bin)) {
         console.warn(`print hub app: ${t.target} NOT built (${(r.stderr || r.error?.message || '').trim().split('\n').pop()})`)
         continue
