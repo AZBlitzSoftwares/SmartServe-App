@@ -1154,7 +1154,7 @@ export function parseArgs(argv) {
  * Read config.json (create it from config.example.json the first time) and
  * apply command-line flags. Returns { ok: true, options } or { ok: false, message }.
  */
-export function loadConfig({ dir = HERE, argv = [] } = {}) {
+export function loadConfig({ dir = HERE, argv = [], embedded = null } = {}) {
   let args;
   try {
     args = parseArgs(argv);
@@ -1166,7 +1166,10 @@ export function loadConfig({ dir = HERE, argv = [] } = {}) {
   }
   const file = path.join(dir, 'config.json');
   const example = path.join(dir, 'config.example.json');
-  if (!fs.existsSync(file)) {
+  // The one-file program carries this cloud's address and key; a config.json next to its
+  // logs (if someone made one) still wins.
+  const useEmbedded = embedded && !fs.existsSync(file);
+  if (!useEmbedded && !fs.existsSync(file)) {
     try {
       fs.copyFileSync(example, file);
     } catch (e) {
@@ -1184,7 +1187,9 @@ export function loadConfig({ dir = HERE, argv = [] } = {}) {
   let cfg;
   try {
     // tolerate a BOM (Notepad) and curly quotes (TextEdit smart quotes)
-    cfg = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\ufeff/, '').replace(/[\u201c\u201d]/g, '"'));
+    cfg = useEmbedded
+      ? { use: 'cloud', servers: { cloud: { url: embedded.url, anonKey: embedded.anonKey } }, eventId: 'auto' }
+      : JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\ufeff/, '').replace(/[\u201c\u201d]/g, '"'));
   } catch (e) {
     return {
       ok: false,
@@ -1239,31 +1244,69 @@ function keepAwake() {
   }
 }
 
-function main() {
+// The one-file program (tools/offline-kit.mjs builds it) leaves its window open after a
+// problem, so the message can be read before the window closes.
+function waitForEnter(text) {
+  return new Promise((resolve) => {
+    process.stdout.write(text);
+    try {
+      process.stdin.resume();
+      process.stdin.once('data', () => resolve());
+      process.stdin.once('end', () => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}
+
+/**
+ * Start the hub from the command line (node printhub.mjs), or as the one-file program:
+ * app = { embedded: { url, anonKey } } - settings built in, logs in the home folder
+ * ("SmartServe Print Hub/logs"), and the window stays open after a problem.
+ */
+export async function main(app = null) {
+  const dataDir = app ? path.join(os.homedir(), 'SmartServe Print Hub') : HERE;
   const major = Number(process.versions.node.split('.')[0]);
   if (major < 18 || typeof fetch !== 'function') {
     console.error(`This needs Node.js 18 or newer (this laptop has ${process.version}).`);
     console.error('Install the LTS version from https://nodejs.org and start again.');
     process.exit(2);
   }
-  const cfg = loadConfig({ argv: process.argv.slice(2) });
+  // the program is double-clicked: no options (and none taken from the environment)
+  const cfg = loadConfig(app ? { argv: [], dir: dataDir, embedded: app.embedded } : { argv: process.argv.slice(2) });
   if (!cfg.ok) {
     console.log(`\n${cfg.help ? '' : 'PRINT HUB NOT STARTED\n\n'}${cfg.message}\n`);
+    if (app && !cfg.help) await waitForEnter('Press Enter to close this window...');
     process.exit(cfg.help ? 0 : 2); // 2 = settings problem: the launcher does not restart
   }
-  const display = process.stdout.isTTY ? 'board' : 'lines';
+  // the full-screen board needs a terminal that understands colours and cursor moves; the old
+  // Windows console (no Windows Terminal) gets the plain line-by-line log instead
+  const oldWindowsConsole = app && process.platform === 'win32' && !process.env.WT_SESSION;
+  const display = process.stdout.isTTY && !oldWindowsConsole ? 'board' : 'lines';
   if (display === 'lines') {
+    if (app) {
+      console.log('SMART SERVE PRINT HUB');
+      console.log('Keep this window open during the event: it sends every KOT to the kitchen printers.');
+      console.log('Close the window to stop printing. Keep the laptop plugged in and awake.');
+      if (oldWindowsConsole) {
+        console.log('Tip: minimise this window. If you click inside it and text turns white (selected),');
+        console.log('press Esc - while text is selected, Windows pauses this window and printing waits.');
+      }
+      console.log('');
+    }
     console.log(`Print Hub starting - server ${cfg.options.serverName} (${cfg.options.url}), hub "${cfg.options.hubName}"`);
   }
+  if (app) process.title = 'SmartServe Print Hub';
   keepAwake();
-  const stop = startHub({ ...cfg.options, display });
+  const logDir = path.join(dataDir, 'logs');
+  const stop = startHub({ ...cfg.options, display, logDir });
 
   // Never crash at an event: log anything unexpected and keep going.
   const logCrash = (e) => {
     try {
       const d = new Date();
-      fs.mkdirSync(path.join(HERE, 'logs'), { recursive: true });
-      fs.appendFileSync(path.join(HERE, 'logs', `printhub-${localDate(d)}.log`), `${d.toISOString()} CRASH-AVOIDED ${e?.stack || e}\n`);
+      fs.mkdirSync(logDir, { recursive: true });
+      fs.appendFileSync(path.join(logDir, `printhub-${localDate(d)}.log`), `${d.toISOString()} CRASH-AVOIDED ${e?.stack || e}\n`);
     } catch {
       /* ignore */
     }
@@ -1291,4 +1334,5 @@ const isMain = (() => {
     return false;
   }
 })();
-if (isMain) main();
+// the one-file program imports this file and calls main() itself (printhub/app-flag.mjs)
+if (isMain && !globalThis.__SS_APP) main();

@@ -3,6 +3,7 @@ import MaestroSetup, { MaestroPreService } from '../../maestro/MaestroSetup'
 import { supabase } from '../../lib/supabase'
 import { tableRanges } from '../../maestro/msData'
 import { useKitInfo, mb } from '../../lib/kitInfo'
+import { eposTestPrint, EPOS_HOST } from '../../lib/eposPrint'
 
 /* Kitchens set-up for a Captain + Multi-Kitchen event.
 
@@ -853,24 +854,93 @@ const ago = (t, now) => {
 const splitIp = ip => { const m = String(ip || '').match(/^(.+):(\d+)$/); return m ? { host:m[1], port:Number(m[2]) } : { host:String(ip || ''), port:9100 } }
 const keyOf = (ip, port) => { const e = splitIp(ip); const p = /:\d+$/.test(String(ip || '')) ? e.port : Number(port) || 9100; return e.host ? (p === 9100 ? e.host : e.host + ':' + p) : null }
 
-/* The Print Hub for a normal day, built with every deploy (tools/offline-kit.mjs):
-   one double-click on the laptop connected to the printers' router. */
+/* The Print Hub for a normal day, built with every deploy (tools/offline-kit.mjs): one
+   program, nothing to install, on the laptop connected to the printers' router. The Node.js
+   version stays as a fallback (Intel Macs, or a laptop that blocks the program). */
+const hubLink = { fontWeight:800, color:'var(--ink)', whiteSpace:'nowrap' }
 function PrintHubDownload() {
   const kit = useKitInfo()
   const files = kit && Array.isArray(kit.printhub) ? kit.printhub : []
   if (!files.length) return null
+  const app = os => files.find(x => x.os === os && x.kind === 'app')
+  const node = os => files.find(x => x.os === os && x.kind !== 'app')
+  const apps = [['windows', 'Windows'], ['mac', 'Mac (Apple chip)']].filter(([os]) => app(os))
   return (
-    <div data-testid="printhub-download" style={{ display:'flex', alignItems:'center', gap:'6px 12px', flexWrap:'wrap', marginTop:10,
-      fontSize:12.5, color:'var(--ink2)', lineHeight:1.5 }}>
-      <span><b style={{ color:'var(--ink)' }}>Print Hub:</b> runs on one laptop connected to the printers’ router (needs Node.js).</span>
-      {[['windows', 'Windows'], ['mac', 'Mac']].map(([os, label]) => {
-        const f = files.find(x => x.os === os)
-        return f && (
-          <a key={os} href={`/downloads/${f.file}`} download data-testid={`hub-${os}`}
-            style={{ fontWeight:800, color:'var(--ink)', whiteSpace:'nowrap' }}>⬇ Download for {label}
-            <span style={{ fontWeight:600, opacity:0.7 }}> ({mb(f.bytes)})</span></a>
-        )
-      })}
+    <div data-testid="printhub-download" style={{ marginTop:10, fontSize:12.5, color:'var(--ink2)', lineHeight:1.55 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'6px 14px', flexWrap:'wrap' }}>
+        <span><b style={{ color:'var(--ink)' }}>Print Hub:</b> runs on one laptop connected to the printers’ router.
+          {apps.length ? ' Download, double-click, keep its window open and the laptop plugged in and awake. Nothing to install.' : ' Needs Node.js.'}</span>
+        {(apps.length ? apps : [['windows', 'Windows'], ['mac', 'Mac']]).map(([os, label]) => {
+          const f = apps.length ? app(os) : node(os)
+          return f && (
+            <a key={os} href={`/downloads/${f.file}`} download data-testid={`hub-${os}`} style={hubLink}>⬇ Download for {label}
+              <span style={{ fontWeight:600, opacity:0.7 }}> ({mb(f.bytes)})</span></a>
+          )
+        })}
+      </div>
+      {apps.length > 0 && (
+        <div style={{ fontSize:11.5, marginTop:4 }}>
+          First start only: Windows may say “Windows protected your PC” › <b>More info</b> › <b>Run anyway</b>. Mac: double-click,
+          then System Settings › Privacy &amp; Security › <b>Open Anyway</b>.
+          {(node('windows') || node('mac')) && <> Intel Mac, or the program is blocked? The Node.js version:{' '}
+            {node('windows') && <a href={`/downloads/${node('windows').file}`} download data-testid="hub-node-windows" style={hubLink}>Windows</a>}
+            {node('windows') && node('mac') && ' · '}
+            {node('mac') && <a href={`/downloads/${node('mac').file}`} download data-testid="hub-node-mac" style={hubLink}>Mac</a>}
+            {' '}(install Node.js first).</>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* Printing without the Print Hub, straight from this browser (Epson web printing). A test
+   for now: it shows whether this laptop, this browser and this printer allow it. */
+function BrowserTestPrint({ kitchens }) {
+  const guess = (kitchens.map(k => String(k.printer_ip || '').trim()).find(ip => ip && !ip.startsWith('127.')) || '')
+  const [open, setOpen] = useState(false)
+  const [typed, setHost] = useState(null)   // null until something is typed: then the kitchens' printer
+  const host = typed ?? guess
+  const [busy, setBusy] = useState(false)
+  const [res, setRes] = useState(null)   // { ok, kind, text, secure }
+  async function run(secure) {
+    setBusy(true); setRes(null)
+    const r = await eposTestPrint(host, { secure })
+    setBusy(false); setRes({ ...r, secure })
+  }
+  const h = host.trim()
+  return (
+    <div data-testid="browser-print" style={{ marginTop:10, fontSize:12.5, color:'var(--ink2)' }}>
+      <button onClick={() => setOpen(o => !o)} style={{ background:'none', border:'none', padding:0, color:'var(--ink)', fontWeight:800,
+        fontSize:12.5, cursor:'pointer', textDecoration:'underline' }}>{open ? 'Hide' : 'Try'} printing without the Print Hub (test)</button>
+      {open && (
+        <div style={{ marginTop:8, border:'1.5px dashed var(--line)', borderRadius:10, padding:'10px 12px', lineHeight:1.55 }}>
+          <div>Epson printers can print straight from a web page. On the laptop at the venue (same router as the printer),
+            type the printer’s address and press the button. If Chrome asks to look for <b>devices on your local network</b>, click <b>Allow</b>.</div>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center', marginTop:8 }}>
+            <input value={host} onChange={e => { setHost(e.target.value.replace(/[^\d.:]/g, '')); setRes(null) }} placeholder="192.168.0.201"
+              aria-label="Printer address" inputMode="decimal" style={{ ...input, width:170, height:34 }} />
+            <button disabled={busy || !EPOS_HOST.test(h)} onClick={() => run(false)} data-testid="browser-print-go"
+              style={{ ...btn, height:34, padding:'0 12px', fontSize:12.5 }}>{busy ? 'Printing…' : '🖨 Test print from this browser'}</button>
+          </div>
+          {res && (
+            <div data-testid="browser-print-result" style={{ marginTop:8 }}>
+              <Banner tone={res.ok ? 'ok' : 'warn'}>
+                {res.ok
+                  ? <>A slip printed straight from this browser{res.secure ? ' (secure connection)' : ''}. This printer can print without the Print Hub
+                    from this laptop: tell us “browser print works”.</>
+                  : res.kind === 'blocked'
+                    ? <>The browser did not let the slip out, or nothing answered at {h}. Try: (1) update Chrome (⋮ › Help › About Google Chrome),
+                      then press the button again and click <b>Allow</b> when Chrome asks about your local network; (2) or open{' '}
+                      <a href={`https://${h}`} target="_blank" rel="noreferrer">https://{h}</a>, click Advanced › Proceed, come back and{' '}
+                      <button onClick={() => run(true)} style={{ background:'none', border:'none', padding:0, color:'inherit', fontWeight:800,
+                        textDecoration:'underline', cursor:'pointer', fontSize:'inherit' }}>try the secure connection</button>.
+                      <div style={{ fontSize:11, marginTop:4, opacity:0.8 }}>Details: {res.text}</div></>
+                    : <>{res.text} {res.kind === 'timeout' ? 'Is this laptop on the printer’s router, and is the address right?' : ''}</>}
+              </Banner>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -997,6 +1067,7 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
       )}
       {note && <div style={{ marginTop:8 }}><Banner tone={note.tone} onClose={() => setNote(null)}>{note.text}</Banner></div>}
       <PrintHubDownload />
+      <BrowserTestPrint kitchens={kitchens} />
       {open && list.length > 0 && (
         <div style={{ display:'grid', gap:6, marginTop:10 }}>
           {list.map(f => {
