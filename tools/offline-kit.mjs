@@ -2,6 +2,8 @@
 // an event without internet into two downloads, served by the app itself:
 //   dist/downloads/SmartServe-Offline-Kit-Windows.zip
 //   dist/downloads/SmartServe-Offline-Kit-Mac.zip
+//   dist/downloads/SmartServe-Print-Hub-Windows.zip / -Mac.zip (the Print Hub
+//     alone, for every normal day: one laptop on the printers' router)
 //   dist/downloads/offline-kit.json   (what the Control tab shows)
 // The laptop needs only Node.js: no Git, no build, no database password. The
 // kit carries the built app, the local server, the Print Hub, the database
@@ -210,6 +212,74 @@ function kitEntries(os) {
   return [...[...dirs].sort().map((d) => ({ name: d, dir: true })), ...entries]
 }
 
+// ---------------------------------------------------------------- Print Hub alone
+// For every normal day (internet fine): the laptop on the printers' router runs
+// this and nothing else. Only Node.js is needed; config.json already carries
+// this cloud's address and public key, so it starts with one double-click.
+const HUB = 'SmartServe Print Hub'
+function hubReadMe(os) {
+  const mac = os === 'mac'
+  const text = `SMART SERVE - PRINT HUB
+=======================
+
+The Print Hub sends every KOT to the kitchen printers. It runs on ONE laptop
+that is connected to the same router (Wi-Fi or cable) as the printers.
+The app itself cannot reach a printer: the Print Hub on this laptop does.
+
+ONCE, ON THIS LAPTOP
+ 1. Install Node.js (the LTS version) from https://nodejs.org
+    (Next / Continue until Finish).
+ 2. ${mac ? 'Double-click the zip to unpack it, and move the folder to Documents.' : 'Right-click the zip > Extract All, and keep the folder in Documents.'}
+
+EVERY EVENT
+ 3. Switch on the router and the printers. Connect this laptop to the same
+    router. Keep the laptop plugged in, awake and the lid open.
+ 4. Double-click "Start Print Hub". Keep its window open until the event ends.
+${mac
+    ? `    Mac, first time only: if macOS says it cannot open the file, click Done,
+    open System Settings > Privacy & Security, scroll down and click
+    "Open Anyway" (or right-click the file > Open > Open).`
+    : `    Windows, first time only: if it says "Windows protected your PC",
+    click More info > Run anyway.`}
+ 5. Control Desk > Control tab > Event set-up > Kitchens & printers >
+    "Find printers". Every printer on this router appears with its address.
+    "Print a slip" shows which printer is which; "Use for a kitchen" gives it
+    to a kitchen. No IP address or port to type.
+ 6. "Test print" on each kitchen.
+
+GOOD TO KNOW
+ - ONLY ONE Print Hub per event. Close any other Print Hub (on another
+   laptop) first: every Print Hub that runs takes that event's KOTs.
+ - The Print Hub prints for the events dated today.
+ - A printer that restarts on a new address is followed automatically.
+ - To stop: close the window${mac ? ' (or press Ctrl+C in it)' : ''}.
+ - If the venue internet is bad, use the Offline Kit (Control tab >
+   Offline kit) and its own "4 Start Print Hub" instead of this one.
+`
+  return Buffer.from(mac ? text : crlf(text))
+}
+function hubLauncher(ext) {
+  let s = read('printhub', `Start Print Hub.${ext}`).toString('utf8')
+  const a = ext === 'command' ? 'cd "$(dirname "$0")" || exit 1' : 'cd /d "%~dp0"'
+  const b = ext === 'command' ? 'cd "$(dirname "$0")/files" || exit 1' : 'cd /d "%~dp0files"'
+  if (!s.includes(a)) throw new Error(`print hub: "Start Print Hub.${ext}" no longer has: ${a}`)
+  s = s.split(a).join(b)
+  return ext === 'command' ? Buffer.from(s.replace(/\r\n/g, '\n')) : Buffer.from(crlf(s))
+}
+function hubEntries(os) {
+  const ext = os === 'mac' ? 'command' : 'bat'
+  const entries = []
+  const add = (name, data, exec = false) => entries.push({ name: `${HUB}/${name}`, data: Buffer.isBuffer(data) ? data : Buffer.from(data), exec })
+  add('READ ME FIRST.txt', hubReadMe(os))
+  add(`Start Print Hub.${ext}`, hubLauncher(ext), ext === 'command')
+  for (const f of ['printhub.mjs', 'discover.mjs', 'escpos.mjs']) add(`files/${f}`, read('printhub', f))
+  // no hubName: each laptop reports under its own computer name
+  add('files/config.json', JSON.stringify({ use: 'cloud', servers: { cloud: { url: CLOUD_URL, anonKey: ANON_KEY } }, eventId: 'auto', pollMs: 1500 }, null, 2) + '\n')
+  const dirs = new Set()
+  for (const e of entries) { const parts = e.name.split('/'); for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/')) }
+  return [...[...dirs].sort().map((d) => ({ name: d, dir: true })), ...entries]
+}
+
 // ---------------------------------------------------------------- main
 // A problem with the kit never stops the app's own deploy: it only leaves the
 // kit out of this build (the Control tab then says so).
@@ -220,13 +290,18 @@ try {
     console.warn('offline kit: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY not set - no Offline Kit in this build')
   } else {
     fs.mkdirSync(OUT, { recursive: true })
-    const info = { builtAt: new Date().toISOString(), cloud: CLOUD_URL, kits: [] }
+    const info = { builtAt: new Date().toISOString(), cloud: CLOUD_URL, kits: [], printhub: [] }
     for (const [os, label] of [['windows', 'Windows'], ['mac', 'Mac']]) {
       const file = `SmartServe-Offline-Kit-${label}.zip`
       const buf = makeZip(kitEntries(os))
       fs.writeFileSync(path.join(OUT, file), buf)
       info.kits.push({ os, file, bytes: buf.length })
       console.log(`offline kit: ${file} ${(buf.length / 1048576).toFixed(1)} MB`)
+      const hubFile = `SmartServe-Print-Hub-${label}.zip`
+      const hub = makeZip(hubEntries(os))
+      fs.writeFileSync(path.join(OUT, hubFile), hub)
+      info.printhub.push({ os, file: hubFile, bytes: hub.length })
+      console.log(`print hub: ${hubFile} ${(hub.length / 1024).toFixed(0)} KB`)
     }
     fs.writeFileSync(path.join(OUT, 'offline-kit.json'), JSON.stringify(info, null, 2) + '\n')
   }

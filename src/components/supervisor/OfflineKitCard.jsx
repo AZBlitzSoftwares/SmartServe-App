@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
 import LaptopServerSwitch from '../LaptopServerSwitch'
 import { isLaptopOrigin } from '../../lib/serverSwitch'
+import { useKitInfo, mb } from '../../lib/kitInfo'
 
 /* Control tab, every event type: the Offline Kit. If the venue internet is bad,
    one laptop on the event router runs the whole event (tablets, kitchen
@@ -20,20 +20,9 @@ const STEPS = [
   ['After the event, with internet', '"5 Upload to Cloud" sends every order, KOT and dish taken on the laptop to the cloud.'],
 ]
 
-const mb = (b) => `${(b / 1048576).toFixed(1)} MB`
-
 export default function OfflineKitCard() {
   const onLaptop = isLaptopOrigin()
-  const [kit, setKit] = useState(null)     // offline-kit.json, false = not in this build
-  useEffect(() => {
-    if (onLaptop) return
-    let alive = true
-    fetch('/downloads/offline-kit.json', { cache: 'no-store' })
-      .then(r => (r.ok && (r.headers.get('content-type') || '').includes('json') ? r.json() : false))
-      .then(j => { if (alive) setKit(j && Array.isArray(j.kits) ? j : false) })
-      .catch(() => { if (alive) setKit(false) })
-    return () => { alive = false }
-  }, [onLaptop])
+  const kit = useKitInfo()                 // offline-kit.json, false = not in this build
   const file = os => (kit && kit.kits.find(k => k.os === os)) || null
 
   return (
