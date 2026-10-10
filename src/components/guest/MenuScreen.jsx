@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { readMenu, saveMenu } from '../../lib/cache'
 import janusLogo from '../../assets/janus_logo.jpg'
-import igQrCode from '../../assets/ig_qr.jpg'
 
 // Categories may be stored session-prefixed ("Lunch - Starters") so the
 // supervisor can show or hide a whole meal. Guests only ever see the
@@ -114,7 +114,10 @@ function HeaderCarousel({ eventData, tableNumber, isOnline, captain, onSwitchCap
           <button onClick={onCaptainBack}
             style={{ background:'rgba(232,137,12,0.25)', border:'1px solid rgba(232,137,12,0.6)',
               color:'#FFD9A0', borderRadius:999, padding:'3px 11px', fontSize:10,
-              fontWeight:800, cursor:'pointer', marginTop:3 }}>Change table</button>
+              fontWeight:800, cursor:'pointer', marginTop:3 }}>
+            {/* ss-multi-kitchen: a captain linked to a table does not change tables */}
+            {eventData?.multi_kitchen && captain?.table_number != null && captain.table_number !== '' ? 'My table' : 'Change table'}
+          </button>
         </div>
       ) : (
       <div style={{ flex:2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3 }}>
@@ -221,13 +224,21 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
 }
 
 export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen, onBack, captain, onSwitchCaptain, captainTable, onCaptainBack, onChat, chatUnread = 0 }) {
-  const [categories, setCategories] = useState([])
-  const [items, setItems] = useState([])
+  // ss-menu-cache. Start from the last menu this device saw for the event
+  // (src/lib/cache.js), so the dishes show at once. The fresh fetch below
+  // always runs on open and replaces it.
+  const [initialMenu] = useState(() => readMenu(eventData?.id))
+  const [categories, setCategories] = useState(initialMenu?.categories || [])
+  const [items, setItems] = useState(initialMenu?.items || [])
   const [search, setSearch] = useState('')
   const [vegMode, setVegMode] = useState('all')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!initialMenu)
   const sectionRefs = useRef({})
   const scrollRef = useRef()
+  const shownRef = useRef(initialMenu?.json || null)  // menu on screen now
+  const eventIdRef = useRef(eventData?.id)
+  const startedRef = useRef(0)   // loads started
+  const appliedRef = useRef(0)   // newest load whose answer has been used
 
   // Category order comes straight from sort_order, which the CSV importer sets
   // from the order categories first appear in the import file. This gives full
@@ -244,6 +255,8 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
 
   useEffect(() => {
     if (!eventData) return
+    // Always fetch on open, even with a cached menu on screen: sold-out and
+    // hidden dishes must drop off.
     loadMenu()
     // Real-time updates when supervisor hides/shows items
     const sub = supabase.channel('menu-realtime-'+eventData.id)
@@ -256,14 +269,37 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   }, [eventData?.id])
 
   async function loadMenu(showSpinner = true) {
-    if (showSpinner) setLoading(true)
-    const { data: cats } = await supabase.from('menu_categories').select('*').eq('event_id', eventData.id).eq('is_visible', true).order('sort_order')
+    const eventId = eventData.id
+    const seq = ++startedRef.current
+    if (eventIdRef.current !== eventId) {
+      // A different event from the one on screen: start from its own cached
+      // menu, or from nothing - never from the previous event's dishes.
+      eventIdRef.current = eventId
+      const c = readMenu(eventId)
+      shownRef.current = c ? c.json : null
+      setCategories(c ? c.categories : []); setItems(c ? c.items : [])
+    }
+    // The "Loading menu" spinner only when there is nothing to show yet.
+    if (showSpinner && shownRef.current === null) setLoading(true)
+    const { data: cats, error: catErr } = await supabase.from('menu_categories').select('*').eq('event_id', eventId).eq('is_visible', true).order('sort_order')
     const { data: catIds } = { data: (cats||[]).map(c=>c.id) }
-    const { data: menuItems } = catIds.length
+    const { data: menuItems, error: itemErr } = catIds.length
       ? await supabase.from('menu_items').select('*').in('category_id', catIds).eq('is_available', true).order('name')
-      : { data: [] }
-    setCategories(sortCategories(cats||[]))
-    setItems(menuItems||[])
+      : { data: [], error: null }
+    // A newer load already answered, or this screen moved to another event.
+    if (seq < appliedRef.current || eventIdRef.current !== eventId) return
+    // A failed fetch (network down) keeps the menu already on screen instead
+    // of blanking it. The next poll or realtime change tries again.
+    if (catErr || itemErr) { setLoading(false); return }
+    appliedRef.current = seq
+    const freshCats = sortCategories(cats||[])
+    const freshItems = menuItems||[]
+    const json = saveMenu(eventId, freshCats, freshItems)
+    if (json !== shownRef.current) {
+      shownRef.current = json
+      setCategories(freshCats)
+      setItems(freshItems)
+    }
     setLoading(false)
   }
 
@@ -316,7 +352,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         </div>
         <div style={{ flexShrink:0, width:110, height:90, borderRadius:12, overflow:'hidden' }}>
           {item.photo_url
-            ? <img src={item.photo_url} alt={item.name} style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>e.target.style.display='none'} />
+            ? <img src={item.photo_url} alt={item.name} loading="lazy" decoding="async" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>e.target.style.display='none'} />
             : <div style={{ width:'100%', height:'100%', background:'linear-gradient(135deg,#F7F4FB,#E8E0F0)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:36 }}>🍽️</div>
           }
         </div>

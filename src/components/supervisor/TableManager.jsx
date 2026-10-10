@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { WaiterList, HelpItemsEditor } from './EventManager'
 import CaptainList from './CaptainList'
+import KitchenSetup from './KitchenSetup'
 
 /* Table management for the current event.
 
@@ -34,9 +35,167 @@ const STATUS = {
   free:    { label:'NOT ASSIGNED', color:'#6B7280', bg:'#F3F4F6', border:'#E5E7EB' },
 }
 
+/* ----------------------------------------------------------------------
+   Control: ONE set-up screen per event type.
+
+   Everything a supervisor sets up for an event is on this one page, in the
+   order it is done, with a ready-check on top. Sections that do not apply
+   to the event type are not shown at all, so nobody configures something
+   that has no effect (an order limit on a Maestro event, waiters on a
+   Maestro event, tablets on a captain event).
+   ---------------------------------------------------------------------- */
+const MODES = {
+  self:    { name:'Guest Self-Service', note:'A tablet on every table; guests order for themselves and waiters deliver.' },
+  captain: { name:'Captain Service', note:'Captains carry the tablet and take orders; waiters deliver.' },
+  multi:   { name:'Captain + Multi-Kitchen', note:'Captains order by chair; each cuisine KOT prints in its own kitchen; waiters carry from their kitchen.' },
+  maestro: { name:'Smart Serve Maestro', note:'Plated, course-by-course service: hold and fire per cover, barkers on kitchen screens, Control Desk.' },
+}
+export function modeOf(ev) {
+  return ev?.maestro ? 'maestro' : ev?.multi_kitchen ? 'multi' : ev?.service_mode === 'captain' ? 'captain' : 'self'
+}
+
 export default function TableManager({ eventData, onEventChange }) {
-  // Waiters first: the list that changes during an event
-  const [view, setView] = useState('waiters')
+  const mode = modeOf(eventData)
+  const [nonce, setNonce] = useState(0)
+  if (!eventData?.id) return null
+
+  // The jump bar: every section of this event type, in order
+  const nav = {
+    self:    [['ss-ready','Ready check'], ['st-tables','Tables & tablets'], ['ss-waiters','Waiters'], ['ss-help','Help requests'], ['ss-limit','Order limit']],
+    captain: [['ss-ready','Ready check'], ['ss-captains','Captains'], ['ss-waiters','Waiters'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit']],
+    multi:   [['ks-ready','Ready check'], ['ks-chairs','Chairs'], ['ks-kitchens','Kitchens & printers'], ['ks-routing','Menu routing'], ['ks-captains','Captains'], ['ks-waiters','Waiters'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit']],
+    maestro: [['ms-ready','Ready check'], ['ks-chairs','Covers'], ['ks-kitchens','Kitchens & printers'], ['ks-routing','Menu routing'], ['ms-courses','Courses'], ['ms-rules','Kitchen rules'], ['ms-dishes','Dishes'], ['ms-barkers','Barkers'], ['ks-captains','Captains'], ['st-tables','Tables']],
+  }[mode]
+  const jump = id => document.getElementById(id)?.scrollIntoView({ behavior:'smooth', block:'start' })
+  const sectionHead = (id, title, sub) => (
+    <div id={id} style={{ margin:'18px 0 8px', scrollMarginTop:70 }}>
+      <h3 style={{ fontSize:16, fontWeight:900 }}>{title}</h3>
+      {sub && <div style={{ fontSize:12.5, color:'var(--ink2)', marginTop:2, lineHeight:1.5 }}>{sub}</div>}
+    </div>
+  )
+
+  return (
+    <div key={eventData.id + ':' + mode}>
+      <style>{`#ss-setup [id]{scroll-margin-top:70px}`}</style>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12, marginBottom:10, flexWrap:'wrap' }}>
+        <div style={{ minWidth:0 }}>
+          <h2 style={{ fontSize:20, fontWeight:800 }}>Event set-up</h2>
+          <div style={{ fontSize:12.5, color:'var(--ink2)', marginTop:3 }}>
+            <span style={{ background:'var(--ink)', color:'#fff', borderRadius:999, padding:'2px 10px', fontWeight:800, fontSize:11.5, marginRight:8 }}>
+              {MODES[mode].name}</span>
+            {MODES[mode].note} Everything for this event type is on this page; change the type under Events.
+          </div>
+        </div>
+        <button onClick={() => setNonce(n => n + 1)} style={{ background:'var(--ink)', color:'#fff', border:'none',
+          borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700, cursor:'pointer' }}>Refresh</button>
+      </div>
+
+      {/* Jump bar - stays at the top while scrolling */}
+      <div style={{ position:'sticky', top:0, zIndex:20, background:'var(--bg)', padding:'6px 0 8px', marginBottom:6,
+        display:'flex', gap:6, overflowX:'auto' }}>
+        {nav.map(([id, label]) => (
+          <button key={id} onClick={() => jump(id)}
+            style={{ flexShrink:0, padding:'6px 12px', borderRadius:999, fontSize:12.5, fontWeight:700, cursor:'pointer',
+              border:'1.5px solid var(--line)', background:'#fff', color:'var(--ink)', whiteSpace:'nowrap' }}>{label}</button>
+        ))}
+      </div>
+
+      <div id="ss-setup" key={nonce} style={{ paddingBottom:'45vh' /* lets the last sections scroll to the top from the jump bar */ }}>
+        {(mode === 'self' || mode === 'captain') && <BasicReadiness eventData={eventData} mode={mode} />}
+
+        {(mode === 'multi' || mode === 'maestro') && <KitchenSetup eventData={eventData} onEventChange={onEventChange} />}
+
+        {mode === 'captain' && <>
+          {sectionHead('ss-captains', 'Captains', 'Name and 4-digit PIN for each captain. On the tablet they sign in with these; the event is found automatically.')}
+          <CaptainList eventId={eventData.id} />
+        </>}
+
+        {mode === 'self' && <TablesSection eventData={eventData} onEventChange={onEventChange} showTablets />}
+
+        {(mode === 'self' || mode === 'captain') && <>
+          {sectionHead('ss-waiters', 'Waiters', 'The people who carry food and answer help requests. The desk assigns them to orders.')}
+          <WaiterList eventId={eventData.id} />
+        </>}
+
+        {mode !== 'self' && <TablesSection eventData={eventData} onEventChange={onEventChange} showTablets={false} />}
+
+        {mode !== 'maestro' && <>
+          {sectionHead('ss-help', 'Help requests', mode === 'self'
+            ? 'What guests can ask for from the tablet, and the switch for the Help button.'
+            : 'What captains can request from the desk on behalf of a table.')}
+          <HelpPane eventData={eventData} onEventChange={onEventChange} mode={mode} />
+          {sectionHead('ss-limit', 'Order limit')}
+          <EventSettings eventData={eventData} onEventChange={onEventChange} />
+        </>}
+      </div>
+    </div>
+  )
+}
+
+/* Ready check for guest and captain events: the same idea as the kitchen
+   check on multi-kitchen and Maestro events - green when everything a
+   service needs is in place, each line jumps to the section to fix it. */
+function BasicReadiness({ eventData, mode }) {
+  const [d, setD] = useState(null)
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const ev = eventData.id
+      const [cats, waiters, caps, tables, sups] = await Promise.all([
+        supabase.from('menu_categories').select('id').eq('event_id', ev),
+        supabase.from('waiters').select('id').eq('event_id', ev).eq('is_active', true),
+        supabase.from('captains').select('id, pin').eq('event_id', ev).eq('is_active', true),
+        supabase.from('tables').select('id, claimed_by_device, last_seen_at, claimed_at').eq('event_id', ev),
+        supabase.from('supervisors').select('id').eq('event_id', ev).eq('is_active', true),
+      ])
+      const ids = (cats.data || []).map(c => c.id)
+      const items = ids.length ? await supabase.from('menu_items').select('id, is_available').in('category_id', ids) : { data: [] }
+      if (alive) setD({ cats: ids.length, items: items.data || [], waiters: waiters.data || [], caps: caps.data || [],
+        tables: tables.data || [], sups: sups.data || [] })
+    })()
+    return () => { alive = false }
+  }, [eventData.id])
+  if (!d) return <div style={{ padding:20, color:'var(--ink2)', fontSize:13 }}>Checking the set-up…</div>
+  const n = eventData.number_of_tables || 0
+  const live = d.tables.filter(t => statusOf(t) === 'online').length
+  const checks = [
+    { id:'ss-menu', title:'Menu', ok: d.items.length > 0, detail: d.items.length
+        ? d.items.length + ' dishes in ' + d.cats + ' categories'
+        : 'No dishes yet — add the menu under the Menu tab' },
+    { id:'st-tables', title:'Tables', ok: n > 0, detail: n ? n + ' tables at this event' : 'Set the number of tables' },
+    ...(mode === 'self' ? [{ id:'st-tables', title:'Tablets', ok: n > 0 && live >= n,
+        detail: live + ' of ' + n + ' tables have a working tablet' }] : []),
+    ...(mode === 'captain' ? [{ id:'ss-captains', title:'Captains', ok: d.caps.length > 0 && d.caps.every(c => /^\d{4}$/.test(String(c.pin || ''))),
+        detail: !d.caps.length ? 'No captains yet — nobody can take orders' : d.caps.length + ' captains with a sign-in PIN' }] : []),
+    { id:'ss-waiters', title:'Waiters', ok: d.waiters.length > 0, detail: d.waiters.length ? d.waiters.length + ' waiters' : 'No waiters yet' },
+    { id:'ss-help', title:'Supervisor', ok: d.sups.length > 0, detail: d.sups.length ? d.sups.length + ' supervisor sign-in' + (d.sups.length === 1 ? '' : 's') : 'No supervisor for this event (Events tab)' },
+  ]
+  const failing = checks.filter(c => !c.ok).length
+  const jump = id => document.getElementById(id)?.scrollIntoView({ behavior:'smooth', block:'start' })
+  return (
+    <div id="ss-ready" style={{ background:'#fff', borderRadius:12, padding:'14px 16px', marginBottom:12, boxShadow:'var(--shadow)',
+      borderTop:'4px solid ' + (failing ? '#E8890C' : '#16A34A') }}>
+      <div style={{ fontSize:11, fontWeight:800, color:'var(--ink2)', textTransform:'uppercase', letterSpacing:'0.4px' }}>Before service</div>
+      <div style={{ fontSize:18, fontWeight:900, margin:'2px 0 10px', color: failing ? 'var(--ink)' : '#16A34A' }}>
+        {failing ? failing + (failing === 1 ? ' thing' : ' things') + ' to finish before service' : '✓ Ready for service'}
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(230px, 1fr))', gap:8 }}>
+        {checks.map((c, i) => (
+          <button key={i} onClick={() => jump(c.id)} style={{ textAlign:'left', fontFamily:'Manrope', cursor:'pointer', borderRadius:10,
+            padding:'9px 11px', display:'flex', gap:9, alignItems:'flex-start',
+            background: c.ok ? '#F0FDF4' : '#FEF2F2', border:'1.5px solid ' + (c.ok ? '#BBF7D0' : '#FECACA') }}>
+            <span style={{ width:22, height:22, borderRadius:'50%', flexShrink:0, background: c.ok ? '#16A34A' : '#DC2626', color:'#fff',
+              fontSize:13, fontWeight:900, display:'inline-flex', alignItems:'center', justifyContent:'center' }}>{c.ok ? '✓' : '✗'}</span>
+            <span><span style={{ display:'block', fontSize:13, fontWeight:800 }}>{c.title}</span>
+              <span style={{ display:'block', fontSize:12, fontWeight:600, color: c.ok ? '#15803D' : '#B91C1C' }}>{c.detail}</span></span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function TablesSection({ eventData, onEventChange, showTablets }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(null)
@@ -151,56 +310,12 @@ export default function TableManager({ eventData, onEventChange }) {
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-        <h2 style={{ fontSize:20, fontWeight:800 }}>Event Control</h2>
-        <button onClick={load} style={{ background:'var(--ink)', color:'#fff', border:'none',
-          borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700, cursor:'pointer' }}>Refresh</button>
+      <div id="st-tables" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', margin:'4px 0 10px' }}>
+        <h3 style={{ fontSize:16, fontWeight:900 }}>{showTablets ? 'Tables and tablets' : 'Tables'}</h3>
+        {showTablets && <button onClick={load} style={{ background:'#fff', color:'var(--ink)', border:'1.5px solid var(--line)',
+          borderRadius:9, padding:'6px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>Refresh</button>}
       </div>
-
-      <div style={{ display:'flex', gap:8, marginBottom:14 }}>
-        {[['waiters','Waiters'],
-          // Only on captain events. On a self-service event there are no
-          // captains, and an always-visible empty tab invites someone to fill it.
-          ...(eventData?.service_mode === 'captain' ? [['captains','Captains']] : []),
-          ['tables','Tables'],['help','Help'],['settings','Settings']].map(([v,label]) => (
-          <button key={v} onClick={() => setView(v)}
-            style={{ flex:1, padding:'9px 4px', borderRadius:10, fontSize:13, fontWeight:700,
-              cursor:'pointer', border:'1.5px solid',
-              background: view===v ? 'var(--ink)' : '#fff',
-              color: view===v ? '#fff' : 'var(--ink)',
-              borderColor: view===v ? 'var(--ink)' : 'var(--line)' }}>{label}</button>
-        ))}
-      </div>
-
-      {view === 'waiters' && eventData?.id && <WaiterList eventId={eventData.id} />}
-
-      {view === 'captains' && eventData?.id && <CaptainList eventId={eventData.id} />}
-
-      {/* Help list. Was on the admin Events screen, which the supervisor
-          cannot open - so the person standing in the room could not change
-          what guests were allowed to ask for. */}
-      {view === 'help' && eventData?.id && (
-        <HelpPane eventData={eventData} onEventChange={onEventChange} />
-      )}
-
-      {view === 'settings' && eventData?.id && (
-        <EventSettings eventData={eventData} onEventChange={onEventChange} />
-      )}
-
-      {view === 'tables' && (
       <>
-      {/* ss-captain-tables-note. Without this the Tables screen reads as a
-          room full of dead tablets, when in fact there are no tablets on the
-          tables at all and nothing is wrong. */}
-      {eventData?.service_mode === 'captain' && (
-        <div style={{ background:'#EFF6FF', border:'1.5px solid #BFDBFE', borderRadius:12,
-          padding:'11px 14px', marginBottom:14, fontSize:13, color:'#1d4ed8',
-          fontWeight:600, lineHeight:1.55 }}>
-          This is a Captain Service event, so no tablet sits on a table and every
-          number below stays Not assigned. That is correct. Table rows appear here
-          as captains place the first order for each table.
-        </div>
-      )}
 
       {/* Sits above the counts because it changes what those counts mean */}
       <div style={{ background:'#fff', borderRadius:12, padding:'12px 14px', marginBottom:12,
@@ -210,7 +325,9 @@ export default function TableManager({ eventData, onEventChange }) {
             <div style={{ fontSize:11, fontWeight:800, color:'var(--ink2)',
               textTransform:'uppercase', letterSpacing:'0.4px' }}>Tables at this event</div>
             <div style={{ fontSize:12, color:'var(--ink2)', marginTop:3, lineHeight:1.5 }}>
-              Raise it when the caterer lays more. Tablets can claim the new numbers within a minute.
+              {showTablets
+                ? 'Raise it when the caterer lays more. Tablets can claim the new numbers within a minute.'
+                : 'Raise it when the caterer lays more. Captains can use the new numbers straight away.'}
             </div>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
@@ -250,6 +367,11 @@ export default function TableManager({ eventData, onEventChange }) {
         )}
       </div>
 
+      {!showTablets ? (
+        <div style={{ fontSize:12.5, color:'var(--ink2)', lineHeight:1.55, margin:'0 2px 14px' }}>
+          No tablet sits on a table at this event: captains carry the tablets, so there is nothing else to set up here.
+        </div>
+      ) : (<>
       {/* At-a-glance cover check before guests sit down */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10, marginBottom:16 }}>
         {[['Online', online, '#16A34A'], ['Offline', offline, '#DC2626'], ['Not assigned', missing, '#6B7280']].map(([label, n, c]) => (
@@ -324,8 +446,8 @@ export default function TableManager({ eventData, onEventChange }) {
         )
       })}
       </div>
+      </>)}
       </>
-      )}
     </div>
   )
 }
@@ -432,7 +554,8 @@ function EventSettings({ eventData, onEventChange }) {
    Separating them put "can guests ask for anything" a tab away from "what
    can they ask for", so neither screen told the whole story and turning the
    button off meant hopping between tabs to check what had been hidden. */
-function HelpPane({ eventData, onEventChange }) {
+function HelpPane({ eventData, onEventChange, mode }) {
+  const who = mode === 'self' ? 'guests' : 'captains'
   const [saving, setSaving] = useState(false)
   const callOn = eventData.call_waiter_enabled !== false
 
@@ -453,9 +576,9 @@ function HelpPane({ eventData, onEventChange }) {
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
           <div style={{ flex:1 }}>
             <div style={{ fontSize:11, fontWeight:800, color:'var(--ink2)',
-              textTransform:'uppercase', letterSpacing:'0.4px' }}>Help button on guest tablets</div>
+              textTransform:'uppercase', letterSpacing:'0.4px' }}>Help button on {mode === 'self' ? 'guest' : 'captain'} tablets</div>
             <div style={{ fontSize:13, fontWeight:700, marginTop:3 }}>
-              {callOn ? 'On — guests can send the requests below'
+              {callOn ? 'On — ' + who + ' can send the requests below'
                       : 'Off — no request button on any tablet'}
             </div>
           </div>
@@ -477,7 +600,7 @@ function HelpPane({ eventData, onEventChange }) {
       {!callOn && (
         <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:10,
           padding:'9px 13px', fontSize:12, color:'#92400E', fontWeight:600, marginBottom:12 }}>
-          The button is off, so none of these are reaching guests right now.
+          The button is off, so none of these can be sent right now.
         </div>
       )}
 

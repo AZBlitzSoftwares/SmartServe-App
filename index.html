@@ -4,13 +4,34 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    
+
     <meta name="theme-color" content="#2A1B2E" />
     <link rel="manifest" href="/manifest.json" />
     <title>SmartServe</title>
     <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'))
+      // Waiters add /waiter to their phone's home screen: give that its own
+      // name and start page. Runs before anything else on the page loads.
+      (function () {
+        try {
+          if (/^\/waiter(\/|$)/.test(location.pathname)) {
+            var m = document.querySelector('link[rel="manifest"]')
+            if (m) m.setAttribute('href', '/manifest-waiter.json')
+            document.title = 'Smart Serve Waiter'
+          }
+        } catch (e) {}
+      })()
+    </script>
+    <!-- Open the connections early. Harmless when the laptop server is in use. -->
+    <link rel="preconnect" href="https://kapmreqrhlifxuzjjejz.supabase.co" crossorigin />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <script>
+      // Offline cache (public/sw.js). Service workers only exist on https or
+      // localhost, so the plain-http laptop server skips this entirely.
+      if ('serviceWorker' in navigator && window.isSecureContext && '%PROD%' === 'true') {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {})
+        })
       }
     </script>
   </head>

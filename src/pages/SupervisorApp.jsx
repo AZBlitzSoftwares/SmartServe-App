@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { supabase } from '../lib/supabase'
 import SupervisorLogin from '../components/supervisor/SupervisorLogin'
 import KOTDashboard from '../components/supervisor/KOTDashboard'
+import KitchenBoard from '../components/supervisor/KitchenBoard'
 import SOSRequests, { useSOSAlert } from '../components/supervisor/SOSRequests'
 import MenuManager from '../components/supervisor/MenuManager'
 import ReportsDashboard from '../components/supervisor/ReportsDashboard'
@@ -10,6 +11,11 @@ import TableManager from '../components/supervisor/TableManager'
 import FeedbackReport from '../components/supervisor/FeedbackReport'
 import SupervisorChat from '../components/supervisor/SupervisorChat'
 import { playChatChime, unlockChime } from '../lib/chime'
+import { lazyPage } from '../lib/lazyPage'
+import { setUnsavedCheck } from '../lib/appUpdate'
+// ss-maestro: course-firing events get their own desk and reports, loaded only when used
+const ControlDesk = lazyPage(() => import('../maestro/ControlDesk'), 'controldesk')
+const MaestroReports = lazyPage(() => import('../maestro/MaestroReports'), 'msreports')
 
 
 // ─── Event Status Helper ───────────────────────────────────────────────────
@@ -33,8 +39,12 @@ const TYPE_EMOJI  = { sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', wate
 
 export default function SupervisorApp() {
   const [authed, setAuthed] = useState(false)
+  // A new version never reloads the desk by itself: it would land on the sign-in
+  // screen. The Update button at the top is there when the operator is ready.
+  useEffect(() => { setUnsavedCheck(() => authed); return () => setUnsavedCheck(null) }, [authed])
   const [currentUser, setCurrentUser] = useState(null)
-  const [activeTab, setActiveTab] = useState('kot')
+  const [chosenTab, setActiveTab] = useState('kot')
+  const [deskView, setDeskView] = useState('desk')   // ss-maestro: Control Desk or printer board
   const [eventData, setEventData] = useState(null)
   const eventManuallySet = useRef(false) // true once user or initial load sets event
   const [allEvents, setAllEvents] = useState([])
@@ -218,15 +228,21 @@ export default function SupervisorApp() {
     else if (evs.length) { setEventData(evs[0]); eventManuallySet.current = true }
   }
 
+  const feedbackTab = !eventData || eventData.service_mode !== 'captain'
+  // Feedback was open and the desk switched to a captain event: show its first tab instead
+  const activeTab = chosenTab === 'feedback' && !feedbackTab ? 'kot' : chosenTab
   if (!authed) return <SupervisorLogin onLogin={(user) => { setCurrentUser(user); setAuthed(true) }} />
 
   const isAdmin = currentUser?.role === 'admin'
 
   const TABS = [
-    { id:'kot',     label:'Orders',   emoji:'🎫', badge:orderCount },
+    eventData?.maestro
+      ? { id:'kot', label:'Control Desk', emoji:'🎼', badge:0 }
+      : { id:'kot',     label:'Orders',   emoji:'🎫', badge:orderCount },
     { id:'menu',    label:'Menu',     emoji:'📋', badge:0 },
     { id:'reports', label:'Reports',  emoji:'📊', badge:0 },
-    { id:'feedback', label:'Feedback', emoji:'⭐', badge:0 },
+    // Guests give feedback on their own tablet only at guest self-service events
+    ...(feedbackTab ? [{ id:'feedback', label:'Feedback', emoji:'⭐', badge:0 }] : []),
     // Supervisors get table release here rather than through Events,
     // which would also expose every other event and staff deletion.
     { id:'tables',  label:'Control',  emoji:'🎛️', badge:0 },
@@ -414,10 +430,30 @@ export default function SupervisorApp() {
 
       {/* ── CONTENT ── */}
       <div style={{ padding:'16px' }}>
-        {activeTab==='kot'     && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={(order) => { setNewOrderAlert(order); setOrderCount(c=>c+1) }} />}
-        {activeTab==='menu'    && <MenuManager eventData={eventData} />}
-        {activeTab==='reports' && <ReportsDashboard eventData={eventData} onEventChange={setEventData} />}
-        {activeTab==='feedback' && <FeedbackReport eventData={eventData} />}
+        {/* Multi-kitchen events have no waiter assignment: the board is per kitchen and per KOT. */}
+        {activeTab==='kot'     && eventData?.maestro && deskView==='desk' && (
+          <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'#888' }}>Loading…</div>}>
+            <ControlDesk eventData={eventData} onShowPrinters={() => setDeskView('printers')} />
+          </Suspense>
+        )}
+        {activeTab==='kot'     && eventData?.maestro && deskView==='printers' && (
+          <div>
+            <button onClick={() => setDeskView('desk')} style={{ background:'var(--ink)', color:'#fff', border:'none',
+              borderRadius:10, padding:'9px 16px', fontSize:13, fontWeight:800, cursor:'pointer', marginBottom:12 }}>
+              ← Back to Control Desk</button>
+            <KitchenBoard eventData={eventData} />
+          </div>
+        )}
+        {activeTab==='kot'     && eventData?.multi_kitchen && !eventData?.maestro && <KitchenBoard eventData={eventData} />}
+        {activeTab==='kot'     && !eventData?.multi_kitchen && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={(order) => { setNewOrderAlert(order); setOrderCount(c=>c+1) }} />}
+        {activeTab==='menu'    && <MenuManager eventData={eventData} onEventChange={setEventData} />}
+        {activeTab==='reports' && eventData?.maestro && (
+          <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'#888' }}>Loading…</div>}>
+            <MaestroReports eventData={eventData} />
+          </Suspense>
+        )}
+        {activeTab==='reports' && !eventData?.maestro && <ReportsDashboard eventData={eventData} onEventChange={setEventData} />}
+        {activeTab==='feedback' && feedbackTab && <FeedbackReport eventData={eventData} />}
         {activeTab==='tables'  && <TableManager eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='events'  && <EventManager onEventChange={(ev) => { setEventData(ev); loadEvents() }} />}
       </div>
@@ -425,7 +461,8 @@ export default function SupervisorApp() {
       {/* Docked over the board rather than living in a tab. A supervisor
           answering "table 12 has been waiting" needs to see table 12 while
           they type, and a tab would replace the very thing being asked about. */}
-      {eventData && (
+      {/* Chat is with captains: a guest self-service event has none */}
+      {eventData && eventData.service_mode === 'captain' && (
         <SupervisorChat eventData={eventData}
           meName={currentUser?.name || currentUser?.username || (isAdmin ? 'Admin' : 'Operator')}
           minimized={!chatOpen} unread={chatUnread} focus={chatFocus}

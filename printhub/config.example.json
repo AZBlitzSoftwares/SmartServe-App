@@ -1,0 +1,16 @@
+{
+  "use": "cloud",
+  "servers": {
+    "cloud": {
+      "url": "https://kapmreqrhlifxuzjjejz.supabase.co",
+      "anonKey": "PASTE_ANON_KEY"
+    },
+    "local": {
+      "url": "http://127.0.0.1:54321",
+      "anonKey": "PASTE_LOCAL_ANON_KEY"
+    }
+  },
+  "eventId": "auto",
+  "hubName": "desk-laptop",
+  "pollMs": 1500
+}

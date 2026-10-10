@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { supabase } from '../lib/supabase'
 import { getPendingOrders, clearOrder } from '../lib/offlineQueue'
 import SetupScreen from '../components/guest/SetupScreen'
@@ -7,6 +7,7 @@ import CaptainOrders from '../components/guest/CaptainOrders'
 import CaptainTableGrid from '../components/guest/CaptainTableGrid'
 import CaptainTableBlocked from '../components/guest/CaptainTableBlocked'
 import CaptainChat from '../components/guest/CaptainChat'
+import ChairPicker from '../components/guest/ChairPicker'
 import { installTapFx } from '../lib/feedbackFx'
 import WelcomeScreen from '../components/guest/WelcomeScreen'
 import MenuScreen from '../components/guest/MenuScreen'
@@ -18,7 +19,19 @@ import SOSPanel from '../components/guest/SOSPanel'
 import OrderHistory from '../components/guest/OrderHistory'
 import FeedbackModal from '../components/guest/FeedbackModal'
 import ExitGate from '../components/guest/ExitGate'
+import NoEventScreen from '../components/guest/NoEventScreen'
+import { lazyPage } from '../lib/lazyPage'
+import { setUnsavedCheck, setSignOutReason, hideUpdatePill } from '../lib/appUpdate'
+import {
+  entryFor, loadTodaysEvents, sessionStillCurrent, isCaptainEvent,
+  clearGuestKeys, clearCaptainKeys, rememberMode, rememberedMode,
+} from '../components/guest/deviceEntry'
 
+
+// Smart Serve Maestro (course-paced multi-kitchen events): the captain's
+// own screens. Loaded only when a captain signs in to a Maestro event, so
+// guest tablets and other captain events never download it.
+const MaestroCaptain = lazyPage(() => import('../maestro/MaestroCaptain'), 'mscaptain')
 
 // Two back presses within this window on the Welcome screen open the exit dialog.
 const EXIT_DOUBLE_PRESS_MS = 3000
@@ -67,6 +80,24 @@ export default function GuestApp() {
   const [menuSheetOpen, setMenuSheetOpen] = useState(false)
   const [showExitGate, setShowExitGate] = useState(false)
   const [exitReady, setExitReady] = useState(false)
+  // What decideEntry() last found for today: feeds the chooser and the
+  // No-event screen. offline = the server could not be read at all.
+  const [entryInfo, setEntryInfo] = useState({ captainEvents: [], selfEvents: [], offline: false })
+
+  // ── ss-multi-kitchen ─────────────────────────────────────────────────────
+  // Everything below is read only when eventData.multi_kitchen is true. At a
+  // guest event or an ordinary captain event these stay at their defaults
+  // and nothing looks at them.
+  //   chairPickerOpen  the chair sheet that Place Order opens
+  //   mkSent           what the Genie screen shows: table, chairs, KOTs
+  //   mkLand*          land a linked captain on their table's menu once,
+  //                    after sign-in or restore, when both the event and
+  //                    the captain row have been read fresh
+  const [chairPickerOpen, setChairPickerOpen] = useState(false)
+  const [mkSent, setMkSent] = useState(null)
+  const [mkLand, setMkLand] = useState(false)
+  const [mkCapSynced, setMkCapSynced] = useState(false)
+  const [mkEvChecked, setMkEvChecked] = useState(false)
 
   const appStateRef      = useRef('loading')
   const cartOpenRef      = useRef(false)
@@ -87,6 +118,7 @@ export default function GuestApp() {
   const blockedTableRef  = useRef(null)
   const chatOpenRef      = useRef(false)
   const cartRef          = useRef([])
+  const chairPickerRef   = useRef(false)
 
   // Back-button machinery
   const allowExitRef    = useRef(false) // true only after a valid exit PIN
@@ -108,6 +140,7 @@ export default function GuestApp() {
   useEffect(() => { showCaptainOrdersRef.current = showCaptainOrders }, [showCaptainOrders])
   useEffect(() => { blockedTableRef.current = blockedTable },           [blockedTable])
   useEffect(() => { chatOpenRef.current = chatOpen },                   [chatOpen])
+  useEffect(() => { chairPickerRef.current = chairPickerOpen },         [chairPickerOpen])
 
   // A short vibration and a quiet click on every button, guest and captain
   // alike. Installed once at the document level rather than wired into each
@@ -147,6 +180,8 @@ export default function GuestApp() {
 
     // Overlays close one at a time, innermost first
     if (showFeedbackRef.current) { handleFeedbackClose(); return }
+    // ss-multi-kitchen: the chair sheet sits over the menu like the cart
+    if (chairPickerRef.current)   { setChairPickerOpen(false); return }
     if (menuSheetRef.current)    { setMenuSheetOpen(false); menuSheetRef.current = false; return }
     if (cartOpenRef.current)     { setCartOpen(false); return }
     if (showSOSRef.current)      { setShowSOS(false); return }
@@ -161,6 +196,10 @@ export default function GuestApp() {
     // A captain returning from the Genie screen has no table selected any
     // more, so the menu would show "TABLE -". The grid is where they are
     // actually going next.
+    // ss-multi-kitchen: a captain linked to a table carries on at that table
+    if (s === 'genie' && captainRef.current && eventData?.multi_kitchen && mkSent?.table != null) {
+      mkOrderAgain(); return
+    }
     if (s === 'genie' && captainRef.current) { setCaptainSent(null); captainBackToGrid(); return }
     if (s === 'genie')  { goTo('menu'); return }
     if (s === 'status') { goTo('menu'); return }
@@ -294,103 +333,135 @@ export default function GuestApp() {
     setExitReady(false)
   }
 
-  // Load saved setup from localStorage
-  useEffect(() => {
-    // A captain session wins over everything. That tablet has no table and
-    // must not fall into the guest setup flow.
-    const capRaw = localStorage.getItem('ss_captain_session')
-    const capEv  = localStorage.getItem('ss_captain_event')
-    if (capRaw && capEv) {
-      try {
-        const cap = JSON.parse(capRaw)
-        const cev = JSON.parse(capEv)
-        setCaptain(cap); setEventData(cev)
-        goTo('captaintable'); refreshEvent(cev.id)
-        return
-      } catch (e) {
-        localStorage.removeItem('ss_captain_session')
-        localStorage.removeItem('ss_captain_event')
-      }
-    }
-    const ok   = localStorage.getItem('ss_setup_complete')
-    const ev   = localStorage.getItem('ss_setup_event')
-    const td   = localStorage.getItem('ss_setup_table')
-    const tNum = localStorage.getItem('ss_setup_table_number')
-    if (ok && ev && td) {
-      try {
-        const evObj = JSON.parse(ev)
+  /* ── Where this tablet starts ─────────────────────────────────────────
 
-        // A guest session saved for an earlier event must not resume today.
-        // This is exactly what put a Select Table screen in front of a
-        // captain: the tablet restored a previous setup before it ever
-        // looked at which event is actually running.
-        const d0 = new Date()
-        const todayISO = d0.getFullYear() + '-' + String(d0.getMonth()+1).padStart(2,'0') +
-          '-' + String(d0.getDate()).padStart(2,'0')
-        if (evObj.date !== todayISO || evObj.service_mode === 'captain') {
-          ;['ss_setup_complete','ss_setup_event','ss_setup_table','ss_setup_table_number']
-            .forEach(k => localStorage.removeItem(k))
+     1. A saved captain session resumes, if its event is still today.
+     2. Otherwise a saved guest table resumes, if its event is still today
+        and still self-service.
+     3. Otherwise decideEntry() - the one rule, written out above entryFor()
+        in components/guest/deviceEntry.js.
+
+     A saved session is then checked against the server. If its event has
+     been deleted or moved to another day, the session is cleared and the
+     rule runs. Nothing ever needs clearing by hand.                       */
+  useEffect(() => {
+    const cap = readSaved('ss_captain_session')
+    const cev = readSaved('ss_captain_event')
+    if (cap && cev && sessionStillCurrent(cev.date)) {
+      setCaptain(cap); setEventData(cev)
+      goTo('captaintable')
+      // ss-multi-kitchen: landing waits for the fresh event, so a cached
+      // copy cannot send the captain to a table by mistake.
+      setMkLand(true)
+      refreshEvent(cev.id).then(r => {
+        if (r.status === 'gone' || (r.status === 'ok' && !sessionStillCurrent(r.data.date))) {
+          dropCaptainSession()
           decideEntry()
           return
         }
-
-        setEventData(evObj)
-        setTableData(JSON.parse(td))
-        setTableNumber(parseInt(tNum))
-        goTo('welcome')
-        // localStorage holds a snapshot taken at setup time. Pull the live
-        // record so branding changes (catering name, logo, welcome note,
-        // video) reach the tablet without a re-setup.
-        refreshEvent(evObj.id)
-      } catch(e) { localStorage.clear(); goTo('setup') }
-    } else {
-      decideEntry()
+        setMkEvChecked(true)
+      })
+      return
     }
+    // Yesterday's session, or half of one: neither may steer this tablet.
+    clearCaptainKeys()
+
+    const ok   = localStorage.getItem('ss_setup_complete')
+    const evObj = readSaved('ss_setup_event')
+    const td   = readSaved('ss_setup_table')
+    const tNum = localStorage.getItem('ss_setup_table_number')
+    if (ok && evObj && td) {
+      // A guest session saved for an earlier event must not resume today.
+      if (!sessionStillCurrent(evObj.date)) {
+        clearGuestKeys()
+        decideEntry()
+        return
+      }
+      // Its event is Captain Service now: this is a captain's tablet.
+      if (isCaptainEvent(evObj)) {
+        clearGuestKeys()
+        goTo('captain')
+        return
+      }
+      setEventData(evObj)
+      setTableData(td)
+      setTableNumber(parseInt(tNum) || td.table_number)
+      goTo('welcome')
+      // localStorage holds a snapshot taken at setup time. Pull the live
+      // record so branding changes (catering name, logo, welcome note,
+      // video) reach the tablet without a re-setup - and so a deleted or
+      // re-dated event ends this table's session.
+      refreshEvent(evObj.id).then(r => {
+        if (r.status === 'gone' || (r.status === 'ok' && !sessionStillCurrent(r.data.date))) {
+          clearGuestKeys()
+          setEventData(null); setTableData(null); setTableNumber(null)
+          setCart([]); setActiveOrders([])
+          decideEntry()
+        }
+      })
+      return
+    }
+    clearGuestKeys()
+    decideEntry()
   }, [])
 
-  /* Which door this tablet opens on.
+  function readSaved(key) {
+    try { return JSON.parse(localStorage.getItem(key) || 'null') } catch (e) { return null }
+  }
 
-     A tablet at a captain-only event must never be asked to claim a table,
-     and one at a self-service event must never be asked for a captain PIN.
-     With only one kind of event running today the tablet decides by itself;
-     the chooser appears only when both kinds are live, which is rare. */
-  async function decideEntry() {
-    try {
-      const d = new Date()
-      const today = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') +
-        '-' + String(d.getDate()).padStart(2,'0')
-      const { data } = await supabase.from('events')
-        .select('*').order('date', { ascending:false }).limit(50)
-      const active = (data || []).filter(e => e.date === today)
-      const capEvents  = active.filter(e => e.service_mode === 'captain')
-      const selfEvents = active.filter(e => e.service_mode !== 'captain')
+  /* Which door a fresh tablet opens on - see entryFor() for the rule.
+     A remembered choice (ss_device_mode) is only highlighted on the
+     chooser; it never skips it.
+     silent: the No-event screen's own 30-second re-check - no Loading
+     flash, and ignored if the tablet has moved on meanwhile. */
+  async function decideEntry(silent) {
+    if (!silent) goTo('loading')
+    const r = await loadTodaysEvents()
+    if (silent && appStateRef.current !== 'noevent') return
+    setEntryInfo({ captainEvents: r.captainEvents, selfEvents: r.selfEvents, offline: !r.ok })
+    goTo(r.ok ? entryFor(r.captainEvents, r.selfEvents) : 'noevent')
+  }
+  const decideEntryRef = useRef(decideEntry)
+  decideEntryRef.current = decideEntry
+  const retryEntry = useCallback(silent => decideEntryRef.current(silent), [])
 
-      // Asked once per tablet, then remembered. With both kinds of event
-      // running today the tablet cannot know by itself, but a device that
-      // was a captain's yesterday is almost certainly a captain's today -
-      // and nobody wants to answer this on twenty tablets before service.
-      const remembered = localStorage.getItem('ss_device_mode')
-      if (remembered === 'captain' && capEvents.length)  { goTo('captain'); return }
-      if (remembered === 'guest'   && selfEvents.length) { goTo('setup');   return }
-      if (capEvents.length && !selfEvents.length) { goTo('captain'); return }
-      if (capEvents.length && selfEvents.length)  { goTo('entry');   return }
-      goTo('setup')
-    } catch (e) {
-      // Offline or the server is unreachable. Self-service is the older and
-      // far commoner case, so that is the safer place to land.
-      goTo('setup')
-    }
+  // The two ways across. Each clears only the OTHER mode's saved keys.
+  function toGuestSetup() {
+    clearCaptainKeys()
+    rememberMode('guest')
+    goTo('setup')
+  }
+  function toCaptainSignIn() {
+    clearGuestKeys()
+    rememberMode('captain')
+    setTableData(null); setTableNumber(null)
+    goTo('captain')
+  }
+
+  // A saved captain session whose event is gone. Everything switchCaptain
+  // clears, plus the event itself.
+  function dropCaptainSession() {
+    clearCaptainKeys()
+    captainRef.current = null
+    setCaptain(null); setEventData(null)
+    setCart([]); setCaptainTable(null); setHeldCarts({})
+    setMkLand(false); setMkCapSynced(false); setMkEvChecked(false)
+    setChairPickerOpen(false); setMkSent(null)
   }
 
   function handleCaptainLogin(cap, ev) {
-    // Kept apart from the ss_setup_* keys on purpose. A tablet that ended up
-    // holding half a guest session and half a captain session would be very
-    // hard to reason about at a live event.
+    // Kept apart from the ss_setup_* keys on purpose, and those are cleared
+    // here. A tablet that ended up holding half a guest session and half a
+    // captain session would be very hard to reason about at a live event.
+    clearGuestKeys()
     localStorage.setItem('ss_captain_session', JSON.stringify(cap))
     localStorage.setItem('ss_captain_event', JSON.stringify(ev))
     setCaptain(cap); setEventData(ev)
     setTableData(null); setTableNumber(null)
     setCart([]); setActiveOrders([]); setCaptainTable(null); setHeldCarts({})
+    // ss-multi-kitchen: both rows were read moments ago by the sign-in
+    // screen, so a linked captain can go straight to their table.
+    setMkLand(true); setMkEvChecked(true); setMkCapSynced(true)
     goTo('captaintable')
   }
 
@@ -402,10 +473,118 @@ export default function GuestApp() {
   // them in the database. The incoming captain sees what every other captain
   // sees, with the name of whoever took it down.
   function switchCaptain() {
+    captainRef.current = null
     localStorage.removeItem('ss_captain_session')
     localStorage.removeItem('ss_captain_event')
     setCaptain(null); setCart([]); setCaptainTable(null)
+    setMkLand(false); setMkCapSynced(false); setChairPickerOpen(false); setMkSent(null)
     goTo('captain')
+  }
+
+  /* ss-multi-kitchen: the captain row, read fresh.
+
+     The admin links a captain to a table under Control. A tablet that
+     signed in before that - or restored a session cached yesterday - holds
+     a captain object without the link. Read on arrival, again every time
+     the grid comes up, and every 15 seconds while it is up, so an unlinked
+     captain is picked up the moment the admin links them. The cached
+     session is kept in step. Multi-kitchen events only. */
+  const onGrid = appState === 'captaintable'
+  useEffect(() => {
+    if (!captain?.id || !eventData?.multi_kitchen) return
+    let stop = false
+    const id = captain.id
+    async function sync() {
+      try {
+        const { data } = await supabase.from('captains').select('*').eq('id', id).maybeSingle()
+        if (stop) return
+        if (data) {
+          setCaptain(prev => {
+            if (!prev || prev.id !== data.id) return prev
+            // The PIN is left as signed in with, so the guard below notices a new one
+            const { pin: _newPin, ...rest } = data
+            const next = { ...prev, ...rest }
+            return JSON.stringify(next) === JSON.stringify(prev) ? prev : next
+          })
+          try {
+            const raw = localStorage.getItem('ss_captain_session')
+            const cur = raw ? JSON.parse(raw) : null
+            if (cur && cur.id === data.id) {
+              const { pin: _p, ...fresh } = data
+              localStorage.setItem('ss_captain_session', JSON.stringify({ ...cur, ...fresh }))
+            }
+          } catch (e) { /* storage full or blocked - the in-memory copy is current */ }
+        }
+      } catch (e) { /* offline: carry on with the cached captain */ }
+      if (!stop) setMkCapSynced(true)
+    }
+    sync()
+    const t = onGrid ? setInterval(sync, 15000) : null
+    return () => { stop = true; if (t) clearInterval(t) }
+  }, [captain?.id, eventData?.id, eventData?.multi_kitchen, onGrid])
+
+  /* A saved sign-in the desk has since ended - the captain was removed, or
+     given a new PIN - must not carry on from the tablet's memory. Checked
+     at start, every minute, and whenever the screen wakes. Offline: the
+     tablet carries on as it is. */
+  useEffect(() => {
+    if (!captain?.id) return
+    let stop = false
+    const id = captain.id
+    const pin = String(captain.pin ?? '')
+    async function check() {
+      try {
+        const { data, error } = await supabase.from('captains').select('id, is_active, pin').eq('id', id).maybeSingle()
+        if (stop || error) return
+        const reason = !data || data.is_active === false ? 'You were signed out: this captain was removed at the desk.'
+          : pin && data.pin != null && String(data.pin) !== pin ? 'Your PIN was changed at the desk. Sign in with the new PIN.'
+          : null
+        if (!reason) return
+        setSignOutReason(reason)
+        dropCaptainSession()
+        goTo('captain')
+      } catch (e) { /* offline */ }
+    }
+    check()
+    const t = setInterval(check, 60000)
+    const vis = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', vis)
+    return () => { stop = true; clearInterval(t); document.removeEventListener('visibilitychange', vis) }
+  }, [captain?.id])
+
+  // The Update button is for staff: guest screens update quietly at a safe moment
+  useEffect(() => { hideUpdatePill(!captain && ['welcome', 'menu', 'status', 'genie', 'setup', 'entry', 'noevent', 'loading'].includes(appState)) }, [captain, appState])
+
+  // A guest's cart lives only in memory: no automatic update while it has dishes
+  useEffect(() => { setUnsavedCheck(() => (cartRef.current?.length || 0) > 0) ; return () => setUnsavedCheck(null) }, [])
+
+  // ss-multi-kitchen: a linked captain lands straight on their table's menu
+  // after sign-in or restore. Once only - back from the menu goes to the
+  // grid and stays there.
+  useEffect(() => {
+    if (!mkLand || !mkCapSynced || !mkEvChecked) return
+    if (appState !== 'captaintable' || !captain || !eventData?.multi_kitchen) return
+    const n = captain.table_number
+    if (n == null || n === '') return
+    setMkLand(false)
+    openTableMenu(Number(n))
+  }, [mkLand, mkCapSynced, mkEvChecked, appState, captain?.table_number, eventData?.multi_kitchen])
+
+  // The chair sheet never outlives the menu or the cart it was opened for
+  useEffect(() => {
+    if (chairPickerOpen && (appState !== 'menu' || cart.length === 0)) setChairPickerOpen(false)
+  }, [chairPickerOpen, appState, cart.length])
+
+  // ss-multi-kitchen: after an order the captain carries on at the SAME
+  // table - Place another order, the Genie timeout and Back all come here.
+  function mkOrderAgain() {
+    const t = mkSent?.table
+    setCaptainSent(null); setMkSent(null)
+    if (t != null) openTableMenu(Number(t)); else captainBackToGrid()
+  }
+
+  function setCartNote(itemId, note) {
+    setCart(prev => prev.map(c => c.id === itemId ? { ...c, note } : c))
   }
 
   /* Picking a table is now the captain's first act, not their last.
@@ -428,6 +607,8 @@ export default function GuestApp() {
   }, [appState, captain?.id, eventData?.id])
 
   function captainPickTable(n, state, live) {
+    // ss-multi-kitchen: no "table busy" there - a table takes many orders
+    if (eventData?.multi_kitchen) { openTableMenu(n); return }
     if (state === 'red') {
       setBlockedTable({ n, live, limit: eventData?.max_orders_per_table || 1 })
       return
@@ -439,6 +620,30 @@ export default function GuestApp() {
     setBlockedTable(null)
     setCaptainTable(n)
     setCartOpen(false)
+    setMkLand(false)
+    // The held cart is read from the server first. If the captain is signed
+    // out meanwhile (the desk changed the PIN or removed them, or the tablet
+    // was handed over), the menu must not open behind the sign-in screen.
+    const who = captainRef.current?.id
+    const stillSignedIn = () => !!captainRef.current && captainRef.current.id === who
+
+    // ss-multi-kitchen: two captains can share a table there, each ordering
+    // for their own chairs. A held cart is picked up only by the captain who
+    // wrote it - otherwise one captain's dishes would go out a second time
+    // on the other's order, to the wrong chairs.
+    const mk = !!eventData?.multi_kitchen
+    if (mk) {
+      let mine = []
+      try {
+        const { data } = await supabase.from('table_carts')
+          .select('items, captain_id').eq('event_id', eventData.id).eq('table_number', n).maybeSingle()
+        if (data && Array.isArray(data.items) && data.captain_id === captain?.id) mine = data.items
+      } catch (e) { /* start empty rather than guess */ }
+      if (!stillSignedIn()) return
+      setCart(mine)
+      goTo('menu')
+      return
+    }
 
     // Read the table's held cart fresh rather than trusting the grid's last
     // poll - another captain may have added to it thirty seconds ago.
@@ -448,6 +653,7 @@ export default function GuestApp() {
         .select('items').eq('event_id', eventData.id).eq('table_number', n).maybeSingle()
       if (data && Array.isArray(data.items)) items = data.items
     } catch (e) { /* fall back to what the grid had */ }
+    if (!stillSignedIn()) return
 
     setCart(items)
     goTo('menu')
@@ -495,8 +701,14 @@ export default function GuestApp() {
     cartSaveRef.current = setTimeout(async () => {
       try {
         if (!snapshot.length) {
-          await supabase.from('table_carts').delete()
-            .eq('event_id', eventData.id).eq('table_number', t)
+          // ss-multi-kitchen: only ever clear this captain's own held cart
+          if (eventData?.multi_kitchen) {
+            await supabase.from('table_carts').delete()
+              .eq('event_id', eventData.id).eq('table_number', t).eq('captain_id', captain.id)
+          } else {
+            await supabase.from('table_carts').delete()
+              .eq('event_id', eventData.id).eq('table_number', t)
+          }
         } else {
           await supabase.from('table_carts').upsert({
             event_id: eventData.id,
@@ -514,8 +726,14 @@ export default function GuestApp() {
   async function clearHeldCart(tableNum) {
     if (!eventData?.id || tableNum == null) return
     try {
-      await supabase.from('table_carts').delete()
-        .eq('event_id', eventData.id).eq('table_number', tableNum)
+      // ss-multi-kitchen: only this captain's own held cart
+      if (eventData?.multi_kitchen && captainRef.current) {
+        await supabase.from('table_carts').delete()
+          .eq('event_id', eventData.id).eq('table_number', tableNum).eq('captain_id', captainRef.current.id)
+      } else {
+        await supabase.from('table_carts').delete()
+          .eq('event_id', eventData.id).eq('table_number', tableNum)
+      }
     } catch (e) {}
     setHeldCarts(prev => { const next = { ...prev }; delete next[tableNum]; return next })
   }
@@ -581,13 +799,17 @@ export default function GuestApp() {
     return () => clearTimeout(t)
   }, [chatToast])
 
-  // Keep event branding in sync with the supervisor's edits
+  // Keep event branding in sync with the supervisor's edits.
+  // Returns { status: 'ok', data } | { status: 'gone' } | { status: 'error' }.
+  // 'gone' (the event no longer exists) is acted on only at start-up, by the
+  // restore effect; a poll during service never throws a tablet out.
   async function refreshEvent(eventId) {
-    if (!eventId) return
+    if (!eventId) return { status: 'error' }
     try {
-      const { data } = await supabase.from('events')
-        .select('*').eq('id', eventId).single()
-      if (!data) return
+      const { data, error } = await supabase.from('events')
+        .select('*').eq('id', eventId).maybeSingle()
+      if (error) return { status: 'error' }
+      if (!data) return { status: 'gone' }
       setEventData(data)
 
       // A captain tablet keeps its own key and must never write the guest
@@ -595,22 +817,22 @@ export default function GuestApp() {
       // which is what later resumed as a Select Table screen.
       if (captainRef.current) {
         localStorage.setItem('ss_captain_event', JSON.stringify(data))
-        return
+        return { status: 'ok', data }
       }
 
       // The admin switched this event to Captain Service while the tablet
       // was sitting on it. Stop being a guest tablet rather than holding a
       // table number nobody will ever place a tablet on.
-      if (data.service_mode === 'captain') {
-        ;['ss_setup_complete','ss_setup_event','ss_setup_table','ss_setup_table_number']
-          .forEach(k => localStorage.removeItem(k))
+      if (isCaptainEvent(data)) {
+        clearGuestKeys()
         setTableData(null); setTableNumber(null)
         goTo('captain')
-        return
+        return { status: 'ok', data }
       }
 
       localStorage.setItem('ss_setup_event', JSON.stringify(data))
-    } catch (e) {}
+      return { status: 'ok', data }
+    } catch (e) { return { status: 'error' } }
   }
 
   // Live branding updates while the event is running
@@ -656,13 +878,13 @@ export default function GuestApp() {
   }
 
   function handleSetupComplete(ev, td) {
+    clearCaptainKeys()
     setEventData(ev); setTableData(td); setTableNumber(td.table_number)
     setCart([]); goTo('welcome')
   }
 
   function triggerReSetup() {
-    ['ss_setup_complete','ss_setup_event','ss_setup_table','ss_setup_table_number']
-      .forEach(k => localStorage.removeItem(k))
+    clearGuestKeys()
     setEventData(null); setTableData(null); setTableNumber(null)
     setCart([]); setActiveOrders([]); goTo('setup')
   }
@@ -774,7 +996,8 @@ export default function GuestApp() {
   const cartCount = cart.reduce((s,i) => s+i.quantity, 0)
 
   // After ordering the guest sees the genie screen, not the Track page.
-  function handleOrderPlaced(newOrderId, forTable) {
+  // mk is passed only by the multi-kitchen chair picker: { kots, chairs, sentAt }
+  function handleOrderPlaced(newOrderId, forTable, mk) {
     // cartOpen must not survive the cart being emptied, or CartDrawer
     // reads it as true the next time it mounts and opens on its own.
     setCart([]); setCartOpen(false)
@@ -790,6 +1013,7 @@ export default function GuestApp() {
       if (forTable != null) clearHeldCart(forTable)
       setCaptainSent(forTable != null ? String(forTable) : '')
       setLastOrderId(newOrderId || null)
+      setMkSent(mk ? { ...mk, orderId: newOrderId, table: forTable } : null)
       goTo('genie')
       return
     }
@@ -828,19 +1052,66 @@ export default function GuestApp() {
     </div>
   )
 
+  // Both kinds of event today: ask, every time. The last choice is only
+  // highlighted.
   if (appState === 'entry') return (
-    <EntryChooser
-      onGuest={() => { localStorage.setItem('ss_device_mode', 'guest'); goTo('setup') }}
-      onCaptain={() => { localStorage.setItem('ss_device_mode', 'captain'); goTo('captain') }} />
+    <EntryChooser remembered={rememberedMode()}
+      captainEvents={entryInfo.captainEvents} selfEvents={entryInfo.selfEvents}
+      onGuest={toGuestSetup} onCaptain={toCaptainSignIn} />
   )
 
+  if (appState === 'noevent') return (
+    <NoEventScreen offline={entryInfo.offline} onRetry={retryEntry} />
+  )
+
+  // "Guest tablet? Set up a table ->" appears there when a self-service
+  // event is running today.
   if (appState === 'captain') return (
-    <CaptainLogin onLogin={handleCaptainLogin} onBack={() => decideEntry()} />
+    <CaptainLogin onLogin={handleCaptainLogin} onGuest={toGuestSetup} />
   )
 
+  // Lists self-service events only. "Captain? Sign in here ->" appears
+  // there when a Captain Service event is running today.
   if (appState === 'setup') return (
     <SetupScreen onSetupComplete={handleSetupComplete}
-      currentTableNumber={tableNumber} currentEventId={eventData?.id} />
+      currentTableNumber={tableNumber} currentEventId={eventData?.id}
+      onSwitchToCaptain={toCaptainSignIn} />
+  )
+
+  // ss-maestro: a captain at a Maestro event works only on the Maestro
+  // screens (Take order + Course board); the grid, menu and Genie of the
+  // other captain modes are never shown.
+  if (captain && eventData?.maestro && ['captaintable', 'menu', 'genie', 'status'].includes(appState)) return (
+    <>
+      <Suspense fallback={<div style={{ minHeight:'100vh', background:'#F6F4EF' }} />}>
+        <MaestroCaptain eventData={eventData} captain={captain} onSwitchCaptain={switchCaptain}
+          onChat={() => setChatOpen(true)} chatUnread={chatUnread} />
+      </Suspense>
+      {/* The same chat with the control desk as every captain event. The
+          launcher is the Desk button in the top bar, so nothing floats over
+          the Fire bar at the bottom. */}
+      <CaptainChat eventData={eventData} captain={captain}
+        minimized={!chatOpen} unread={chatUnread} hidePill bottomOffset={16} title="Control Desk"
+        onToggle={() => setChatOpen(o => !o)} />
+      {chatToast && (
+        <div onClick={() => { setChatToast(null); setChatOpen(true) }}
+          style={{ position:'fixed', top:0, left:0, right:0, zIndex:300,
+            background:'#1A0A0A', borderBottom:'3px solid #E8890C',
+            padding:'12px 16px', display:'flex', alignItems:'center', gap:12,
+            cursor:'pointer', boxShadow:'0 6px 24px rgba(0,0,0,0.5)' }}>
+          <span style={{ fontSize:26 }}>💬</span>
+          <span style={{ flex:1, minWidth:0 }}>
+            <span style={{ display:'block', color:'#E8890C', fontSize:11,
+              fontWeight:900, letterSpacing:'0.5px' }}>CONTROL DESK</span>
+            <span style={{ display:'block', color:'#fff', fontSize:14, fontWeight:700,
+              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {chatToast.body}
+            </span>
+          </span>
+          <span style={{ flexShrink:0, color:'rgba(255,255,255,0.55)', fontSize:11, fontWeight:700 }}>Tap to reply</span>
+        </div>
+      )}
+    </>
   )
 
   if (appState === 'captaintable' && captain) return (
@@ -901,7 +1172,10 @@ export default function GuestApp() {
       {appState === 'genie' && (
         <GenieScreen tableData={tableData} eventData={eventData} orderId={lastOrderId}
           captain={captain} forTable={captainSent}
-          onOrderAgain={() => { setCaptainSent(null); captain ? captainBackToGrid() : goTo('menu') }}
+          mk={captain && eventData?.multi_kitchen ? mkSent : null}
+          onOrderAgain={() => {
+            if (captain && eventData?.multi_kitchen && mkSent?.table != null) { mkOrderAgain(); return }
+            setCaptainSent(null); captain ? captainBackToGrid() : goTo('menu') }}
           onDone={() => goTo('welcome')} />
       )}
       {appState === 'status' && (
@@ -917,7 +1191,18 @@ export default function GuestApp() {
           captain={captain} captainTable={captainTable}
           onShowStatus={() => captain ? setShowCaptainOrders(true) : goTo('status')}
           onOpenMenu={() => setMenuSheetOpen(true)}
-          showTrack={hasActiveOrders || !!captain} />
+          showTrack={hasActiveOrders || !!captain}
+          onOpenChairs={captain && eventData?.multi_kitchen ? () => setChairPickerOpen(true) : undefined}
+          onNote={captain && eventData?.multi_kitchen ? setCartNote : undefined} />
+      )}
+      {/* ss-multi-kitchen: Place Order -> chairs -> one call sends the order
+          and a KOT to every kitchen it touches. */}
+      {chairPickerOpen && captain && eventData?.multi_kitchen && appState === 'menu' && cartCount > 0 && (
+        <ChairPicker eventData={eventData} captain={captain} tableNumber={captainTable}
+          cart={cart} isOnline={isOnline}
+          onClose={() => setChairPickerOpen(false)}
+          onNote={setCartNote}
+          onSent={r => { setChairPickerOpen(false); handleOrderPlaced(r.orderId, captainTable, r) }} />
       )}
       {/* ss-toast-removed-48 - the Genie screen replaced this in batch 48 */}
       {showCaptainOrders && captain && (

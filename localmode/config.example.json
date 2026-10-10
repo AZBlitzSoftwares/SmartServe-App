@@ -1,0 +1,9 @@
+{
+  "cloud": {
+    "url": "https://kapmreqrhlifxuzjjejz.supabase.co",
+    "anonKey": "PASTE_ANON_KEY",
+    "dbUrl": "PASTE_DATABASE_CONNECTION_STRING"
+  },
+  "port": 8080,
+  "events": []
+}

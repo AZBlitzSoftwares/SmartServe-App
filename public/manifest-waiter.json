@@ -1,0 +1,18 @@
+{
+  "name": "Smart Serve Waiter",
+  "short_name": "SS Waiter",
+  "description": "Kitchen waiter app for Janu's Smart Serve events",
+  "start_url": "/waiter",
+  "scope": "/waiter",
+  "display": "standalone",
+  "background_color": "#1A0A0A",
+  "theme_color": "#1A0A0A",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

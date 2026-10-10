@@ -1,0 +1,258 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  WIDTH,
+  buildKot,
+  decodeEscPos,
+  textLines,
+  sanitize,
+  wrap,
+  leftRight,
+  formatTime,
+  parseItems,
+  totalQty,
+  parseStatusByte,
+  statusByteFor,
+} from '../escpos.mjs';
+
+const orderJob = {
+  id: 'k1',
+  kind: 'order',
+  kitchen_name: 'Italian Kitchen',
+  kot_no: 'IT-014',
+  table_number: 8,
+  chairs: [2, 3],
+  captain_name: 'Rahul',
+  created_at: '2026-10-13T14:12:00.000Z',
+  event_name: 'Sharma Wedding',
+  items: [
+    { name: 'Penne Arrabbiata', qty: 2, note: 'Jain', veg: true },
+    { name: 'Tiramisu', qty: 1, note: null, veg: true },
+  ],
+};
+
+const find = (lines, pred) => lines.find(pred);
+
+test('order KOT: header, table, chairs, KOT no + time, captain, items, note, total', () => {
+  const buf = buildKot(orderJob, { now: new Date('2026-10-13T14:12:30Z') });
+  const d = decodeEscPos(buf);
+  const lines = d.lines;
+  const texts = lines.map((l) => l.text.trim());
+
+  // starts with ESC @ and ESC t 0, ends with a partial cut GS V 66 3
+  assert.deepEqual([...buf.subarray(0, 5)], [0x1b, 0x40, 0x1b, 0x74, 0]);
+  assert.deepEqual([...buf.subarray(-4)], [0x1d, 0x56, 66, 3]);
+  assert.equal(d.cuts, 1);
+  assert.equal(d.unknown, 0, 'only known commands are used');
+
+  const kitchen = find(lines, (l) => l.text.trim() === 'ITALIAN KITCHEN');
+  assert.ok(kitchen, 'kitchen name printed in capitals');
+  assert.equal(kitchen.align, 'center');
+  assert.equal(kitchen.bold, true);
+  assert.equal(kitchen.w, 2);
+  assert.equal(kitchen.h, 2);
+
+  const table = find(lines, (l) => l.text.trim() === 'TABLE 8');
+  assert.ok(table, 'table line');
+  assert.ok(table.w >= 3 && table.h >= 3, 'table number is the biggest text');
+  assert.equal(table.align, 'left');
+
+  const chairs = find(lines, (l) => l.text.trim() === 'CHAIRS 2, 3');
+  assert.ok(chairs);
+  assert.equal(chairs.w, 2);
+
+  const kot = find(lines, (l) => l.text.startsWith('KOT IT-014'));
+  assert.ok(kot, 'KOT number line');
+  assert.equal(kot.text.length, WIDTH, 'KOT no left and time right on one 48-column line');
+  assert.ok(kot.text.endsWith(formatTime(new Date(orderJob.created_at))));
+  assert.match(kot.text, /\d\d:\d\d [AP]M$/);
+
+  assert.ok(texts.includes('Captain: Rahul'));
+  const item = find(lines, (l) => l.text.trim() === '2 x Penne Arrabbiata');
+  assert.ok(item);
+  assert.equal(item.bold, true);
+  assert.equal(item.h, 2, 'items are double height');
+  const note = find(lines, (l) => l.text.includes('>> JAIN <<'));
+  assert.ok(note, 'note on its own line');
+  assert.equal(note.text, '   >> JAIN <<');
+  assert.equal(note.reverse, true);
+  assert.ok(texts.includes('1 x Tiramisu'));
+  assert.ok(texts.includes('Total items: 3'), 'total is the sum of quantities');
+  assert.ok(texts.some((t) => t.includes('Sharma Wedding')), 'event name in the footer');
+  assert.ok(texts.includes('-'.repeat(WIDTH)), 'dashed separators');
+  assert.ok(!texts.some((t) => t.includes('BACKUP')));
+});
+
+test('every byte of text is printable ASCII', () => {
+  const job = {
+    ...orderJob,
+    kitchen_name: 'Café – Arabic “Grill”',
+    captain_name: 'José',
+    event_name: 'Eid ✨ Dinner',
+    items: [{ name: 'Shish Taouk × 2 – spicy 🌶️', qty: 1, note: 'No “onion”\u0007\u001b@' }],
+  };
+  const buf = buildKot(job);
+  const d = decodeEscPos(buf);
+  for (const l of d.lines) assert.match(l.text, /^[\x20-\x7e]*$/, `line "${l.text}" is ASCII`);
+  const texts = d.lines.map((l) => l.text.trim());
+  assert.ok(texts.includes('CAFE - ARABIC "GRILL"'));
+  assert.ok(texts.includes('Captain: Jose'));
+  assert.ok(texts.includes('1 x Shish Taouk x 2 - spicy ?'));
+  assert.ok(texts.some((t) => t.includes('>> NO "ONION"@ <<')), 'control bytes in a note are dropped, not sent');
+  assert.equal(d.unknown, 0);
+});
+
+test('sanitize replaces known symbols, drops accents and control bytes, marks the rest', () => {
+  assert.equal(sanitize('2 × Crème brûlée – “nice” ‘ok’ …'), "2 x Creme brulee - \"nice\" 'ok' ...");
+  assert.equal(sanitize('a—b'), 'a-b');
+  assert.equal(sanitize('Paneer 🌶🌶 Tikka'), 'Paneer ? Tikka');
+  assert.equal(sanitize('मसाला dosa'), '? dosa');
+  assert.equal(sanitize('tab\there\nnew'), 'tab here new');
+  assert.equal(sanitize('\u001b@\u0010\u0004\u0004x'), '@x');
+  assert.equal(sanitize(null), '');
+  assert.equal(sanitize(12), '12');
+});
+
+test('wrap keeps words, indents continuation lines and splits very long words', () => {
+  assert.deepEqual(wrap('a b c', 48), ['a b c']);
+  const lines = wrap('1 x Wood-fired Margherita Pizza with extra basil and buffalo mozzarella', 24, 4);
+  assert.ok(lines.length > 1);
+  for (const l of lines) assert.ok(l.length <= 24, `"${l}" fits`);
+  assert.ok(lines.slice(1).every((l) => l.startsWith('    ') && l[4] !== ' '), 'continuations are indented');
+  assert.deepEqual(wrap('x'.repeat(30), 12), ['x'.repeat(12), 'x'.repeat(12), 'x'.repeat(6)]);
+  assert.deepEqual(wrap('', 10), ['']);
+});
+
+test('long dish names wrap within 48 columns on the KOT', () => {
+  const job = {
+    ...orderJob,
+    items: [{ name: 'Slow-cooked Lamb Ouzi with Spiced Rice, Roasted Nuts and Raisins', qty: 12 }],
+  };
+  const lines = decodeEscPos(buildKot(job)).lines;
+  const idx = lines.findIndex((l) => l.text.startsWith('12 x Slow-cooked'));
+  assert.ok(idx >= 0);
+  assert.ok(lines[idx].text.length <= WIDTH);
+  assert.ok(lines[idx + 1].text.startsWith('     '), 'second line indented under the dish name');
+  assert.ok(lines[idx + 1].text.trim().length > 0);
+  assert.ok(textLines(buildKot(job)).includes('Total items: 12'));
+});
+
+test('cancel KOT: CANCELLED banner, do-not-prepare line and the original items', () => {
+  const texts = textLines(buildKot({ ...orderJob, kind: 'cancel' }));
+  assert.ok(texts.includes('ITALIAN KITCHEN'));
+  assert.ok(texts.includes('TABLE 8'));
+  assert.ok(texts.includes('CHAIRS 2, 3'));
+  assert.ok(texts.some((t) => t.startsWith('KOT IT-014')));
+  assert.equal(texts.filter((t) => t === '*** CANCELLED ***').length, 2, 'banner at top and bottom');
+  assert.ok(texts.includes('DO NOT PREPARE / DELIVER'));
+  assert.ok(texts.includes('2 x Penne Arrabbiata'));
+  assert.ok(texts.includes('1 x Tiramisu'));
+  const banner = decodeEscPos(buildKot({ ...orderJob, kind: 'cancel' })).lines.find((l) => l.text.includes('CANCELLED'));
+  assert.equal(banner.reverse, true);
+  assert.equal(banner.w, 2);
+});
+
+test('test print: kitchen, printer address, time and the reassurance line', () => {
+  const job = { id: 't1', kind: 'test', kitchen_name: 'Arabic', items: [], event_name: 'Demo' };
+  const texts = textLines(buildKot(job, { printer: '192.168.1.102:9100', now: new Date(2026, 9, 13, 19, 42) }));
+  assert.ok(texts.includes('TEST PRINT'));
+  assert.ok(texts.includes('ARABIC'));
+  assert.ok(texts.includes('Printer: 192.168.1.102:9100'));
+  assert.ok(texts.includes('Time:    13 Oct 2026, 07:42 PM'));
+  assert.ok(texts.join(' ').includes('If you can read this, KOTs for Arabic will print here.'));
+});
+
+test('backup printer line', () => {
+  const texts = textLines(buildKot(orderJob, { backup: true }));
+  assert.ok(texts.includes('PRINTED ON BACKUP PRINTER (main printer down)'));
+});
+
+test('missing pieces do not break a KOT', () => {
+  const texts = textLines(buildKot({ kind: 'order', items: '[{"name":"Hummus","qty":"3"}]', chairs: [5] }));
+  assert.ok(texts.includes('KITCHEN'));
+  assert.ok(texts.includes('CHAIR 5'));
+  assert.ok(texts.includes('3 x Hummus'));
+  assert.ok(texts.includes('Total items: 3'));
+  assert.ok(!texts.some((t) => t.startsWith('TABLE')));
+  assert.ok(!texts.some((t) => t.startsWith('Captain')));
+  assert.deepEqual(parseItems('not json'), []);
+  assert.equal(totalQty([{ name: 'a', qty: 2 }, { name: 'b' }, { name: 'c', qty: 0 }]), 4);
+});
+
+test('leftRight and formatTime', () => {
+  assert.equal(leftRight('KOT IT-014', '07:42 PM').length, WIDTH);
+  assert.equal(formatTime(new Date(2026, 9, 13, 0, 5)), '12:05 AM');
+  assert.equal(formatTime(new Date(2026, 9, 13, 12, 0)), '12:00 PM');
+  assert.equal(formatTime(new Date(2026, 9, 13, 19, 42)), '07:42 PM');
+});
+
+test('printer status byte (DLE EOT 4)', () => {
+  assert.equal(parseStatusByte(0x12), 'online');
+  assert.equal(parseStatusByte(0x12 | 0x0c), 'paper_low');
+  assert.equal(parseStatusByte(0x12 | 0x60), 'paper_out');
+  assert.equal(parseStatusByte(0x12 | 0x60 | 0x0c), 'paper_out');
+  assert.equal(parseStatusByte(0x41), null, 'not a status byte');
+  assert.equal(parseStatusByte(undefined), null);
+  for (const s of ['online', 'paper_low', 'paper_out']) assert.equal(parseStatusByte(statusByteFor(s)), s);
+});
+
+// ---------------------------------------------------------------------------
+// Smart Serve Maestro: cover-wise KOT
+// ---------------------------------------------------------------------------
+
+const maestroJob = {
+  id: 'm1',
+  kind: 'order',
+  kitchen_name: 'Asian',
+  kot_no: 'AS-A 014',
+  table_number: 7,
+  chairs: [3],
+  cover_no: 3,
+  barker: 'A',
+  barker_name: 'Rohit',
+  course: 'Starters',
+  firing_no: 2,
+  fired_at: '2026-10-13T15:13:00.000Z',
+  captain_name: 'Neha',
+  event_name: 'Demo',
+  items: [
+    { name: 'Crystal Veg Dim Sum', qty: 1, note: '' },
+    { name: 'Szechuan Eggplant', qty: 1, note: 'Jain' },
+  ],
+};
+
+test('maestro KOT: kitchen, KOT number, barker, cover, course, firing, plates', () => {
+  const lines = textLines(buildKot(maestroJob)).map((l) => l.trim());
+  const all = lines.join('\n');
+  assert.ok(lines.includes('ASIAN'));
+  assert.ok(lines.includes('KOT AS-A 014'));
+  assert.ok(lines.includes('Barker A - Rohit'));
+  assert.ok(lines.includes('T7 - C3'));
+  assert.ok(lines.includes('COURSE: STARTERS'));
+  assert.match(all, /Fired .*Firing #2/);
+  assert.match(all, /Table captain\s+Neha/);
+  assert.match(all, /1 x Crystal Veg Dim Sum/);
+  assert.match(all, />> JAIN <</);
+  assert.match(all, /Plates: 2\s+Cover: T7-C3/);
+  assert.doesNotMatch(all, /REMAKE|REPRINT|CHAIR/);
+});
+
+test('maestro KOT: remake and reprint banners', () => {
+  const all = textLines(buildKot({ ...maestroJob, is_remake: true, priority: true, is_reprint: true })).join('\n');
+  assert.match(all, /REMAKE - PRIORITY/);
+  assert.match(all, /REPRINT/);
+});
+
+test('maestro cancel slip keeps the cover and says do not dispatch', () => {
+  const all = textLines(buildKot({ ...maestroJob, kind: 'cancel', items: [{ name: 'Szechuan Eggplant', qty: 1 }] })).join('\n');
+  assert.match(all, /CANCELLED/);
+  assert.match(all, /DO NOT PREPARE \/ DISPATCH/);
+  assert.match(all, /T7 - C3/);
+  assert.match(all, /Plates cancelled: 1/);
+});
+
+test('a KOT without a cover still prints the multi-kitchen layout', () => {
+  const all = textLines(buildKot(orderJob)).join('\n');
+  assert.match(all, /CHAIRS 2, 3/);
+  assert.doesNotMatch(all, /Barker/);
+});

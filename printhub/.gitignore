@@ -1,0 +1,3 @@
+# per-laptop settings (holds the key) and daily logs
+config.json
+logs/

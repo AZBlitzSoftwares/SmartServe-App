@@ -23,7 +23,7 @@ const QUICK = [
   'Please call me',
 ]
 
-export default function CaptainChat({ eventData, captain, minimized, unread = 0, onToggle, hidePill, bottomOffset = 16 }) {
+export default function CaptainChat({ eventData, captain, minimized, unread = 0, onToggle, hidePill, bottomOffset = 16, title = 'Operator' }) {
   // On the menu screen the launcher lives in the bottom bar instead, so the
   // pill is suppressed there. A floating pill would sit on top of the order
   // buttons, which is the one part of that screen that must stay clear.
@@ -73,7 +73,7 @@ export default function CaptainChat({ eventData, captain, minimized, unread = 0,
       <div style={{ flexShrink:0, background:'#1A0A0A', padding:'12px 10px 12px 16px',
         display:'flex', alignItems:'center', gap:10 }}>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ color:'#fff', fontSize:15, fontWeight:900 }}>Operator</div>
+          <div style={{ color:'#fff', fontSize:15, fontWeight:900 }}>{title}</div>
           <div style={{ color:'rgba(255,255,255,0.5)', fontSize:11, fontWeight:600,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
             You are {captain?.name || 'captain'}
@@ -91,7 +91,7 @@ export default function CaptainChat({ eventData, captain, minimized, unread = 0,
         <ChatThread eventId={eventData?.id} captainId={captain?.id}
           me="captain" meName={captain?.name || ''}
           quickReplies={QUICK}
-          emptyHint={'Message the operator from here.\nThey see it on their screen straight away.'} />
+          emptyHint={'Message the ' + (title === 'Operator' ? 'operator' : title) + ' from here.\nThey see it on their screen straight away.'} />
       </div>
     </div>
   )
