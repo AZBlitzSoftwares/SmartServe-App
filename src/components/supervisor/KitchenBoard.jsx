@@ -1136,8 +1136,8 @@ function Board({ eventId, maestro }) {
       )}
       {hub === 'down' && (
         <Banner tone="red" icon={'🖨'}
-          title={'Print Hub is not running on the desk laptop – ' + waitingAll + (waitingAll === 1 ? ' KOT' : ' KOTs') + ' waiting to print'}
-          sub={'Start the Print Hub program on this laptop \u2013 if it is already open, check it is set to this event. Waiting KOTs print by themselves once it runs. ' + (Number.isFinite(hubAge) ? 'Last seen ' + agoText(hubAge) + '.' : 'Not seen today.')} />
+          title={'Nothing is printing: no Print Hub and no “Print from this laptop” – ' + waitingAll + (waitingAll === 1 ? ' KOT' : ' KOTs') + ' waiting to print'}
+          sub={'Switch on Print from this laptop (Control \u203a Kitchens & printers) on the laptop on the printers\u2019 Wi-Fi, or start the Print Hub there. Waiting KOTs print by themselves once it runs. ' + (Number.isFinite(hubAge) ? 'Last seen ' + agoText(hubAge) + '.' : 'Not seen today.')} />
       )}
       {hub === 'slow' && (
         <Banner tone="amber" icon={'🖨'}

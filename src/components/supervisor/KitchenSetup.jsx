@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { tableRanges } from '../../maestro/msData'
 import { useKitInfo, mb } from '../../lib/kitInfo'
 import { eposTestPrint, EPOS_HOST } from '../../lib/eposPrint'
+import { PrintStationSwitch } from './PrintStation'
 
 /* Kitchens set-up for a Captain + Multi-Kitchen event.
 
@@ -786,7 +787,7 @@ function KitchensSection({ eventId, maestro, kitchens, setKitchens, setCats, wai
     <div style={card} id="ks-kitchens">
       <SectionHead step={2} title="Kitchens & printers"
         sub={maestro
-          ? "One kitchen per cuisine, plus a First Course and a Desserts kitchen if you like. Every firing prints one KOT per cover, per kitchen and per barker, on that kitchen's printer, through the Print Hub on the desk laptop."
+          ? "One kitchen per cuisine, plus a First Course and a Desserts kitchen if you like. Every firing prints one KOT per cover, per kitchen and per barker, on that kitchen's printer, from the desk laptop (Print from this laptop, below, or the Print Hub)."
           : "One kitchen per cuisine. Each order is split into one KOT per kitchen and printed on that kitchen's printer by the Print Hub on the desk laptop."}
         right={!form && <button onClick={() => openAdd('')} style={btn}>+ Add kitchen</button>} />
 
@@ -911,7 +912,7 @@ function BrowserTestPrint({ kitchens }) {
   return (
     <div data-testid="browser-print" style={{ marginTop:10, fontSize:12.5, color:'var(--ink2)' }}>
       <button onClick={() => setOpen(o => !o)} style={{ background:'none', border:'none', padding:0, color:'var(--ink)', fontWeight:800,
-        fontSize:12.5, cursor:'pointer', textDecoration:'underline' }}>{open ? 'Hide' : 'Try'} printing without the Print Hub (test)</button>
+        fontSize:12.5, cursor:'pointer', textDecoration:'underline' }}>{open ? 'Hide' : 'Show'} the printer test from this browser</button>
       {open && (
         <div style={{ marginTop:8, border:'1.5px dashed var(--line)', borderRadius:10, padding:'10px 12px', lineHeight:1.55 }}>
           <div>Epson printers can print straight from a web page. On the laptop at the venue (same router as the printer),
@@ -1066,8 +1067,8 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
           connected to the printers’ router and close the other{hubs.length > 2 ? 's' : ''}, or KOTs can fail.</Banner></div>
       )}
       {note && <div style={{ marginTop:8 }}><Banner tone={note.tone} onClose={() => setNote(null)}>{note.text}</Banner></div>}
+      <PrintStationSwitch eventId={eventId}><BrowserTestPrint kitchens={kitchens} /></PrintStationSwitch>
       <PrintHubDownload />
-      <BrowserTestPrint kitchens={kitchens} />
       {open && list.length > 0 && (
         <div style={{ display:'grid', gap:6, marginTop:10 }}>
           {list.map(f => {

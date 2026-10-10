@@ -12,6 +12,30 @@
 
 export const WIDTH = 48; // characters per line, Font A on 80 mm paper
 
+// Node has Buffer; a browser (printing straight from the Control Desk, src/lib/printStation.js)
+// gets the few Buffer calls used here on plain byte arrays.
+const Bytes =
+  typeof Buffer !== 'undefined'
+    ? Buffer
+    : {
+        from(v) {
+          if (typeof v !== 'string') return Uint8Array.from(v);
+          const out = new Uint8Array(v.length);
+          for (let i = 0; i < v.length; i++) out[i] = v.charCodeAt(i) & 0xff; // like Node's 'ascii' (= latin1 when encoding)
+          return out;
+        },
+        concat(list) {
+          const out = new Uint8Array(list.reduce((n, p) => n + p.length, 0));
+          let at = 0;
+          for (const p of list) {
+            out.set(p, at);
+            at += p.length;
+          }
+          return out;
+        },
+        isBuffer: (x) => x instanceof Uint8Array,
+      };
+
 const ESC = 0x1b;
 const GS = 0x1d;
 const DLE = 0x10;
@@ -19,7 +43,7 @@ const EOT = 0x04;
 const LF = 0x0a;
 
 /** DLE EOT 4 = "tell me the roll paper sensor status" (answered in real time). */
-export const STATUS_REQUEST = Buffer.from([DLE, EOT, 4]);
+export const STATUS_REQUEST = Bytes.from([DLE, EOT, 4]);
 
 // ---------------------------------------------------------------------------
 // Text clean-up
@@ -142,7 +166,7 @@ class Receipt {
     this.parts = [];
   }
   raw(...bytes) {
-    this.parts.push(Buffer.from(bytes));
+    this.parts.push(Bytes.from(bytes));
     return this;
   }
   init() {
@@ -165,7 +189,7 @@ class Receipt {
     return this.raw(ESC, 0x4d, on ? 1 : 0); // ESC M n: Font B (64 columns)
   }
   text(s) {
-    this.parts.push(Buffer.from(sanitize(s), 'ascii'));
+    this.parts.push(Bytes.from(sanitize(s), 'ascii'));
     return this;
   }
   line(s = '') {
@@ -181,7 +205,7 @@ class Receipt {
     return this.raw(GS, 0x56, 66, 3); // GS V 66 3: feed to the cutter, partial cut
   }
   toBuffer() {
-    return Buffer.concat(this.parts);
+    return Bytes.concat(this.parts);
   }
 }
 
@@ -440,7 +464,7 @@ export function statusByteFor(status) {
  * (Virtual Printers page).
  */
 export function decodeEscPos(input) {
-  const buf = Buffer.isBuffer(input) ? input : Buffer.from(input);
+  const buf = Bytes.isBuffer(input) ? input : Bytes.from(input);
   const lines = [];
   const st = { align: 'left', bold: false, w: 1, h: 1, reverse: false, small: false };
   let cur = null;

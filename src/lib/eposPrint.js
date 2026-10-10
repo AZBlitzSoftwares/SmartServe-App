@@ -36,19 +36,39 @@ const CODES = {
   SchemaError: 'the printer did not understand the test slip',
 }
 
+// ePOS status bits (ASB_*) that matter for a kitchen printer
+const ASB_OFF_LINE = 0x00000008
+const ASB_COVER_OPEN = 0x00000020
+const ASB_RECEIPT_NEAR_END = 0x00020000
+const ASB_RECEIPT_END = 0x00080000
+
+/** Raw ESC/POS bytes (the Print Hub's own KOT layout) as one ePOS-Print document. */
+export function eposCommandXml(bytes) {
+  let hex = ''
+  for (let i = 0; i < bytes.length; i++) hex += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16)
+  return '<?xml version="1.0" encoding="utf-8"?>' +
+    '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+    '<epos-print xmlns="http://www.epson-pos.com/schemas/2011/03/epos-print">' +
+    '<command>' + hex + '</command>' +
+    '</epos-print></s:Body></s:Envelope>'
+}
+
+/** "http://192.168.0.201" for a printer on the usual port 9100 (its web printing is on port 80),
+    "http://host:port" for anything else (a test printer). */
+export function eposBase(host, port, secure = false) {
+  const p = Number(port) || 9100
+  return `${secure ? 'https' : 'http'}://${host}${p === 9100 || p === 80 ? '' : ':' + p}`
+}
+
 /**
- * Send a test slip. Returns { ok, kind, text }:
- *   ok true            printed
- *   kind 'printer'     the printer answered but did not print (paper, cover ...)
- *   kind 'blocked'     the browser did not let the request out, or nothing answered
- *   kind 'timeout'     no answer in time (wrong address, not on this network)
- *   kind 'notepos'     something answered but it is not Epson web printing
+ * Send one ePOS-Print document. Returns
+ *   { ok: true, status: 'online' | 'paper_low' }
+ *   { ok: false, kind: 'printer', status: 'paper_out' | 'offline', error }  the printer said no
+ *   { ok: false, kind: 'blocked' | 'timeout' | 'notepos', status: 'offline', error }
  */
-export async function eposTestPrint(host, { secure = false, timeoutMs = 15000, lines } = {}) {
-  const h = String(host || '').trim()
-  if (!EPOS_HOST.test(h)) return { ok: false, kind: 'input', text: 'Type the printer address, for example 192.168.0.201' }
-  const url = `${secure ? 'https' : 'http'}://${h}/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000`
-  const xml = eposTestXml(lines || ['Test print from this browser', 'No Print Hub used', new Date().toLocaleString()])
+export async function eposSend(base, xml, { timeoutMs = 15000 } = {}) {
+  const url = `${base}/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000`
+  const where = base.replace(/^https?:\/\//, '')
   let res
   try {
     res = await fetch(url, {
@@ -61,15 +81,37 @@ export async function eposTestPrint(host, { secure = false, timeoutMs = 15000, l
       // value that does not match the printer's address space makes Chrome refuse the request
     })
   } catch (e) {
-    if (e?.name === 'TimeoutError') return { ok: false, kind: 'timeout', text: 'No answer from ' + h + ' in ' + Math.round(timeoutMs / 1000) + ' s.' }
-    return { ok: false, kind: 'blocked', text: (e?.message || String(e)) }
+    if (e?.name === 'TimeoutError') return { ok: false, kind: 'timeout', status: 'offline', error: `Printer ${where} did not answer in ${Math.round(timeoutMs / 1000)} s` }
+    return { ok: false, kind: 'blocked', status: 'offline', error: `Printer ${where} not reachable from this browser (${e?.message || e})` }
   }
   let text = ''
   try { text = await res.text() } catch { /* no body */ }
   const m = text.match(/<response\b[^>]*>/)
-  if (!m) return { ok: false, kind: 'notepos', text: `The printer answered ${res.status} but not as Epson web printing (ePOS-Print may be switched off).` }
+  if (!m) return { ok: false, kind: 'notepos', status: 'offline', error: `Printer ${where} answered ${res.status} but not as Epson web printing (ePOS-Print off?)` }
   const attr = k => (m[0].match(new RegExp(`\\b${k}="([^"]*)"`)) || [])[1] || ''
-  if (attr('success') === 'true') return { ok: true, kind: 'printed', text: 'Printed.' }
+  const bits = Number(attr('status')) || 0
+  if (attr('success') === 'true') return { ok: true, status: bits & ASB_RECEIPT_NEAR_END ? 'paper_low' : 'online' }
   const code = attr('code')
-  return { ok: false, kind: 'printer', text: 'The printer answered but did not print: ' + (CODES[code] || code || 'unknown reason') + '.' }
+  const paperOut = code === 'EPTR_REC_EMPTY' || (bits & ASB_RECEIPT_END) !== 0
+  const why = CODES[code] || (bits & ASB_COVER_OPEN ? CODES.EPTR_COVER_OPEN : bits & ASB_OFF_LINE ? 'the printer is offline' : code || 'unknown reason')
+  return { ok: false, kind: 'printer', status: paperOut ? 'paper_out' : 'offline', code, error: `Printer ${where}: ${why}` }
+}
+
+/**
+ * Send a test slip. Returns { ok, kind, text }:
+ *   ok true            printed
+ *   kind 'printer'     the printer answered but did not print (paper, cover ...)
+ *   kind 'blocked'     the browser did not let the request out, or nothing answered
+ *   kind 'timeout'     no answer in time (wrong address, not on this network)
+ *   kind 'notepos'     something answered but it is not Epson web printing
+ */
+export async function eposTestPrint(host, { secure = false, timeoutMs = 15000, lines } = {}) {
+  const h = String(host || '').trim()
+  if (!EPOS_HOST.test(h)) return { ok: false, kind: 'input', text: 'Type the printer address, for example 192.168.0.201' }
+  const [ip, port] = h.split(':')
+  const r = await eposSend(eposBase(ip, port || 9100, secure),
+    eposTestXml(lines || ['Test print from this browser', 'No Print Hub used', new Date().toLocaleString()]), { timeoutMs })
+  if (r.ok) return { ok: true, kind: 'printed', text: 'Printed.' }
+  if (r.kind === 'printer') return { ok: false, kind: 'printer', text: 'The printer answered but did not print: ' + r.error.replace(/^Printer [^:]+: /, '') + '.' }
+  return { ok: false, kind: r.kind, text: r.kind === 'timeout' ? `No answer from ${h} in ${Math.round(timeoutMs / 1000)} s.` : r.error }
 }
