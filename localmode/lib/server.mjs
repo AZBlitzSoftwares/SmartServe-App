@@ -10,7 +10,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import pg from 'pg'
 import {
-  P, HERE, IS_MAC, IS_WIN, UserError, loadConfig, loadLocal, saveLocal, readJson, writeJson, isPrepared, serverRunning,
+  P, HERE, IS_MAC, IS_WIN, IS_KIT, LAUNCHER, UserError, loadConfig, loadLocal, saveLocal, readJson, writeJson, isPrepared, serverRunning,
   portFree, freePort, lanAddresses, localDbOptions, eventLabel, fmtTime, fmtDateTime, fmtAgo, hasCloudApi, logLine,
   isDevSnapshot, DEV_BANNER,
 } from './common.mjs'
@@ -306,7 +306,7 @@ export async function startCommand({ kotJump = null } = {}) {
 
   const ph = updatePrinthubConfig(local, cfg.port)
   const phNote = ph.status === 'missing'
-    ? 'Print Hub settings not found next to this folder: "Start Print Hub (Local)" creates them.'
+    ? `Print Hub settings not found next to this folder: "${LAUNCHER.printhub}" creates them.`
     : ph.status === 'unreadable' ? `printhub/config.json could not be read (${ph.error}) - not changed.` : ''
 
   // Keep a Mac awake while the server runs (closing the lid still sleeps it).
@@ -411,8 +411,8 @@ export async function startCommand({ kotJump = null } = {}) {
       L.push('    (Wi-Fi or cable) - the links for the devices will then appear here.')
     }
     L.push('')
-    L.push(' PRINT HUB: close its window, then double-click "Start Print Hub (Local)"')
-    L.push('   in the localmode folder (or: node ss-local.mjs printhub).')
+    L.push(` PRINT HUB: close the normal Print Hub window, then double-click "${LAUNCHER.printhub}"`)
+    L.push(IS_KIT ? '   in the Offline Kit folder.' : '   in the localmode folder (or: node ss-local.mjs printhub).')
     if (phNote) L.push(`   ${phNote}`)
     L.push('')
     const k = s.kots === undefined ? '' : `   KOTs ${s.kots}   waiting to print ${s.to_print}   print failed ${s.print_failed}`

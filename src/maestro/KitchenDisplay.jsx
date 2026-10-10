@@ -18,6 +18,7 @@ import { unlockChime, playChatChime, chimeReady } from '../lib/chime'
 import { todayISO, sessionStillCurrent } from '../components/guest/deviceEntry'
 import { setSignOutReason, takeSignOutReason, setUnsavedCheck } from '../lib/appUpdate'
 import logo from '../assets/janus_logo.jpg'
+import LaptopServerSwitch from '../components/LaptopServerSwitch'
 import './maestro.css'
 import { NEXT_ACTION, lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, loadMenu, shortName, coursesOf, shortCourses } from './msData'
 
@@ -477,6 +478,10 @@ function KitchenScreen({ session, onSignOut }) {
               {[['S', 'Small'], ['M', 'Medium'], ['L', 'Large'], ['XL', 'Extra large']].map(([v, label]) => (
                 <button key={v} className={'btn ' + (size === v ? 'btn-navy' : 'btn-ghost')} onClick={() => pickSize(v)}>{label}</button>
               ))}
+            </div>
+            <div style={{ borderTop: '1px solid var(--line)', padding: '10px 0 12px', marginBottom: 6 }}>
+              <b style={{ fontSize: 13, display: 'block', marginBottom: 6 }}>Laptop server (internet down)</b>
+              <LaptopServerSwitch />
             </div>
             <div className="row">
               <button className="btn btn-ghost" onClick={() => setSheet('soldout')}>Sold out dishes</button>

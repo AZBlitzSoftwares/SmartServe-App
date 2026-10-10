@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import MaestroSetup, { MaestroPreService } from '../../maestro/MaestroSetup'
 import { supabase } from '../../lib/supabase'
 import { tableRanges } from '../../maestro/msData'
+import { useKitInfo, mb } from '../../lib/kitInfo'
 
 /* Kitchens set-up for a Captain + Multi-Kitchen event.
 
@@ -852,6 +853,28 @@ const ago = (t, now) => {
 const splitIp = ip => { const m = String(ip || '').match(/^(.+):(\d+)$/); return m ? { host:m[1], port:Number(m[2]) } : { host:String(ip || ''), port:9100 } }
 const keyOf = (ip, port) => { const e = splitIp(ip); const p = /:\d+$/.test(String(ip || '')) ? e.port : Number(port) || 9100; return e.host ? (p === 9100 ? e.host : e.host + ':' + p) : null }
 
+/* The Print Hub for a normal day, built with every deploy (tools/offline-kit.mjs):
+   one double-click on the laptop connected to the printers' router. */
+function PrintHubDownload() {
+  const kit = useKitInfo()
+  const files = kit && Array.isArray(kit.printhub) ? kit.printhub : []
+  if (!files.length) return null
+  return (
+    <div data-testid="printhub-download" style={{ display:'flex', alignItems:'center', gap:'6px 12px', flexWrap:'wrap', marginTop:10,
+      fontSize:12.5, color:'var(--ink2)', lineHeight:1.5 }}>
+      <span><b style={{ color:'var(--ink)' }}>Print Hub:</b> runs on one laptop connected to the printers’ router (needs Node.js).</span>
+      {[['windows', 'Windows'], ['mac', 'Mac']].map(([os, label]) => {
+        const f = files.find(x => x.os === os)
+        return f && (
+          <a key={os} href={`/downloads/${f.file}`} download data-testid={`hub-${os}`}
+            style={{ fontWeight:800, color:'var(--ink)', whiteSpace:'nowrap' }}>⬇ Download for {label}
+            <span style={{ fontWeight:600, opacity:0.7 }}> ({mb(f.bytes)})</span></a>
+        )
+      })}
+    </div>
+  )
+}
+
 function FindPrinters({ eventId, kitchens, setKitchens }) {
   const [rows, setRows] = useState(null)        // null = not loaded / not available
   const [missing, setMissing] = useState(false) // database update not applied yet
@@ -860,6 +883,7 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
   const [busy, setBusy] = useState({})          // ip -> 'slip' | 'assign'
   const [note, setNote] = useState(null)
   const [now, setNow] = useState(() => Date.now())   // refreshed with every load, for "seen 2 min ago"
+  const [claimers, setClaimers] = useState([])  // Print Hubs that took this event's KOTs lately
 
   async function load() {
     const { data, error } = await supabase.from('found_printers').select('*').eq('event_id', eventId).order('seen_at', { ascending:false })
@@ -868,6 +892,20 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
     setRows(data || []); return data || []
   }
   useEffect(() => { load() }, [eventId])
+  // Only one Print Hub may work on an event: every running hub takes the event's KOTs, and a hub
+  // that cannot reach a printer (another building, another router) fails them.
+  useEffect(() => {
+    let alive = true
+    async function loadClaimers() {
+      const since = new Date(Date.now() - 10 * 60000).toISOString()
+      const { data, error } = await supabase.from('kots').select('print_claimed_by')
+        .eq('event_id', eventId).gte('print_claimed_at', since).not('print_claimed_by', 'is', null).limit(500)
+      if (alive && !error) setClaimers([...new Set((data || []).map(r => r.print_claimed_by).filter(Boolean))])
+    }
+    loadClaimers()
+    const t = setInterval(loadClaimers, 30000)
+    return () => { alive = false; clearInterval(t) }
+  }, [eventId])
   useEffect(() => {
     const t = setInterval(load, search && search.phase === 'waiting' ? 2000 : 20000)
     return () => clearInterval(t)
@@ -929,11 +967,12 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
   const moved = kitchens.filter(k => k.printer_moved_at && now - new Date(k.printer_moved_at) < 12 * 3600e3)
   const list = rows || []
   const latest = list.length ? Math.max(...list.map(r => +new Date(r.seen_at))) : 0
+  const hubs = [...new Set([...claimers, ...list.filter(r => r.hub && latest - new Date(r.seen_at) < 3 * 60000).map(r => r.hub)])]
   const phaseText = !search ? null
     : search.phase === 'asking' ? 'Asking the Print Hub…'
     : search.phase === 'waiting' ? 'The Print Hub is looking at its network…'
     : search.phase === 'done' ? search.n + ' printer' + (search.n === 1 ? '' : 's') + ' answered'
-    : 'No printers reported. Check that the Print Hub is running on the desk laptop and that the laptop is on the printers’ network (router / Wi-Fi), then try again.'
+    : 'No printers reported. Check that the Print Hub is running on a laptop connected to the printers’ router (download it below), then try again.'
 
   return (
     <div style={{ marginTop:14, borderTop:'1px solid var(--line)', paddingTop:12 }}>
@@ -951,7 +990,13 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
         <span style={{ fontSize:12, fontWeight:700, color: search?.phase === 'nohub' ? AMBER_INK : 'var(--ink2)' }}>
           {phaseText || 'The Print Hub finds printers on its network and follows a printer that restarts on a new address.'}</span>
       </div>
+      {hubs.length > 1 && (
+        <div style={{ marginTop:8 }} data-testid="two-hubs"><Banner tone="warn">
+          {hubs.length} Print Hubs are working on this event: {hubs.join(', ')}. Only one may run: keep the one on the laptop
+          connected to the printers’ router and close the other{hubs.length > 2 ? 's' : ''}, or KOTs can fail.</Banner></div>
+      )}
       {note && <div style={{ marginTop:8 }}><Banner tone={note.tone} onClose={() => setNote(null)}>{note.text}</Banner></div>}
+      <PrintHubDownload />
       {open && list.length > 0 && (
         <div style={{ display:'grid', gap:6, marginTop:10 }}>
           {list.map(f => {
@@ -968,7 +1013,7 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
                   background: f.status === 'paper_out' ? '#FEF2F2' : f.status === 'paper_low' ? AMBER_BG : '#F0FDF4',
                   color: f.status === 'paper_out' ? RED : f.status === 'paper_low' ? AMBER_INK : GREEN }}>
                   {f.status === 'paper_out' ? 'Paper out' : f.status === 'paper_low' ? 'Paper low' : 'Answering'}</span>
-                <span style={{ fontSize:11.5, color:'var(--ink2)' }}>seen {ago(f.seen_at, now)}</span>
+                <span style={{ fontSize:11.5, color:'var(--ink2)' }}>seen {ago(f.seen_at, now)}{f.hub ? ' by ' + f.hub : ''}</span>
                 <span style={{ fontSize:12, fontWeight:700, color: used.length ? 'var(--ink)' : AMBER_INK, flex:1, minWidth:140 }}>
                   {used.length ? 'Used by ' + used.join(', ') : 'Not used by any kitchen'}</span>
                 <button onClick={() => slip(f)} disabled={!!busy[f.ip]} style={{ ...btn, height:32, padding:'0 10px', fontSize:12, background:'#fff', color:'var(--ink)', border:'1.5px solid var(--line)' }}>

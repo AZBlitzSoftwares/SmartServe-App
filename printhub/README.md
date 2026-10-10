@@ -16,7 +16,7 @@ Keep the Print Hub window open for the whole event. Closing it stops printing.
 
 ## How printing works at the event
 
-1. **Each kitchen has its own printer** on the event router, with a **fixed IP** (it never changes), e.g. Italian `192.168.1.101`, Arabic `192.168.1.102`. The same IP is entered for that kitchen in Smart Serve (Control › Kitchens).
+1. **Each kitchen has its own printer** on the event router (cable or Wi-Fi), e.g. Italian `192.168.1.101`, Arabic `192.168.1.102`. **Find printers** at the desk lists them and assigns one to each kitchen (or type the IP in Control › Kitchens). A fixed IP or a DHCP reservation in the router is best; a printer that moves to a new address is followed by its MAC.
 2. A captain sends an order from the tablet. Smart Serve splits it into **one KOT per kitchen**.
 3. The **Print Hub** on the desk laptop picks up each new KOT **within about 2 seconds** and sends it to that kitchen's printer. Before printing it asks the printer whether it has paper.
 4. The result comes back to everyone: the captain sees **Printing… → Printed ✓** (or **Failed — operator alerted**), and the desk sees each KOT's status and each printer's health (**Online / Paper low / Paper out / Offline**).
@@ -24,6 +24,18 @@ Keep the Print Hub window open for the whole event. Closing it stops printing.
 6. When the printer is back (switched on, new roll loaded), the Print Hub notices within about 15 seconds and **its failed KOTs print again by themselves**.
 
 ---
+
+## The simple way: download it from the app
+
+Control Desk › Control tab › Event set-up › **Kitchens & printers** › **Print Hub: Download for Windows / Mac**.
+The download is built with every deploy and already carries the server address and key: install Node.js,
+unzip, double-click **Start Print Hub** (READ ME FIRST inside). Then **Find printers** lists every printer on
+that laptop's router; **Print a slip** shows which is which and **Use for a kitchen** assigns it, so no IP
+has to be typed. A printer on automatic addresses (DHCP) that comes back on a new address is followed by its
+MAC. Only one Print Hub may run per event (any running hub takes the event's KOTs); the desk warns when two
+hubs took KOTs in the last 10 minutes.
+
+The manual set-up below is for running it from the code folder.
 
 ## One-time setup
 

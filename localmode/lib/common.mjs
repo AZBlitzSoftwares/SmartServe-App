@@ -32,6 +32,12 @@ export const P = {
 }
 
 export const DB_NAME = 'smartserve'
+// The Offline Kit (downloaded from the Control tab) has no app sources, and its
+// launchers sit at the top of the kit with numbers in their names.
+export const IS_KIT = !fs.existsSync(path.join(REPO, 'src'))
+export const LAUNCHER = IS_KIT
+  ? { prepare: '1 Prepare Event', refresh: '2 Refresh Event Data', start: '3 Start Local Server', printhub: '4 Start Print Hub', upload: '5 Upload to Cloud' }
+  : { prepare: 'Prepare Event', refresh: 'Refresh Event Data', start: 'Start Local Server', printhub: 'Start Print Hub (Local)', upload: 'Upload to Cloud' }
 export const IS_WIN = process.platform === 'win32'
 export const IS_MAC = process.platform === 'darwin'
 
@@ -99,6 +105,8 @@ export function saveConfig(cfg) { writeJson(P.config, cfg) }
 
 const unset = (v) => !v || /PASTE_/.test(String(v))
 export const hasCloudApi = (cfg) => !!cfg && !unset(cfg.cloud.url) && !unset(cfg.cloud.anonKey)
+// No database connection string: Prepare Event reads the cloud through its API (Offline Kit).
+export const hasCloudDb = (cfg) => !!cfg && !unset(cfg.cloud.dbUrl)
 
 export function requireCloudApi(cfg) {
   if (unset(cfg.cloud.url)) throw new UserError('config.json: "url" under "cloud" is missing.')

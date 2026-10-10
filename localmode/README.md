@@ -21,6 +21,32 @@ Use the launchers in this folder (double-click). Mac: the `.command` files. Wind
 
 ---
 
+## The simple way: the Offline Kit (any laptop, no technical set-up)
+
+Control Desk > **Control** tab > **Offline kit** > **Download for Windows** or **Download for Mac**.
+The kit is made with every deploy, so it always matches the app. The laptop needs only **Node.js**
+(nodejs.org, LTS): no Git, no code to build, no database password - the kit already carries the
+cloud's address and its public key. Unzip it and follow `READ ME FIRST.txt`:
+
+| Kit launcher | When |
+|---|---|
+| **1 Prepare Event** | The day before, with internet (first time: also downloads its parts, about 150 MB) |
+| **2 Refresh Event Data** | At the venue, just before switching to Plan B (if there is any internet) |
+| **3 Start Local Server** | Plan B: runs the event from the laptop. Keep the window open |
+| **4 Start Print Hub** | Plan B: prints the KOTs from the laptop |
+| **5 Upload to Cloud** | After the event, with internet |
+
+- One laptop can carry several events of the same day (type `1,2` in Prepare Event). Events at
+  different venues: one laptop per venue. Never two laptops for the same event.
+- Devices move to the laptop with **Use laptop server**: tablets behind the Device button
+  (supervisor PIN), kitchen screens in their menu, the desk on the Offline kit card.
+- Everything below (Plan B, after the event, troubleshooting) applies to the kit as well; the
+  kit's files are in its `files` folder (`files/localmode` = this folder).
+- The sections "One-time setup" and "The day before" describe the technical route (Git and the
+  database connection string), which also copies the cloud's exact structure.
+
+---
+
 ## One-time setup (at the office)
 
 You need a Mac (Apple Silicon or Intel) or a Windows 10/11 laptop, with its charger.
@@ -179,6 +205,25 @@ Sync is **one way**: laptop -> cloud. Two-way sync is a later phase.
 ---
 
 ## For the technical team
+
+**Offline Kit** (`../tools/offline-kit.mjs`, run by `npm run build` after `vite build`): two zips
+in `dist/downloads/` (Windows / Mac) + `offline-kit.json` for the Control tab card. Kit layout:
+numbered launchers at the top (the ones in this folder, changed to `cd files/localmode`),
+`files/dist` (the built app, no sources: `prepareApp` just copies it), `files/db` (dated updates
+only), `files/localmode` (no node_modules/data/bin; `config.json` with url + anon key, no
+`dbUrl`), `files/printhub`. No VITE_SUPABASE_URL / _ANON_KEY at build time = no kit.
+
+**Prepare without `dbUrl`** (the kit; `lib/cloudrest.mjs`): events listed and rows read through
+the REST API with the anon key (pages of 1000, `in.()` filters in chunks). The structure is
+`dev/standin-schema.sql` (kept in step with the cloud's columns) + the dated `../db/*.sql`; any
+column the cloud has and the laptop lacks is added from the rows (and one sample row per table),
+typed from the values. Not one snapshot like the SQL route; no sequences (all ids are uuids).
+
+**Upload** drops columns the cloud does not have (asked with `select=...&limit=0`, the cloud names
+the unknown one), so a column made only on the laptop never blocks a row. `ms_covers` and
+`table_carts` rows that clash on their natural key (seated in the cloud after the last refresh)
+are merged on that key.
+
 
 `ss-local.mjs` (Node 20+) with three npm packages: `embedded-postgres` (real Postgres 17 binaries:
 initdb, pg_ctl, postgres), `pg` and `qrcode`. PostgREST 13.0.5 is downloaded from GitHub into `bin/` by prepare.

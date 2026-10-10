@@ -107,15 +107,19 @@ export async function runSqlText(db, name, text, note = '') {
   return res
 }
 
-export function dbFiles(dir = DB_DIR) {
+// migrationsOnly: just the dated database updates (2026-10-08_maestro.sql ...),
+// never the demo files - used when an event is prepared without the database
+// password (Offline Kit), where the structure comes from this kit.
+export function dbFiles(dir = DB_DIR, { migrationsOnly = false } = {}) {
   if (!fs.existsSync(dir)) return []
-  return fs.readdirSync(dir).filter((f) => /\.sql$/i.test(f)).sort().map((f) => path.join(dir, f))
+  return fs.readdirSync(dir).filter((f) => /\.sql$/i.test(f) && (!migrationsOnly || /^\d{4}-\d{2}-\d{2}_[^/]+\.sql$/i.test(f)))
+    .sort().map((f) => path.join(dir, f))
 }
 
 // Every ../db/*.sql file in name order, on the LOCAL database.
-export async function applyDbFiles(db) {
+export async function applyDbFiles(db, opts = {}) {
   const out = []
-  for (const f of dbFiles()) out.push(await runSqlFile(db, f))
+  for (const f of dbFiles(DB_DIR, opts)) out.push(await runSqlFile(db, f))
   return out
 }
 
