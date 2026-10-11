@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, Suspense } from 'react'
+import PrintStationRunner from '../components/supervisor/PrintStation'
 import { supabase } from '../lib/supabase'
 import SupervisorLogin from '../components/supervisor/SupervisorLogin'
 import KOTDashboard from '../components/supervisor/KOTDashboard'
@@ -457,6 +458,9 @@ export default function SupervisorApp() {
         {activeTab==='tables'  && <TableManager eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='events'  && <EventManager onEventChange={(ev) => { setEventData(ev); loadEvents() }} />}
       </div>
+
+      {/* "Print from this laptop" (Control › Kitchens & printers) keeps printing on every tab */}
+      <PrintStationRunner />
 
       {/* Docked over the board rather than living in a tab. A supervisor
           answering "table 12 has been waiting" needs to see table 12 while
