@@ -1,17 +1,13 @@
-/* Smart Serve Maestro - Kitchen Display (/kitchen).
+/* Smart Serve Maestro - Kitchen Display (/kitchen), for a kitchen barker on a tablet or a screen.
 
-   The kitchen barker's screen: a large screen, a mouse, at the pass.
-     My dishes      the barker's own KOTs in three columns, oldest first:
-                    Received -> In Preparation -> Ready, then Handed over when
-                    the plate leaves with a steward: that completes the KOT.
-                    A KOT is marked received as soon as it reaches the screen.
-     Entire kitchen every open KOT of both barkers, with the same buttons, so
-                    one barker can carry on for the other when needed.
-     Done           KOTs handed over this service, with their times, and the
-                    barker's counts (handed over, average time, late).
-   Timers run from firing and turn red after the kitchen's late threshold.
-   Coming-up counts show dishes held at the tables and not yet fired.
-   Reprint sends a KOT to the kitchen printer again, marked REPRINT. */
+   Two states only, so a busy barker taps once per plate:
+     In progress   a KOT is in progress the moment it reaches the kitchen (it prints by itself)
+     Delivered     the barker hands the plate and its KOT to a steward: one tap, the KOT moves to
+                   Delivered (and can be brought back from there).
+   KOTs are listed by serial number, the oldest first, top left. The serial number is the biggest
+   thing on the card. A KOT not delivered within the kitchen alert time (event set-up, 3 minutes
+   by default) starts flashing gently until it is delivered. Search finds a KOT by its number,
+   table, cover or dish. My dishes: this barker's KOTs; Entire kitchen: both barkers'. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { unlockChime, playChatChime, chimeReady } from '../lib/chime'
@@ -20,7 +16,7 @@ import { setSignOutReason, takeSignOutReason, setUnsavedCheck } from '../lib/app
 import logo from '../assets/janus_logo.jpg'
 import LaptopServerSwitch from '../components/LaptopServerSwitch'
 import './maestro.css'
-import { NEXT_ACTION, lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, loadMenu, shortName, coursesOf, shortCourses } from './msData'
+import { lateMinutes, useLive, useNow, rpc, rpcRetry, isMissingFn, errText, mmss, clockText, loadMenu, coursesOf, shortCourses, splitNote, kotMatches } from './msData'
 
 const SESSION = 'ms_barker_session'
 
@@ -34,7 +30,7 @@ export default function KitchenDisplay() {
     // receptions run past midnight: yesterday's session holds until 5 am
     return s && sessionStillCurrent(s.event?.date) ? s : null
   })
-  useEffect(() => { document.title = "Kitchen Display · Smart Serve Maestro" }, [])
+  useEffect(() => { document.title = 'Kitchen Display · Smart Serve Maestro' }, [])
   if (!session) return <BarkerLogin onLogin={s => { localStorage.setItem(SESSION, JSON.stringify(s)); setSession(s) }} />
   return <KitchenScreen session={session} onSignOut={() => { localStorage.removeItem(SESSION); setSession(null) }} />
 }
@@ -76,54 +72,52 @@ function BarkerLogin({ onLogin }) {
   }
 
   return (
-    <div className="ms kd" style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <form onSubmit={submit} style={{ background: '#1C2741', borderRadius: 18, padding: 28, width: 'min(420px,94vw)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-          <div className="brandmk"><div className="lt" style={{ background: '#fff', width: 44, height: 44, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><img src={logo} alt="" style={{ width: 40, height: 40, objectFit: 'contain' }} /></div></div>
-          <div><div style={{ fontSize: 10, letterSpacing: '.2em', fontWeight: 800, color: '#D9B26B' }}>SMART SERVE MAESTRO</div>
-            <div style={{ fontFamily: 'Georgia,serif', fontSize: 24, fontWeight: 700, color: '#fff' }}>Kitchen Display</div></div>
+    <div className="ms kd kdl">
+      <form onSubmit={submit} className="kdlogin">
+        <div className="kdl-h">
+          <div className="kdl-logo"><img src={logo} alt="" /></div>
+          <div><div className="kdl-k">SMART SERVE MAESTRO</div><div className="kdl-t">Kitchen Display</div></div>
         </div>
-        {events === null ? <div style={{ color: '#AEB8D0' }}>Loading today's events…</div>
-          : !events.length ? <div style={{ color: '#FFD27A', fontWeight: 700 }}>No Smart Serve Maestro event is running today.</div>
+        {events === null ? <div className="kdl-m">Loading today's events…</div>
+          : !events.length ? <div className="kdl-w">No Smart Serve Maestro event is running today.</div>
           : (
             <>
               {events.length > 1 && (
-                <select value={evId} onChange={e => setEvId(e.target.value)} style={inp}>
+                <select value={evId} onChange={e => setEvId(e.target.value)} className="kdl-in">
                   <option value="">Choose the event…</option>
                   {events.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
               )}
-              {events.length === 1 && <div style={{ color: '#AEB8D0', fontWeight: 700 }}>{events[0].name}</div>}
-              <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="off" style={inp} />
-              <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="PIN" inputMode="numeric" type="password" style={inp} />
-              {notice && !err && <div style={{ color: '#FFD27A', fontWeight: 700, fontSize: 14 }}>{notice}</div>}
-              {err && <div style={{ color: '#FF8A8A', fontWeight: 700, fontSize: 14 }}>{err}</div>}
-              <button className="kbtn b2" disabled={busy} style={{ padding: 12, fontSize: 16 }}>{busy ? 'Signing in…' : 'Sign in'}</button>
+              {events.length === 1 && <div className="kdl-m">{events[0].name}</div>}
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="off" className="kdl-in" />
+              <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="PIN" inputMode="numeric" type="password" className="kdl-in" />
+              {notice && !err && <div className="kdl-w">{notice}</div>}
+              {err && <div className="kdl-e">{err}</div>}
+              <button className="kdl-b" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
             </>
           )}
       </form>
     </div>
   )
 }
-const inp = { background: '#111A2E', border: '1.5px solid #2E3B5C', color: '#fff', borderRadius: 10, padding: '12px 14px', fontSize: 16, fontWeight: 700 }
 
 // ------------------------------------------------------------------ screen
 function KitchenScreen({ session, onSignOut }) {
   const { barker, event } = session
   const kitchenId = barker.kitchen_id
   const [view, setView] = useState('mine')           // mine | whole | done
-  const [doneScope, setDoneScope] = useState('mine')  // Done view: my KOTs or the entire kitchen
-  // Card size for this screen: small cards fit more KOTs on a monitor up close, large ones read
-  // from across the kitchen on a TV. Remembered on this screen.
+  const [filter, setFilter] = useState('all')        // all | over
+  const [search, setSearch] = useState('')
+  const [doneScope, setDoneScope] = useState('mine')  // Delivered view: my KOTs or the entire kitchen
+  // Card size for this screen, remembered on it: small for a tablet up close, large for a TV
   const [size, setSize] = useState(() => { try { return localStorage.getItem('ms_kd_size') || 'M' } catch { return 'M' } })
   const pickSize = v => { setSize(v); try { localStorage.setItem('ms_kd_size', v) } catch { /* private mode */ } }
-  const [picked, setPicked] = useState(() => new Set())
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState(null)              // KOT id being changed
   const [toast, setToast] = useState(null)
   const [sheet, setSheet] = useState(null)
   const now = useNow(1000)
   const seenKots = useRef(null)
-  const receiving = useRef(new Set())
+  const starting = useRef(new Set())
 
   // Never reload by itself while a barker is signed in (sound needs a tap after a reload)
   useEffect(() => { setUnsavedCheck(() => true); return () => setUnsavedCheck(null) }, [])
@@ -166,46 +160,59 @@ function KitchenScreen({ session, onSignOut }) {
     return () => clearInterval(t)
   }, [barker.id])
 
+  // The Delivered list is fetched in full only while it is open; otherwise just the ids
+  // for the counts, so a busy kitchen on a weak connection does not pull hundreds of
+  // finished KOTs every few seconds.
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const colsOk = useRef(true)
   const q = useLive(async () => {
     const since = new Date(Date.now() - 12 * 3600e3).toISOString()
-    const [kitchen, kots, held, fin, ev] = await Promise.all([
+    const full = viewRef.current === 'done'
+    // a database not yet updated for v2 lacks some columns: then the whole row
+    const cols = colsOk.current ? KOT_COLS : '*'
+    const [kitchen, kots, fin, ev] = await Promise.all([
       supabase.from('kitchens').select('*').eq('id', kitchenId).maybeSingle(),
-      supabase.from('kots').select('*').eq('kitchen_id', kitchenId).eq('kind', 'order').eq('status', 'open')
-        .neq('stage', 'dispatched').is('served_at', null).gte('created_at', since).order('created_at'),
-      supabase.from('ms_items').select('name,qty,barker').eq('kitchen_id', kitchenId).eq('state', 'held'),
-      // Done: handed over (or closed at the desk) this service, newest first
-      supabase.from('kots').select('*').eq('kitchen_id', kitchenId).eq('kind', 'order').eq('status', 'delivered')
-        .gte('created_at', since).order('dispatched_at', { ascending: false, nullsFirst: false }).limit(300),
+      supabase.from('kots').select(cols).eq('kitchen_id', kitchenId).eq('kind', 'order').eq('status', 'open')
+        .neq('stage', 'dispatched').is('served_at', null).gte('created_at', since).order('fired_at'),
+      // Delivered this service, newest first
+      supabase.from('kots').select(full ? cols : 'id,barker').eq('kitchen_id', kitchenId).eq('kind', 'order').eq('status', 'delivered')
+        .gte('created_at', since).order('dispatched_at', { ascending: false, nullsFirst: false }).limit(full ? 300 : 3000),
       supabase.from('events').select('id,late_minutes,name,courses').eq('id', event.id).maybeSingle(),
     ])
-    for (const r of [kitchen, kots, held, fin]) if (r.error) throw r.error
-    const done = fin.data || []
-    const fr = [...done, ...(kots.data || [])].filter(k => k.fired_at && k.ready_at).map(k => new Date(k.ready_at) - new Date(k.fired_at)).filter(x => x >= 0)
-    return {
-      kitchen: kitchen.data, kots: kots.data || [], held: held.data || [], ev: ev.data || event, done,
-      dispatched: done.length,
-      avgReady: fr.length ? fr.reduce((a, b) => a + b, 0) / fr.length : null,
-    }
-  }, { eventId: event.id, tables: ['kots', 'ms_items'], intervalMs: 2500 })
+    if (colsOk.current && kots.error && /column|42703/i.test(`${kots.error.code} ${kots.error.message}`)) { colsOk.current = false; throw kots.error }
+    for (const r of [kitchen, kots, fin]) if (r.error) throw r.error
+    return { kitchen: kitchen.data, kots: kots.data || [], ev: ev.data || event, done: fin.data || [] }
+  }, { eventId: event.id, tables: ['kots'], intervalMs: 2500, filter: `kitchen_id=eq.${kitchenId}` })
   const d = q.data
+  // KOTs delivered on this screen whose change has not come back from the server yet
+  const [gone, setGone] = useState(() => new Set())
+  useEffect(() => {
+    if (!d || !gone.size) return
+    const still = new Set((d.kots || []).map(k => k.id))
+    if ([...gone].some(id => !still.has(id))) setGone(g => new Set([...g].filter(id => still.has(id))))
+  }, [d]) // eslint-disable-line react-hooks/exhaustive-deps
+  // opening Delivered loads the full list at once
+  const reloadQ = q.reload
+  useEffect(() => { if (view === 'done') reloadQ() }, [view, reloadQ])
   const kitchen = d?.kitchen
   const late = lateMinutes(kitchen, d?.ev || event)
   const crsLabel = shortCourses([...coursesOf(d?.ev), ...(d?.kots || []).map(k => k.course)])
   const mine = k => (k.barker || 'A') === barker.side
+  const age = k => now - new Date(k.fired_at || k.created_at).getTime()
+  const isOver = k => age(k) >= late * 60000
 
-  const kots = useMemo(() => {
-    const list = (d?.kots || []).filter(k => view === 'whole' || mine(k))
-    // remakes first, then oldest first
-    return [...list].sort((a, b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0) || new Date(a.fired_at || a.created_at) - new Date(b.fired_at || b.created_at))
+  // Serial order: the oldest KOT first (top left), then the next one
+  const serialSort = (a, b) => new Date(a.fired_at || a.created_at) - new Date(b.fired_at || b.created_at) || String(a.kot_no).localeCompare(String(b.kot_no))
+  const open = useMemo(() => (d?.kots || []).filter(k => !gone.has(k.id) && (view === 'whole' || mine(k))).sort(serialSort),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d, view, barker.side])
+    [d, view, barker.side, gone])
+  const overCount = open.filter(isOver).length
+  const shown = open.filter(k => (filter !== 'over' || isOver(k)) && kotMatches(k, search))
 
-  // Chime when a KOT arrives that this screen shows (the barker's own, or the
-  // entire kitchen's while that view is open)
+  // Chime when a KOT arrives that this screen shows
   useEffect(() => {
     if (!d) return
-    // Every KOT of the kitchen counts as seen once loaded, so opening Entire kitchen later
-    // does not chime for KOTs that were already there
     const all = (d.kots || []).map(k => k.id)
     if (seenKots.current) {
       const fresh = (d.kots || []).filter(k => !seenKots.current.has(k.id) && (view === 'whole' || mine(k)))
@@ -215,148 +222,114 @@ function KitchenScreen({ session, onSignOut }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d])
 
-  /* A KOT is received the moment it reaches the kitchen screen: no New step
-     for the barker. Only a KOT still at New moves (never one a barker has
-     already started), and each one is sent once. If no kitchen screen is
-     open, the KOT stays "not yet received" on the Control Desk. */
+  /* A KOT is in progress the moment it reaches the kitchen screen: no step for the barker.
+     Only a KOT not yet in progress moves, each one once. If no kitchen screen is open, it
+     stays "not on the kitchen screen" on the Control Desk. */
   useEffect(() => {
-    const fresh = (d?.kots || []).filter(k => k.stage === 'new' && !receiving.current.has(k.id)).map(k => k.id)
+    const fresh = (d?.kots || []).filter(k => ['new', 'received'].includes(k.stage) && !starting.current.has(k.id)).map(k => k.id)
     if (!fresh.length) return
-    fresh.forEach(id => receiving.current.add(id))
+    fresh.forEach(id => starting.current.add(id))
     ;(async () => {
       try {
-        const { error } = await supabase.from('kots').update({ stage: 'received', received_at: new Date().toISOString(), stage_by: barker.name })
-          .in('id', fresh).eq('stage', 'new')
+        const at = new Date().toISOString()
+        const { error } = await supabase.from('kots').update({ stage: 'in_prep', received_at: at, in_prep_at: at, stage_by: barker.name })
+          .in('id', fresh).in('stage', ['new', 'received'])
         if (error) throw error
         q.reload()
-      } catch { fresh.forEach(id => receiving.current.delete(id)) /* tried again on the next refresh */ }
+      } catch { fresh.forEach(id => starting.current.delete(id)) /* tried again on the next refresh */ }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d])
 
-  const age = k => now - new Date(k.fired_at || k.created_at).getTime()
-  const cls = k => {
-    if (k.stage === 'ready') return ''
-    const a = age(k)
-    if (a >= late * 60000) return 'l'
-    if (a >= (late - 1) * 60000) return 'w'
-    return ''
-  }
-  const by = st => kots.filter(k => k.stage === st)
-  // New only lasts until the screen has marked it received: shown as received
-  const received = kots.filter(k => k.stage === 'new' || k.stage === 'received')
-  const lateCount = kots.filter(k => cls(k) === 'l').length
-
-  const heldCounts = useMemo(() => {
-    const m = new Map()
-    for (const h of d?.held || []) {
-      if (view !== 'whole' && !mine(h)) continue
-      m.set(h.name, (m.get(h.name) || 0) + (h.qty || 1))
-    }
-    return [...m.entries()].sort((a, b) => b[1] - a[1])
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d, view])
-
-  async function move(k, to, quiet) {
-    const from = k.stage
+  // Delivered: the plate left with a steward. The KOT is complete.
+  // Delivered: the card goes at once (no waiting for the network), other cards stay
+  // tappable, and a weak connection gets a few more tries before the card comes back
+  async function deliver(k) {
+    if (gone.has(k.id)) return
+    setGone(g => new Set(g).add(k.id))
     try {
-      // Both barkers can act on a KOT: if the other screen has just moved it, leave it be
-      const { data: cur } = await supabase.from('kots').select('stage,status').eq('id', k.id).maybeSingle()
-      if (cur && (cur.status !== 'open' || (cur.stage !== from && !(from === 'new' && cur.stage === 'received')))) {
-        if (!quiet) setToast({ text: `${k.kot_no} was just moved by the other screen` })
-        return
-      }
-      if (to === 'dispatched') {
-        // Handed over: the KOT is complete (served), nothing else to mark
-        await rpc('ms_serve', { p_kot_ids: [k.id], p_undo: false })
+      let r
+      try { r = await rpcRetry('ms_deliver', { p_kot_ids: [k.id], p_by: barker.name }) }
+      catch (e) {
+        if (!isMissingFn(e)) throw e
+        // an older database without ms_deliver
+        await rpcRetry('ms_serve', { p_kot_ids: [k.id], p_undo: false })
         await supabase.from('kots').update({ stage_by: barker.name }).eq('id', k.id)
-      } else {
-        await rpc('ms_kot_stage', { p_kot_id: k.id, p_stage: to, p_by: barker.name })
+        r = { delivered: 1, already: [] }
       }
-      if (!quiet) setToast({ text: `${k.kot_no} · ${to === 'in_prep' ? 'in preparation' : to === 'dispatched' ? 'handed over · done' : to}`, undo: () => moveBack(k, from === 'new' ? 'received' : from) })
-    } catch (e) { setToast({ text: errText(e), err: true }) }
+      if (r?.already?.length) setToast({ text: `${k.kot_no} was already delivered` })
+      else setToast({ text: `${k.kot_no} · T${k.table_number} C${k.cover_no} delivered`, undo: () => reopen(k) })
+      q.reload()
+    } catch (e) {
+      setToast({ text: `${k.kot_no} not saved as delivered: ${errText(e)}`, err: true })
+      setGone(g => { const n = new Set(g); n.delete(k.id); return n })
+    }
   }
-  // Undo a move; a KOT handed over by mistake goes back to Ready (open again)
-  async function moveBack(k, stage) {
+  // Back to In progress: delivered by mistake
+  async function reopen(k) {
+    setGone(g => { if (!g.has(k.id)) return g; const n = new Set(g); n.delete(k.id); return n })
     try {
-      const { data: cur } = await supabase.from('kots').select('status').eq('id', k.id).maybeSingle()
-      // Stage first: if the reopen then fails, the KOT is still in Done and can be tried again
-      await rpc('ms_kot_stage', { p_kot_id: k.id, p_stage: stage, p_by: barker.name })
-      if (cur?.status === 'delivered') await rpc('ms_serve', { p_kot_ids: [k.id], p_undo: true })
-      setToast({ text: `${k.kot_no} moved back` }); q.reload()
+      await rpc('ms_kot_stage', { p_kot_id: k.id, p_stage: 'in_prep', p_by: barker.name })
+      await rpc('ms_serve', { p_kot_ids: [k.id], p_undo: true })
+      setToast({ text: `${k.kot_no} is back in progress` }); q.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
   }
-  async function act(k) {
-    const n = NEXT_ACTION[k.stage]
-    if (!n || busy) return
-    setBusy(true)
-    await move(k, n.to)
-    await q.reload()
-    setBusy(false)
-  }
-  async function bulkMove() {
-    const list = kots.filter(k => picked.has(k.id))
-    if (!list.length) return
-    setBusy(true)
-    for (const k of list) { const n = NEXT_ACTION[k.stage]; if (n) await move(k, n.to, true) }
-    setToast({ text: `${list.length} KOTs moved on` })
-    setPicked(new Set())
-    await q.reload()
-    setBusy(false)
-  }
-  const pick = k => setPicked(s => { const n = new Set(s); n.has(k.id) ? n.delete(k.id) : n.add(k.id); return n })
-
-  // The KOT slip again, from the kitchen printer, marked REPRINT on the slip
+  // The KOT slip again, from the kitchen printer, marked REPRINT
   async function reprint(k) {
     if (busy) return
-    setBusy(true)
+    setBusy(k.id)
     try {
       await rpc('ms_reprint', { p_kot_id: k.id, p_printer_ip: null })
       setToast({ text: `${k.kot_no} sent to the printer again · marked REPRINT` })
       await q.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
-    setBusy(false)
+    setBusy(null)
   }
 
-  // A plain render function, not a component: a component declared in here
-  // would be a new type on every one-second tick and remount every card.
-  // Entire kitchen has the same buttons: a barker can act on the other barker's KOTs.
-  const card = (k, whole) => {
-    const n = NEXT_ACTION[k.stage]
+  // A plain render function, not a component: a component declared in here would be a new type
+  // on every one-second tick and remount every card.
+  const card = k => {
+    const over = isOver(k)
+    const items = k.items || []
     return (
-      <div key={k.id} className={'tl ' + cls(k) + (picked.has(k.id) ? ' pk' : '')}
-        onClick={e => { if (e.target.tagName !== 'BUTTON') pick(k) }} style={{ cursor: 'pointer' }}>
-        <div className="tr">
-          {/* Entire kitchen: the KOT number in the barker's colour (blue A, gold B) */}
-          <b className={whole ? ((k.barker || 'A') === 'A' ? 'ka' : 'kb') : undefined}>{k.kot_no}</b>
-          <span className="cvb">T{k.table_number}·C{k.cover_no}</span>
-          {k.course && <span className="crs" title={k.course}>{crsLabel(k.course)}</span>}
+      <div key={k.id} className={'kc' + (over ? ' fl' : '')} data-kot={k.kot_no}>
+        <div className="kh">
+          <span className={'sn' + (view === 'whole' ? ((k.barker || 'A') === 'A' ? ' sa' : ' sb') : '')}>{k.kot_no}</span>
           <span className="tm">{mmss(age(k))}</span>
         </div>
-        {(k.is_remake || k.print_status === 'failed') && (
-          <div>{k.is_remake && <span className="rmk">REMAKE</span>}{k.print_status === 'failed' && <span className="rmk">NOT PRINTED</span>}</div>
-        )}
-        <div className="dd">
-          {(k.items || []).map((it, i) => (
-            <div key={i}>{it.qty} × {it.name}{it.note && String(it.note).split(',').map(x => x.trim()).filter(Boolean).map(x => <span key={x} className="jn">{x}</span>)}</div>
+        <div className="km">
+          <span className="tcv">T{k.table_number} · C{k.cover_no}</span>
+          {k.course && <span className="crs" title={k.course}>{crsLabel(k.course)}</span>}
+          {k.is_remake && <span className="bdg">REMAKE</span>}
+          {k.print_status === 'failed' && <span className="bdg">NOT PRINTED</span>}
+        </div>
+        {k.vip_name && <div className="vip">★ {k.vip_name}</div>}
+        {k.guest_allergy && <div className="alg">Allergy · all dishes: {k.guest_allergy}</div>}
+        {k.guest_note && <div className="gn">Guest note: {k.guest_note}</div>}
+        <div className="its">
+          {items.map((it, i) => (
+            <div key={i} className="it1">
+              <div className="nm">{it.qty > 1 ? `${it.qty} × ` : ''}{it.name}</div>
+              {splitNote(it.note).length > 0 && <div className="nt">{splitNote(it.note).join(' · ')}</div>}
+              {it.allergy && <div className="ia">Allergy: {it.allergy}</div>}
+            </div>
           ))}
         </div>
-        <div className="kact">
-          {n && <button className={'kbtn ' + n.cls} disabled={busy} onClick={() => act(k)}>{n.label}</button>}
-          <button className="kbtn rp" disabled={busy} title="Print this KOT again on the kitchen printer"
-            onClick={() => reprint(k)}>Reprint</button>
+        <div className="ka">
+          <button className="dlv" onClick={() => deliver(k)}>Delivered</button>
+          <button className="rp" disabled={busy === k.id} title="Print this KOT again on the kitchen printer" onClick={() => reprint(k)}>{busy === k.id ? '…' : 'Reprint'}</button>
         </div>
       </div>
     )
   }
-  // Done: KOTs handed over this service, with their times
+
+  // Delivered view
   const doneAll = d?.done || []
   const doneMine = doneAll.filter(mine)
-  const doneList = doneScope === 'whole' ? doneAll : doneMine
-  const tReady = k => (k.fired_at && k.ready_at ? new Date(k.ready_at) - new Date(k.fired_at) : null)
+  const doneList = (doneScope === 'whole' ? doneAll : doneMine).filter(k => kotMatches(k, search))
   const tOut = k => { const t = k.dispatched_at || k.served_at; return k.fired_at && t ? new Date(t) - new Date(k.fired_at) : null }
   const avgOf = xs => { const v = xs.filter(x => x != null && x >= 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null }
-  const wasLate = k => (tReady(k) ?? tOut(k) ?? 0) > late * 60000
+  const wasLate = k => (tOut(k) ?? 0) > late * 60000
   const hhmm = iso => (iso ? clockText(new Date(iso)) : '–')
 
   const kname = String(kitchen?.name || barker.kitchen_name || '')
@@ -364,53 +337,44 @@ function KitchenScreen({ session, onSignOut }) {
 
   return (
     <div className={'ms kd sz-' + size} onClick={() => { unlockChime(); if (chimeReady()) setSoundOn(true) }}>
-      {!soundOn && <div style={{ background: '#7A4B00', color: '#FFE3A3', fontWeight: 800, fontSize: 14, padding: '8px 14px', textAlign: 'center', cursor: 'pointer' }}>Tap anywhere to turn on the sound for new KOTs</div>}
+      {!soundOn && <div className="snd">Tap anywhere to turn on the sound for new KOTs</div>}
       <div className="top">
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <div className="brandmk"><div className="lt"><img src={logo} alt="" /></div></div>
-          <div className="brandsep" style={{ margin: '0 12px' }} />
-          <h1>{title} <span>· {view === 'whole' ? 'Both barkers' : view === 'done' ? 'Done this service' : `Barker ${barker.side} · ${barker.name}`}</span></h1>
+        <div className="ttl">
+          <div className="lg"><img src={logo} alt="" /></div>
+          <h1>{title} <span>{view === 'whole' ? 'Both barkers' : view === 'done' ? 'Delivered' : `Barker ${barker.side} · ${barker.name}`}</span></h1>
+        </div>
+        <div className="srch">
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search KOT no., T7, C3 or dish" aria-label="Search KOTs" inputMode="search" />
+          {search && <button onClick={() => setSearch('')} title="Clear">✕</button>}
         </div>
         <div className="seg">
-          <button className={view === 'mine' ? 'a' : ''} onClick={() => { setView('mine'); setPicked(new Set()) }}>My dishes ({barker.side})</button>
+          <button className={view === 'mine' ? 'a' : ''} onClick={() => setView('mine')}>My dishes ({barker.side})</button>
           <button className={view === 'whole' ? 'a' : ''} onClick={() => setView('whole')}>Entire kitchen</button>
-          <button className={view === 'done' ? 'a' : ''} onClick={() => { setView('done'); setPicked(new Set()) }}>Done · {doneMine.length}</button>
+          <button className={view === 'done' ? 'a' : ''} onClick={() => setView('done')}>Delivered · {doneMine.length}</button>
         </div>
-        <div className="cnt">
-          <div className="c"><b>{received.length}</b>Received</div>
-          <div className="c"><b>{by('in_prep').length}</b>In prep</div>
-          <div className="c"><b>{by('ready').length}</b>Ready</div>
-          <div className="c r"><b>{lateCount}</b>Late</div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {!q.online && <span className="c r" style={{ padding: '6px 10px' }}>Offline</span>}
+        <div className="rt">
+          {!q.online && <span className="off">Offline</span>}
           <div className="clock">{clockText(new Date(now))}</div>
           <button className="menu-btn" onClick={() => setSheet('menu')}>☰</button>
         </div>
       </div>
 
-      {heldCounts.length > 0 && (
-        <div className="held"><b>Coming up · held at tables, not yet fired</b>
-          {heldCounts.slice(0, 12).map(([n, c]) => <span key={n}>{shortName(n, 20)} {c}</span>)}
-        </div>
-      )}
-      {picked.size > 0 && (
-        <div className="bulk">{picked.size} KOT{picked.size === 1 ? '' : 's'} selected
-          <button disabled={busy} onClick={bulkMove}>Move to the next stage</button>
-          <button className="g" onClick={() => setPicked(new Set())}>Clear</button>
+      {view !== 'done' && (
+        <div className="fl-row">
+          <button className={'chip' + (filter === 'all' ? ' a' : '')} onClick={() => setFilter('all')}>In progress <b>{open.length}</b></button>
+          <button className={'chip ov' + (filter === 'over' ? ' a' : '')} onClick={() => setFilter('over')}>Over {late} min <b>{overCount}</b></button>
+          <span className="hint">Oldest first · tap <b>Delivered</b> when the plate goes to a steward</span>
         </div>
       )}
 
-      {view === 'whole' && <div className="whint">Both barkers' KOTs. Use the buttons when the other barker is away: every change shows on both screens at once.</div>}
-      {!d ? <div style={{ color: '#AEB8D0', padding: 20 }}>Loading…</div> : view === 'done' ? (
+      {!d || (view === 'done' && doneAll.some(k => !('kot_no' in k))) ? <div className="empty">Loading…</div> : view === 'done' ? (
         <div className="donev">
           <div className="dsum">
-            <div className="c"><b>{doneMine.length}</b>My dishes ({barker.side}) handed over</div>
+            <div className="c"><b>{doneMine.length}</b>My dishes delivered</div>
             <div className="c"><b>{doneAll.length}</b>Entire kitchen</div>
-            <div className="c"><b>{mmss(avgOf(doneList.map(tReady)))}</b>Avg firing → ready</div>
-            <div className="c"><b>{mmss(avgOf(doneList.map(tOut)))}</b>Avg firing → handed over</div>
-            <div className={'c' + (doneList.some(wasLate) ? ' r' : '')}><b>{doneList.filter(wasLate).length}</b>Late (over {late} min)</div>
-            <div className="seg sm" style={{ marginLeft: 'auto' }}>
+            <div className="c"><b>{mmss(avgOf(doneList.map(tOut)))}</b>Avg firing → delivered</div>
+            <div className="c"><b>{doneList.filter(wasLate).length}</b>Over {late} min</div>
+            <div className="seg sm">
               <button className={doneScope === 'mine' ? 'a' : ''} onClick={() => setDoneScope('mine')}>Mine</button>
               <button className={doneScope === 'whole' ? 'a' : ''} onClick={() => setDoneScope('whole')}>Entire kitchen</button>
             </div>
@@ -418,54 +382,39 @@ function KitchenScreen({ session, onSignOut }) {
           <div className="dtw">
             {doneList.length ? (
               <table className="dtab">
-                <thead><tr><th>KOT</th><th>Table</th><th>Course</th><th>Dishes</th><th>Fired</th><th>Ready</th><th>Handed over</th><th>Total</th><th /></tr></thead>
+                <thead><tr><th>KOT</th><th>Table</th><th>Course</th><th>Dishes</th><th>Fired</th><th>Delivered</th><th>Total</th><th /></tr></thead>
                 <tbody>
                   {doneList.map(k => (
                     <tr key={k.id} className={wasLate(k) ? 'l' : ''}>
-                      <td><b>{k.kot_no}</b>{doneScope === 'whole' && <span className={'tag ' + ((k.barker || 'A') === 'A' ? 'ta' : 'tb')}>{k.barker || 'A'}</span>}{k.is_remake && <span className="rmk">REMAKE</span>}</td>
+                      <td><b className="dsn">{k.kot_no}</b>{k.is_remake && <span className="bdg">REMAKE</span>}</td>
                       <td>T{k.table_number} · C{k.cover_no}</td>
                       <td>{k.course || ''}</td>
-                      <td className="dl">{(k.items || []).map(it => `${it.qty} × ${it.name}`).join(', ')}</td>
+                      <td className="dl">{(k.items || []).map(it => `${it.qty > 1 ? it.qty + ' × ' : ''}${it.name}`).join(', ')}</td>
                       <td>{hhmm(k.fired_at)}</td>
-                      <td>{hhmm(k.ready_at)}{tReady(k) != null && <small> · {mmss(tReady(k))}</small>}</td>
                       <td>{hhmm(k.dispatched_at || k.served_at)}{k.stage_by ? <small> · {k.stage_by}</small> : null}</td>
                       <td><b>{mmss(tOut(k))}</b></td>
                       <td className="ac"><div>
-                        <button className="kbtn rp" disabled={busy} onClick={() => reprint(k)}>Reprint</button>
-                        <BackToReady busy={busy} onBack={() => moveBack(k, 'ready')} />
+                        <button className="rp" disabled={!!busy} onClick={() => reprint(k)}>Reprint</button>
+                        <BackToOpen busy={!!busy} onBack={() => reopen(k)} />
                       </div></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            ) : <div className="empty" style={{ color: '#AEB8D0', padding: 30, textAlign: 'center' }}>Nothing handed over yet this service.</div>}
+            ) : <div className="empty">{search ? 'No delivered KOT matches the search.' : 'Nothing delivered yet this service.'}</div>}
           </div>
         </div>
-      ) : view === 'mine' ? (
-        <div className="cols">
-          {[[received, 'Received'], [by('in_prep'), 'In preparation'], [by('ready'), 'Ready · hand to a steward']].map(([list, label]) => (
-            <div className="col" key={label}>
-              <div className="colh"><span>{label}</span><span>{list.length}</span></div>
-              <div className="colb">{list.map(k => card(k, false))}</div>
-            </div>
-          ))}
-        </div>
       ) : (
-        <div className="cols whole">
-          <div className="col"><div className="colh"><span>Received</span><span>oldest first</span></div>
-            <div className="colb">{[...received].sort((a, b) => age(b) - age(a)).map(k => card(k, true))}</div></div>
-          <div className="col"><div className="colh"><span>In preparation</span><span>red = over {late} min</span></div>
-            <div className="colb">{by('in_prep').map(k => card(k, true))}</div></div>
-          <div className="col"><div className="colh"><span>Ready · to dispatch</span></div>
-            <div className="colb">{by('ready').map(k => card(k, true))}</div></div>
+        <div className="grid-k">
+          {shown.length ? shown.map(card) : (
+            <div className="empty">{search ? `No open KOT matches “${search.trim()}”.` : filter === 'over' ? `Nothing over ${late} minutes.` : 'No KOTs in progress. New KOTs appear here and print by themselves.'}</div>
+          )}
         </div>
       )}
 
       <div className="foot">
-        <span>{view === 'whole'
-          ? 'Blue = Barker A · gold = Barker B · tap cards to move several at once · handed over KOTs move to Done'
-          : `Each KOT is for one table and one cover · the timer runs from firing · red after ${late} minutes`}</span>
-        <span>{d?.avgReady != null ? `Avg. firing to ready ${mmss(d.avgReady)} · ` : ''}Handed over this service: {d?.dispatched ?? 0}</span>
+        <span>Each KOT is one dish for one table and cover · the timer runs from firing · it flashes after {late} minutes until delivered</span>
+        <span>Delivered this service: {doneAll.length}</span>
       </div>
 
       {sheet === 'menu' && (
@@ -497,14 +446,17 @@ function KitchenScreen({ session, onSignOut }) {
   )
 }
 
-// Back to Ready from Done: a second tap, so a stray click does not reopen a KOT
-function BackToReady({ busy, onBack }) {
+// Back to In progress from Delivered: a second tap, so a stray tap does not reopen a KOT
+function BackToOpen({ busy, onBack }) {
   const [armed, setArmed] = useState(false)
   useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 4000); return () => clearTimeout(t) }, [armed])
   return armed
-    ? <button className="kbtn b2" disabled={busy} onClick={() => { setArmed(false); onBack() }}>Reopen?</button>
-    : <button className="kbtn rp" disabled={busy} onClick={() => setArmed(true)} title="Handed over by mistake: back to Ready">Back to Ready</button>
+    ? <button className="rp sure" disabled={busy} onClick={() => { setArmed(false); onBack() }}>Reopen?</button>
+    : <button className="rp" disabled={busy} onClick={() => setArmed(true)} title="Delivered by mistake: back to In progress">Back to open</button>
 }
+
+// What a kitchen card shows (not the whole KOT row: less to download on a weak connection)
+const KOT_COLS = 'id,kot_no,kitchen_id,table_number,cover_no,course,fired_at,created_at,barker,barker_name,items,guest_note,guest_allergy,vip_name,is_remake,is_reprint,print_status,stage,status,stage_by,served_at,dispatched_at,received_at'
 
 function KdToast({ toast, onClose }) {
   const closeRef = useRef(onClose); closeRef.current = onClose

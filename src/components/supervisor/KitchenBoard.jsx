@@ -579,12 +579,12 @@ const KotRow = memo(function KotRow({ k, nowS, kitchens, own, act, confirming, o
   if (maestro && k.status === 'delivered') {
     dlv = (
       <div style={{ lineHeight:1.25, minWidth:0 }}>
-        <div style={{ fontSize:12, fontWeight:800, color:'#15803D', whiteSpace:'nowrap' }}>{'✓ Handed over ' + clockTime(k.dispatched_at || k.served_at || k.delivered_at)}</div>
+        <div style={{ fontSize:12, fontWeight:800, color:'#15803D', whiteSpace:'nowrap' }}>{'✓ Delivered ' + clockTime(k.dispatched_at || k.served_at || k.delivered_at)}</div>
         <div style={{ fontSize:11, color:'var(--ink2)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{'by ' + (k.stage_by || k.barker_name || '–')}</div>
       </div>
     )
   } else if (maestro && k.status === 'open') {
-    dlv = <Chip tone={k.stage === 'ready' ? 'amber' : 'grey'}>{MS_STAGE[k.stage] || 'Received'}</Chip>
+    dlv = <Chip tone="grey">{MS_STAGE[k.stage] || 'In progress'}</Chip>
   } else if (k.status === 'delivered') {
     dlv = (
       <div style={{ lineHeight:1.25, minWidth:0 }}>
@@ -788,9 +788,9 @@ export default function KitchenBoard({ eventData }) {
   return <Board key={eventData.id} eventId={eventData.id} maestro={!!eventData.maestro} />
 }
 
-// Smart Serve Maestro: the barker's Handed over completes a KOT, so this list shows the
-// kitchen stage instead of a separate "Mark delivered"
-const MS_STAGE = { new: 'Not on a screen yet', received: 'Received', in_prep: 'In preparation', ready: 'Ready at the pass', dispatched: 'Handed over' }
+// Smart Serve Maestro: the barker's Delivered completes a KOT, so this list shows the
+// kitchen state instead of a separate "Mark delivered"
+const MS_STAGE = { new: 'Not on a screen yet', received: 'In progress', in_prep: 'In progress', ready: 'In progress', dispatched: 'Delivered' }
 
 function Board({ eventId, maestro }) {
   const [kots, setKots] = useState(() => new Map())
