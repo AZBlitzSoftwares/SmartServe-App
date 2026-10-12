@@ -129,7 +129,8 @@ export default function SupervisorApp() {
   // panel spring straight back, but the next message opens it again.
   const chatPoppedRef = useRef(null)
   useEffect(() => {
-    if (!authed || !eventData?.id) return
+    // Smart Serve Maestro captains have no chat (their tablet is for orders only)
+    if (!authed || !eventData?.id || eventData?.maestro) return
     chatPoppedRef.current = null
     let stop = false
     async function pollCaptainChat() {
@@ -182,7 +183,7 @@ export default function SupervisorApp() {
     pollCaptainChat()
     const t = setInterval(pollCaptainChat, 3000)
     return () => { stop = true; clearInterval(t) }
-  }, [authed, eventData?.id])
+  }, [authed, eventData?.id, eventData?.maestro])
 
   useEffect(() => {
     if (!authed) return
@@ -466,7 +467,7 @@ export default function SupervisorApp() {
           answering "table 12 has been waiting" needs to see table 12 while
           they type, and a tab would replace the very thing being asked about. */}
       {/* Chat is with captains: a guest self-service event has none */}
-      {eventData && eventData.service_mode === 'captain' && (
+      {eventData && eventData.service_mode === 'captain' && !eventData.maestro && (
         <SupervisorChat eventData={eventData}
           meName={currentUser?.name || currentUser?.username || (isAdmin ? 'Admin' : 'Operator')}
           minimized={!chatOpen} unread={chatUnread} focus={chatFocus}

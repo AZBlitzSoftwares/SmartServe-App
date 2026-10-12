@@ -230,6 +230,7 @@ export function parseItems(items) {
       name: String(it.name ?? 'Item'),
       qty: Math.max(1, Math.round(Number(it.qty ?? it.quantity ?? 1)) || 1),
       note: it.note == null ? '' : String(it.note).trim(),
+      allergy: it.allergy == null ? '' : String(it.allergy).trim(),
     }));
 }
 
@@ -365,7 +366,8 @@ function buildTest(job, { printer, now }) {
 
 const isMaestro = (job) => job && job.cover_no != null && job.cover_no !== '';
 
-// KITCHEN / KOT AS-A 014 / Barker A - Rohit, then T7 - C3 big, course, firing.
+// KITCHEN / KOT No. IT-A 014 (as big as fits) / Barker A - Rohit, then T7 - C3 big, course, firing,
+// then the VIP guest and the guest's allergy and note (for every dish of this cover).
 function maestroHead(r, job, backup, now) {
   r.init();
   r.align('center').bold(true).size(2);
@@ -375,7 +377,15 @@ function maestroHead(r, job, backup, now) {
   if (backup) r.bold(true).reverse(true).line('PRINTED ON BACKUP PRINTER (main printer down)').reverse(false).bold(false);
   if (job.is_reprint) r.bold(true).reverse(true).line('  REPRINT - CHECK BEFORE COOKING  ').reverse(false).bold(false);
   if (job.is_remake || job.priority) r.bold(true).size(2).reverse(true).line(' REMAKE - PRIORITY ').reverse(false).size(1).bold(false);
-  r.bold(true).size(2).line(job.kot_no ? `KOT ${job.kot_no}` : 'KOT').size(1).bold(false);
+  // The KOT serial number is what the kitchen calls out and searches for: as big as the line allows
+  const serial = sanitize(job.kot_no || '');
+  if (serial) {
+    r.line('KOT No.');
+    const mult = serial.length <= WIDTH / 4 ? 4 : serial.length <= WIDTH / 3 ? 3 : 2;
+    r.bold(true).size(mult);
+    for (const l of wrap(serial, Math.floor(WIDTH / mult))) r.line(l);
+    r.size(1).bold(false);
+  } else r.bold(true).size(2).line('KOT').size(1).bold(false);
   if (job.barker) r.line(`Barker ${String(job.barker).toUpperCase()}${job.barker_name ? ' - ' + job.barker_name : ''}`);
   r.align('left').dashes();
   const tc = `T${job.table_number ?? '?'} - C${job.cover_no}`;
@@ -385,13 +395,53 @@ function maestroHead(r, job, backup, now) {
   r.line(leftRight(`Fired ${formatTime(toDate(job.fired_at || job.created_at, now))}`, job.firing_no ? `Firing #${job.firing_no}` : ''));
   if (job.captain_name) r.line(leftRight('Table captain', String(job.captain_name)));
   r.dashes();
+  guestBlock(r, job);
+}
+
+// VIP guest, then the allergy and note that hold for everything this guest orders.
+// Bold, tall and framed rather than white-on-black, so they read easily.
+function guestBlock(r, job) {
+  const vip = String(job.vip_name || '').trim();
+  const allergy = String(job.guest_allergy || '').trim();
+  const note = String(job.guest_note || '').trim();
+  if (!vip && !allergy && !note) return;
+  if (vip) {
+    r.align('center').bold(true).size(2).reverse(true).line(' VIP GUEST ').reverse(false);
+    for (const l of wrap(vip.toUpperCase(), WIDTH / 2)) r.line(l);
+    r.size(1).bold(false).align('left');
+  }
+  if (allergy) {
+    r.line('='.repeat(WIDTH));
+    r.bold(true).size(1, 2);
+    for (const l of wrap(`ALLERGY (ALL DISHES): ${allergy.toUpperCase()}`, WIDTH, 2)) r.line(l);
+    r.size(1).bold(false);
+    r.line('='.repeat(WIDTH));
+  }
+  if (note) {
+    r.bold(true).size(1, 2);
+    for (const l of wrap(`GUEST NOTE: ${note.toUpperCase()}`, WIDTH, 2)) r.line(l);
+    r.size(1).bold(false);
+  }
+  r.dashes();
+}
+
+// "1 x Funghi Tea Soup" (tall, bold), then its note and allergy on their own lines, bold and tall
+function maestroItemLines(r, items) {
+  for (const it of items) {
+    const prefix = `${it.qty} x `;
+    r.bold(true).size(1, 2);
+    for (const l of wrap(prefix + it.name, WIDTH, prefix.length)) r.line(l);
+    if (it.note) for (const l of wrap(`NOTE: ${it.note.toUpperCase()}`, WIDTH - 4, 6)) r.line('    ' + l);
+    if (it.allergy) for (const l of wrap(`** ALLERGY: ${it.allergy.toUpperCase()} **`, WIDTH - 4, 3)) r.line('    ' + l);
+    r.size(1).bold(false);
+  }
 }
 
 function buildMaestro(job, { backup, now }) {
   const r = new Receipt();
   const items = parseItems(job.items);
   maestroHead(r, job, backup, now);
-  itemLines(r, items, { big: true });
+  maestroItemLines(r, items);
   r.dashes();
   r.bold(true).size(1, 2).line(leftRight(`Plates: ${totalQty(items)}`, `Cover: T${job.table_number ?? '?'}-C${job.cover_no}`)).size(1).bold(false);
   footer(r, job, now);
@@ -406,7 +456,7 @@ function buildMaestroCancel(job, { backup, now }) {
   banner();
   r.line('DO NOT PREPARE / DISPATCH').size(1).bold(false).align('left');
   r.dashes();
-  itemLines(r, items, { big: false });
+  maestroItemLines(r, items);
   r.dashes();
   r.line(leftRight(`Plates cancelled: ${totalQty(items)}`, `Cover: T${job.table_number ?? '?'}-C${job.cover_no}`));
   banner();

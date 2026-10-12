@@ -225,16 +225,46 @@ test('maestro KOT: kitchen, KOT number, barker, cover, course, firing, plates', 
   const lines = textLines(buildKot(maestroJob)).map((l) => l.trim());
   const all = lines.join('\n');
   assert.ok(lines.includes('ASIAN'));
-  assert.ok(lines.includes('KOT AS-A 014'));
+  assert.ok(lines.includes('KOT No.') && lines[lines.indexOf('KOT No.') + 1] === 'AS-A 014', 'serial number on its own line under KOT No.');
   assert.ok(lines.includes('Barker A - Rohit'));
   assert.ok(lines.includes('T7 - C3'));
   assert.ok(lines.includes('COURSE: STARTERS'));
   assert.match(all, /Fired .*Firing #2/);
   assert.match(all, /Table captain\s+Neha/);
   assert.match(all, /1 x Crystal Veg Dim Sum/);
-  assert.match(all, />> JAIN <</);
+  assert.match(all, /NOTE: JAIN/);
+  assert.doesNotMatch(all, />> JAIN <</);
   assert.match(all, /Plates: 2\s+Cover: T7-C3/);
   assert.doesNotMatch(all, /REMAKE|REPRINT|CHAIR/);
+});
+
+test('maestro KOT: serial number printed as big as fits', () => {
+  const d = decodeEscPos(buildKot(maestroJob));
+  const serial = d.lines.find((l) => l.text.trim() === 'AS-A 014');
+  assert.ok(serial && serial.w === 4 && serial.h === 4 && serial.bold, 'AS-A 014 at 4x, bold');
+  const long = decodeEscPos(buildKot({ ...maestroJob, kot_no: 'DESSERT-B 1014' })).lines.find((l) => l.text.trim() === 'DESSERT-B 1014');
+  assert.ok(long && long.w === 3, 'a longer number at 3x');
+});
+
+test('maestro KOT: dish note and allergy bold and tall, not white on black', () => {
+  const d = decodeEscPos(buildKot({ ...maestroJob, items: [{ name: 'Funghi Tea Soup', qty: 1, note: 'Less spicy, sauce on side', allergy: 'Peanuts' }] }));
+  const note = d.lines.find((l) => l.text.includes('NOTE: LESS SPICY, SAUCE ON SIDE'));
+  const alg = d.lines.find((l) => l.text.includes('** ALLERGY: PEANUTS **'));
+  assert.ok(note && note.bold && note.h === 2 && !note.reverse, 'note line');
+  assert.ok(alg && alg.bold && alg.h === 2 && !alg.reverse, 'allergy line');
+});
+
+test('maestro KOT: VIP guest, whole-order allergy and guest note', () => {
+  const plain = textLines(buildKot(maestroJob)).join('\n');
+  assert.doesNotMatch(plain, /VIP GUEST|ALLERGY|GUEST NOTE/);
+  const d = decodeEscPos(buildKot({ ...maestroJob, vip_name: 'VVIP - Mr. Vikram Sethi', guest_allergy: 'Shellfish', guest_note: 'Less spicy | Dislikes: Mushroom' }));
+  const all = d.lines.map((l) => l.text.trim()).join('\n');
+  assert.match(all, /VIP GUEST\nVVIP - MR. VIKRAM SETHI/);
+  assert.match(all, /ALLERGY \(ALL DISHES\): SHELLFISH/);
+  assert.match(all, /GUEST NOTE: LESS SPICY \| DISLIKES: MUSHROOM/);
+  assert.ok(all.indexOf('VIP GUEST') < all.indexOf('1 x Crystal Veg Dim Sum'), 'guest details before the dishes');
+  const banner = d.lines.find((l) => l.text.trim() === 'VIP GUEST');
+  assert.ok(banner.reverse && banner.w === 2, 'VIP banner stands out');
 });
 
 test('maestro KOT: remake and reprint banners', () => {

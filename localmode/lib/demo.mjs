@@ -470,6 +470,7 @@ function summary({ today, port, st, running }) {
   L.push('')
   L.push(`4) ${maestro.name}   ${maestro.tables} tables x ${maestro.chairs} covers`)
   if (st.sampleMenu) L.push('   Menu: Italian, Oriental, Indian (Soup to Main Course 2) and Dessert from the Desserts kitchen.')
+  if (st.vipGuests) L.push('   VIP Guests: three sample guests with preferred dishes (Mrs. Anjali Sethi is fixed at T2 C4).')
   L.push(`   Tablet link -> "Captain" -> ${maestro.captains.map(([n, p, t]) => `${n} ${p} (table ${t})`).join(', ')}`)
   L.push(`   Kitchen Display ${base}/kitchen  (barker name + PIN):`)
   for (const kt of maestro.kitchens) {
@@ -496,6 +497,23 @@ async function sampleMaestroMenu(db) {
   } catch (e) {
     await db.query('rollback to savepoint sample_menu')
     console.log(`  NOTE: the sample menu was not loaded (${String(e.message).split('\n')[0]}); the short demo menu is used.`)
+    return false
+  }
+}
+
+// Three fictional VIP guests with preferred dishes (../db/demo_maestro_vip.sql, the same file the
+// cloud demo uses). It needs the full demo menu and the v2 tables; if either is missing it is skipped.
+async function sampleVipGuests(db) {
+  const f = path.join(DB_DIR, 'demo_maestro_vip.sql')
+  if (!fs.existsSync(f)) return false
+  await db.query('savepoint sample_vip')
+  try {
+    await db.query(fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, ''))
+    await db.query('release savepoint sample_vip')
+    return true
+  } catch (e) {
+    await db.query('rollback to savepoint sample_vip')
+    console.log(`  NOTE: the sample VIP guests were not loaded (${String(e.message).split('\n')[0]}).`)
     return false
   }
 }
@@ -532,6 +550,7 @@ export async function demoCommand({ remove = false } = {}) {
         const deleted = await deleteDemo(db, cols)
         const st = remove ? null : await createDemo(db, cols, today)
         if (st) st.sampleMenu = await sampleMaestroMenu(db)
+        if (st?.sampleMenu) st.vipGuests = await sampleVipGuests(db)
         await db.query('commit')
         return { deleted, st }
       } catch (e) {

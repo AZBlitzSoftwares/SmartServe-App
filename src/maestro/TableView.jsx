@@ -2,9 +2,9 @@
 
    Opened by clicking a table on the Control Desk.
      Left   every cover x every course (the captain's course board, read only):
-            held, in the kitchen, ready, served, late.
+            held, in the kitchen, delivered, late.
      Right  the cover picked on the left: each dish with its kitchen, KOT,
-            barker and times (fired, ready, served), and Reprint for its KOT.
+            barker and times (fired, delivered), and Reprint for its KOT.
    Covers carry the captain who looks after them (cover split).
    The desk can cancel a fired dish at any stage before it is served (a captain
    only until the kitchen starts it); the kitchen gets a CANCEL slip. */
@@ -21,15 +21,18 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
   const [msg, setMsg] = useState(null)
 
   const q = useLive(async () => {
-    const [items, kots, covers] = await Promise.all([
+    const [items, kots, covers, vips] = await Promise.all([
       supabase.from('ms_items').select('*').eq('event_id', ev.id).eq('table_number', table).order('held_at'),
       supabase.from('kots').select('id,kot_no,kitchen_id,kitchen_name,cover_no,barker,barker_name,stage,stage_by,fired_at,received_at,in_prep_at,ready_at,dispatched_at,served_at,status,kind,is_remake,print_status,is_reprint')
         .eq('event_id', ev.id).eq('table_number', table).eq('kind', 'order'),
       supabase.from('ms_covers').select('*').eq('event_id', ev.id).eq('table_number', table),
+      supabase.from('ms_vip_guests').select('id,name,label').eq('event_id', ev.id),
     ])
     for (const r of [items, kots, covers]) if (r.error) throw r.error
-    return { items: items.data || [], kots: kots.data || [], covers: covers.data || [] }
-  }, { eventId: ev.id, tables: ['ms_items', 'kots', 'ms_covers'], intervalMs: 3000, deps: [table] })
+    // VIP guests are optional (an older database has no list): the table view works without them
+    return { items: items.data || [], kots: kots.data || [], covers: covers.data || [], vips: vips.error ? [] : vips.data || [] }
+  }, { eventId: ev.id, tables: ['ms_items', 'kots', 'ms_covers'], intervalMs: 3000, deps: [table],
+    filter: `table_number=eq.${table}`, match: row => row.event_id === ev.id })
   const d = q.data || { items: [], kots: [], covers: [] }
 
   const kotById = useMemo(() => Object.fromEntries(d.kots.map(k => [k.id, k])), [d.kots])
@@ -38,6 +41,8 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
   const live = d.items.filter(i => i.state !== 'cancelled')
   const itemsOf = c => live.filter(i => i.cover_no === c)
   const seatedAt = c => d.covers.find(x => x.cover_no === c)?.seated_at
+  const coverRow = c => d.covers.find(x => x.cover_no === c) || {}
+  const vipOf = c => { const id = coverRow(c).vip_guest_id; return id ? (d.vips || []).find(v => v.id === id) : null }
 
   // The table's captains, in cover order, and who looks after each cover
   const tcaps = caps.filter(c => c.is_active !== false && Number(c.table_number) === Number(table)).sort(capOrder)
@@ -94,7 +99,7 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
             <h3>Table T{table}</h3>
             <p>
               {tcaps.length ? tcaps.map(c => `${c.name} · ${rangeText(ranges.get(c.id))}`).join('   |   ') : 'No table captain'}
-              {'   ·   '}{seatedN}/{coverCount} covers seated · {served}/{live.length} plates served
+              {'   ·   '}{seatedN}/{coverCount} covers seated · {served}/{live.length} dishes delivered
             </p>
           </div>
           <button className="btn btn-ghost" onClick={onClose}>Close</button>
@@ -109,7 +114,7 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
                 <tbody>
                   {covers.map(c => (
                     <tr key={c} className={c === cover ? 'cur' : ''}>
-                      <td className="cvc" style={{ cursor: 'pointer' }} onClick={() => setPick(c)}>C{c}<small>{ownerOf(c) || (seatedAt(c) ? 'seated' : '')}</small></td>
+                      <td className="cvc" style={{ cursor: 'pointer' }} onClick={() => setPick(c)}>C{c}{vipOf(c) ? ' ★' : ''}<small>{ownerOf(c) || (seatedAt(c) ? 'seated' : '')}</small></td>
                       {cols.map(course => cellOf(c, course))}
                     </tr>
                   ))}
@@ -122,6 +127,9 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
             <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
               {seatedAt(cover) ? `Seated ${t(seatedAt(cover))}` : 'Not seated yet'} · {mine.length} {mine.length === 1 ? 'dish' : 'dishes'}
             </p>
+            {vipOf(cover) && <div className="tvg vip">★ {[vipOf(cover).label, vipOf(cover).name].filter(Boolean).join(' - ')}</div>}
+            {coverRow(cover).guest_allergy && <div className="tvg alg">Allergy · all dishes: {coverRow(cover).guest_allergy}</div>}
+            {coverRow(cover).guest_note && <div className="tvg">Guest note: {coverRow(cover).guest_note}</div>}
             {!byCourse.length && <div className="empty">Nothing ordered for C{cover} yet.</div>}
             {byCourse.map(g => (
               <div className="tvc" key={g.course}>
@@ -135,6 +143,7 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
                       <div className="r1">
                         <b>{i.qty > 1 ? `${i.qty} × ` : ''}{i.name}</b>
                         {i.note && <span className="note">{i.note}</span>}
+                        {i.allergy && <span className="note" style={{ background: '#7A4B00' }}>Allergy: {i.allergy}</span>}
                         <span className={'chip ' + s.cls}>{s.label}</span>
                       </div>
                       <div className="r2">
@@ -145,9 +154,8 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
                       {k && (
                         <div className="r3">
                           <span>Fired {t(k.fired_at)}</span>
-                          {k.ready_at && <span>Ready {t(k.ready_at)} ({mmss(new Date(k.ready_at) - new Date(k.fired_at))})</span>}
-                          {done && <span>Served {t(done)}{k.stage_by ? ` by ${k.stage_by}` : ''}</span>}
-                          {!done && !k.ready_at && <span>{k.stage === 'in_prep' ? 'In preparation' : 'Received'} · {mmss(now - new Date(k.fired_at))}</span>}
+                          {done && <span>Delivered {t(done)} ({mmss(new Date(done) - new Date(k.fired_at))}){k.stage_by ? ` by ${k.stage_by}` : ''}</span>}
+                          {!done && <span>{k.stage === 'new' ? 'Not on the kitchen screen yet' : 'In kitchen'} · {mmss(now - new Date(k.fired_at))}</span>}
                           <button className="btn btn-ghost" disabled={busy} onClick={() => reprint(k)}>Reprint KOT</button>
                           {i.state === 'fired' && !done && k.status === 'open' && <DeskCancel disabled={busy} onCancel={() => cancelDish(i, k)} />}
                         </div>

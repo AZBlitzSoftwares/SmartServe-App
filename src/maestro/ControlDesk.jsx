@@ -28,11 +28,14 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
 
   const q = useLive(async () => {
     const since = new Date(Date.now() - 18 * 3600e3).toISOString()
-    const [evr, kitchens, kots, items, covers, caps, barkers, sos, sold] = await Promise.all([
+    // Open KOTs with their dishes (alerts name them); finished ones without, as with one KOT
+    // per dish an evening adds up to a thousand or more
+    const KCOLS = 'id,kot_no,kitchen_id,kitchen_name,table_number,cover_no,barker,barker_name,course,stage,fired_at,received_at,in_prep_at,ready_at,dispatched_at,served_at,status,kind,print_status,last_error,is_remake,created_at'
+    const [evr, kitchens, kotsOpen, kotsDone, items, covers, caps, barkers, sos, sold] = await Promise.all([
       supabase.from('events').select('*').eq('id', ev.id).maybeSingle(),
       supabase.from('kitchens').select('*').eq('event_id', ev.id).eq('is_active', true).order('sort_order'),
-      supabase.from('kots').select('id,kot_no,kitchen_id,kitchen_name,table_number,cover_no,barker,barker_name,course,items,stage,fired_at,received_at,in_prep_at,ready_at,dispatched_at,served_at,status,kind,print_status,last_error,is_remake,created_at')
-        .eq('event_id', ev.id).gte('created_at', since),
+      supabase.from('kots').select(KCOLS + ',items').eq('event_id', ev.id).eq('status', 'open').gte('created_at', since),
+      supabase.from('kots').select(KCOLS).eq('event_id', ev.id).neq('status', 'open').gte('created_at', since),
       supabase.from('ms_items').select('id,table_number,cover_no,course,state,fired_at,served_at,held_at,kitchen_id').eq('event_id', ev.id),
       supabase.from('ms_covers').select('table_number,cover_no,seated_at').eq('event_id', ev.id),
       supabase.from('captains').select('*').eq('event_id', ev.id),
@@ -40,22 +43,24 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
       supabase.from('sos_requests').select('id,table_id,table_number,captain_id,request_type,status,created_at,tables(table_number)').eq('event_id', ev.id).in('status', ['open', 'acknowledged', 'in_progress']),
       eventDishes(ev.id, 'id,name,is_available,sold_out_at,sold_out_by'),
     ])
-    for (const r of [kitchens, kots, items]) if (r.error) throw r.error
+    for (const r of [kitchens, kotsOpen, kotsDone, items]) if (r.error) throw r.error
     return {
-      ev: evr.data || ev, kitchens: kitchens.data || [], kots: kots.data || [], items: items.data || [],
+      ev: evr.data || ev, kitchens: kitchens.data || [], kots: [...(kotsOpen.data || []), ...(kotsDone.data || [])], items: items.data || [],
       covers: covers.data || [], caps: (caps.data || []).filter(c => c.is_active !== false), barkers: (barkers.data || []).filter(b => b.is_active !== false),
       sos: sos.error ? [] : (sos.data || []), sold: (sold.data || []).filter(m => m.is_available === false && m.sold_out_at),
     }
-  }, { eventId: ev.id, tables: ['kots', 'ms_items', 'ms_covers', 'kitchens', 'sos_requests'], intervalMs: 4000 })
+  }, { eventId: ev.id, tables: ['kots', 'ms_items', 'ms_covers', 'kitchens', 'sos_requests'], intervalMs: 4000, minGapMs: 2500 })
 
   const d = q.data
   const E = d?.ev || ev
   const kitchenById = useMemo(() => Object.fromEntries((d?.kitchens || []).map(k => [k.id, k])), [d])
   const orders = (d?.kots || []).filter(k => k.kind === 'order' && k.status !== 'cancelled')
   const lateOf = k => lateMinutes(kitchenById[k.kitchen_id], E)
-  const isLate = k => !['ready', 'dispatched'].includes(k.stage) && !k.served_at && now - new Date(k.fired_at || k.created_at) > lateOf(k) * 60000
-  const fireReady = orders.filter(k => k.ready_at && k.fired_at).map(k => new Date(k.ready_at) - new Date(k.fired_at))
-  const avgFR = fireReady.length ? fireReady.reduce((a, b) => a + b, 0) / fireReady.length : null
+  // Late: not delivered within the kitchen alert time
+  const doneAt = k => k.dispatched_at || k.served_at
+  const isLate = k => k.stage !== 'dispatched' && !k.served_at && now - new Date(k.fired_at || k.created_at) > lateOf(k) * 60000
+  const fireDone = orders.filter(k => doneAt(k) && k.fired_at).map(k => new Date(doneAt(k)) - new Date(k.fired_at)).filter(x => x >= 0)
+  const avgFR = fireDone.length ? fireDone.reduce((a, b) => a + b, 0) / fireDone.length : null
   const plates = (d?.items || []).filter(i => i.state !== 'cancelled')
   const platesOrdered = plates.length
   const tables = Math.max(1, Number(E.number_of_tables) || 0)
@@ -69,7 +74,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
     // for that kitchen, so a slow kitchen does not push everything else away.
     const lateByK = {}
     for (const k of orders.filter(isLate)) (lateByK[k.kitchen_id] ||= []).push(k)
-    const stageText = k => k.stage === 'in_prep' ? 'in preparation' : k.stage === 'new' ? 'not yet received' : 'received'
+    const stageText = k => k.stage === 'new' ? 'not on the kitchen screen' : 'not delivered'
     for (const [kid, list] of Object.entries(lateByK)) {
       const ages = list.map(k => now - new Date(k.fired_at || k.created_at))
       if (list.length > 2) {
@@ -91,7 +96,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
         action: 'Call kitchen', onAct: () => ack('late-' + k.id, 3),
       }))
     }
-    // A KOT is marked received the moment a kitchen screen shows it. Still New after a
+    // A KOT is in progress the moment a kitchen screen shows it. Still New after a
     // minute: no screen of that kitchen is open, the printed slip is the only copy.
     for (const kt of d.kitchens) {
       const unseen = orders.filter(k => k.kitchen_id === kt.id && k.stage === 'new' && now - new Date(k.fired_at || k.created_at) > 60000)
@@ -143,7 +148,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
           key, w: 60, icon: 'P', color: 'var(--blue)',
           title: `Pacing: nothing fired for ${tc(c.table_number, c.cover_no)} in ${Math.floor((now - last) / 60000)} min`,
           sub: `Held: ${[...new Set(held.map(i => i.course))].join(', ')}${cap ? ' · table captain ' + cap : ''}`,
-          action: 'Remind captain', onAct: () => remind(c.table_number, c.cover_no, key),
+          action: 'Seen', onAct: () => ack(key, 10),
         })
       }
     }
@@ -178,16 +183,6 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
     if (error) throw error
   }, 'Help request resolved')
   const undoSold = m => run(() => rpc('ms_sold_out', { p_menu_item_id: m.id, p_sold_out: false, p_by: 'Control Desk' }), `${m.name} is available again`)
-  const remind = (t, c, key) => run(async () => {
-    const caps = captainsForCover(d?.caps, t, c, E.chairs_per_table)
-    if (!caps.length) throw new Error('No table captain is linked to table T' + t)
-    const { error } = await supabase.from('chat_messages').insert(caps.map(cp => ({
-      event_id: ev.id, captain_id: cp.id, sender: 'supervisor', sender_name: 'Control Desk',
-      body: `Pacing: please check ${tc(t, c)} - nothing fired for a while.`, read_by_captain: false, read_by_supervisor: true,
-    })))
-    if (error) throw error
-    ack(key, 10)
-  }, 'Reminder sent to the table captain')
 
   // ---------------------------------------------------------------- tables
   const tableStats = useMemo(() => {
@@ -223,7 +218,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
         </div>
         <div className="r">
           <span className="pill">Plates ordered {platesOrdered}</span>
-          <span className="pill">Avg. firing to ready {mmss(avgFR)}</span>
+          <span className="pill">Avg. firing to delivered {mmss(avgFR)}</span>
           {!q.online && <span className="pill" style={{ background: 'var(--red)' }}>Offline</span>}
           <span className="pill">{clockText(new Date(now))}</span>
           {onShowPrinters && <button className="pill" onClick={onShowPrinters}>Printers &amp; print queue</button>}
@@ -234,16 +229,15 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
           <div className="kits">
             {d.kitchens.map(kt => {
               const ks = orders.filter(k => k.kitchen_id === kt.id && !k.served_at && k.stage !== 'dispatched')
-              const n = ks.filter(k => k.stage === 'new' || k.stage === 'received').length
-              const p = ks.filter(k => k.stage === 'in_prep').length
-              const r = ks.filter(k => k.stage === 'ready').length
+              const n = ks.length
+              const dn = orders.filter(k => k.kitchen_id === kt.id && (k.served_at || k.stage === 'dispatched')).length
               const l = ks.filter(isLate).length
-              const fr = orders.filter(k => k.kitchen_id === kt.id && k.ready_at && k.fired_at).map(k => new Date(k.ready_at) - new Date(k.fired_at))
+              const fr = orders.filter(k => k.kitchen_id === kt.id && doneAt(k) && k.fired_at).map(k => new Date(doneAt(k)) - new Date(k.fired_at)).filter(x => x >= 0)
               const bs = d.barkers.filter(b => b.kitchen_id === kt.id)
               return (
                 <div className="kt" key={kt.id}>
                   <h5>{kt.name}{printerPill(kt)}</h5>
-                  <div className="n3"><div><b>{n}</b>Received</div><div><b>{p}</b>Prep</div><div><b>{r}</b>Ready</div><div className={l ? 'l' : ''}><b>{l}</b>Late</div></div>
+                  <div className="n3"><div><b>{n}</b>In progress</div><div className={l ? 'l' : ''}><b>{l}</b>Late</div><div><b>{dn}</b>Delivered</div></div>
                   <div className="meta"><span>{bs.length ? <>Barkers {bs.sort((a, b) => a.side.localeCompare(b.side)).map(b => (
                     <span key={b.id} className="bk" title={`Barker ${b.side} · ${b.name} · ${b.last_seen_at && now - new Date(b.last_seen_at) < 90000 ? 'screen on' : 'screen not open'}`}>
                       {b.side}<i className={b.last_seen_at && now - new Date(b.last_seen_at) < 90000 ? 'on' : 'off'} /></span>))}</> : 'No barker yet'}</span><span>Avg {mmss(fr.length ? fr.reduce((a, b) => a + b, 0) / fr.length : null)}</span></div>
@@ -252,13 +246,13 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
             })}
           </div>
           <div className="lo">
-            <div className="pan"><h4>Tables <span>click a table to see its covers and every order · plates served / ordered</span></h4>
+            <div className="pan"><h4>Tables <span>click a table to see its covers and every order · dishes delivered / ordered</span></h4>
               <div className="tg">
                 {Array.from({ length: tables }, (_, i) => i + 1).map(t => {
                   const s = tableStats[t] || { ordered: 0, served: 0, late: false }
                   return (
                     <button className={'tb' + (s.late ? ' l' : '') + (s.help ? ' h' : '')} key={t} onClick={() => setOpenTable(t)} title={`Open table T${t}`}>
-                      <b>T{t}{s.help && <i className="hdot" title="Help requested" />}</b>{s.served}/{s.ordered} served
+                      <b>T{t}{s.help && <i className="hdot" title="Help requested" />}</b>{s.served}/{s.ordered} delivered
                       <small>{s.seated || 0} seated{s.late ? ' · late' : ''}</small>
                       <div className="pbar"><i style={{ width: (s.ordered ? Math.round(100 * s.served / s.ordered) : 0) + '%', background: s.late ? 'var(--red)' : undefined }} /></div>
                     </button>

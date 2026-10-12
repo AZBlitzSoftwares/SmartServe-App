@@ -216,8 +216,11 @@ export function describeSlip(decoded) {
     }
     return null;
   };
-  // multi-kitchen: "KOT IT-014   08:42 PM"; Smart Serve Maestro: "KOT AS-A 014" on its own line
-  const kot = find(/^KOT\s+(\S+)\s+\d\d:\d\d [AP]M$/) || find(/^KOT\s+(\S+(?: \d+)?)$/);
+  // multi-kitchen: "KOT IT-014   08:42 PM"; Smart Serve Maestro: "KOT No." then "AS-A 014" big on
+  // the next line (earlier slips: "KOT AS-A 014" on one line)
+  const iNo = texts.indexOf('KOT No.');
+  const serial = iNo >= 0 ? texts.slice(iNo + 1).find((t) => t) || null : null;
+  const kot = find(/^KOT\s+(\S+)\s+\d\d:\d\d [AP]M$/) || serial || find(/^KOT\s+(\S+(?: \d+)?)$/);
   return {
     kind,
     kitchen: head.join(' ') || null,

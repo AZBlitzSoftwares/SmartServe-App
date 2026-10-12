@@ -5,11 +5,13 @@
      Kitchen rules       course rule, one or two barkers, late threshold
      Dish split          course of every dish, Barker A or B, auto-balance
      Barkers             who signs in on each kitchen screen, with a PIN
+     VIP guests          VIP guests of the event: preferences, allergies, preferred dishes,
+                         a fixed seat if known; special VIP-only dishes
    and the Pre-service check shown at the top of the page. */
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import './maestro.css'
-import { coursesOf, routeDish, errText, useNow, eventDishes } from './msData'
+import { coursesOf, routeDish, errText, useNow, eventDishes, PREF_CHIPS, splitNote, joinNote } from './msData'
 
 const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(:\d{1,5})?$/
 
@@ -98,6 +100,7 @@ export default function MaestroSetup({ eventData, onEventChange, onChanged, refr
       <KitchenRules ev={ev} d={d} setD={setD} onChanged={changed} />
       <DishSplit ev={ev} d={d} setD={setD} onChanged={changed} />
       <Barkers ev={ev} d={d} setD={setD} onChanged={changed} />
+      <VipGuests ev={ev} d={d} setD={setD} onChanged={changed} onEventChange={ev2 => { onEventChange && onEventChange(ev2); changed() }} />
     </div>
   )
 }
@@ -110,8 +113,12 @@ function Saved({ at }) {
 // ------------------------------------------------------------- settings
 function ServiceSettings({ ev, dishes = [], onEventChange }) {
   const [courses, setCourses] = useState(coursesOf(ev))
+  // a course added elsewhere (VIP special dish) shows here at once, so Save settings keeps it
+  const evCourses = coursesOf(ev).join('|')
+  useEffect(() => { setCourses(evCourses.split('|')) }, [evCourses])
   const [late, setLate] = useState(ev.late_minutes ?? 5)
   const [pacing, setPacing] = useState(ev.pacing_minutes ?? 25)
+  const [hide, setHide] = useState(ev.served_hide_minutes ?? 3)
   const [auto, setAuto] = useState(ev.first_course_auto !== false)
   const [add, setAdd] = useState('')
   const [msg, setMsg] = useState('')
@@ -124,7 +131,8 @@ function ServiceSettings({ ev, dishes = [], onEventChange }) {
     const dropped = coursesOf(ev).filter(c => !list.includes(c) && dishes.some(x => x.course === c))
     if (dropped.length && !window.confirm(dropped.map(c => `${c} (${dishes.filter(x => x.course === c).length} dishes)`).join(', ')
       + ' will be removed. Those dishes will have no course, so captains cannot order them, until you give them one under Menu. Save anyway?')) return
-    const patch = { courses: list, late_minutes: Math.max(1, Number(late) || 5), pacing_minutes: Math.max(5, Number(pacing) || 25), first_course_auto: auto }
+    const patch = { courses: list, late_minutes: Math.max(1, Number(late) || 3), pacing_minutes: Math.max(5, Number(pacing) || 25), first_course_auto: auto,
+      served_hide_minutes: Math.min(30, Math.max(1, Number(hide) || 3)) }
     const { data, error } = await supabase.from('events').update(patch).eq('id', ev.id).select('*').maybeSingle()
     if (error) { setMsg(errText(error)); return }
     setSaved(Date.now())
@@ -148,14 +156,16 @@ function ServiceSettings({ ev, dishes = [], onEventChange }) {
         <button className="btn btn-ghost" disabled={!add.trim()} onClick={() => { setCourses(c => [...c, add.trim()]); setAdd('') }}>Add</button>
       </div>
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
-        <label>Late alert after <input className="fld" type="number" min="1" value={late} onChange={e => setLate(e.target.value)} style={{ width: 64 }} /> min from firing</label>
+        <label>Kitchen alert after <input className="fld" type="number" min="1" value={late} onChange={e => setLate(e.target.value)} style={{ width: 64 }} /> min from firing</label>
+        <label>Delivered dishes leave the captain's order after <input className="fld" type="number" min="1" max="30" value={hide} onChange={e => setHide(e.target.value)} style={{ width: 64 }} /> min</label>
         <label>Pacing alert after <input className="fld" type="number" min="5" value={pacing} onChange={e => setPacing(e.target.value)} style={{ width: 64 }} /> min with nothing fired</label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> Fire the {courses[0] || 'first course'} automatically when a cover is seated</label>
         <button className="btn btn-navy" onClick={save}>Save settings</button>
         {msg && <span style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</span>}
       </div>
       <p className="sub" style={{ marginTop: 10, marginBottom: 0 }}>
-        <b>Late alert:</b> a KOT not marked Ready this many minutes after it was fired turns red on the kitchen screen and is listed under Needs attention on the Control Desk.{' '}
+        <b>Kitchen alert:</b> a KOT not delivered this many minutes after it was fired flashes on the kitchen screen until the barker taps Delivered, and is listed under Needs attention on the Control Desk (3 minutes is usual).{' '}
+        <b>Delivered dishes:</b> on the captain's tablet a delivered dish stays in the cover's order this long (3 or 5 minutes), then hides; <i>Show delivered</i> brings it back for a moment.{' '}
         <b>Pacing alert:</b> a seated table where nothing has been fired for this long is listed on the Control Desk with <i>Remind captain</i>, so no table waits too long between courses.{' '}
         <b>Automatic first course:</b> when ticked, seating a cover sends the {courses[0] || 'first course'} straight to the kitchen (for a course every guest gets, like a welcome bite); leave it off when guests choose it.
       </p>
@@ -181,7 +191,7 @@ function KitchenRules({ ev, d, setD, onChanged }) {
       <p className="sub">Which kitchen prepares a dish: a kitchen chosen for the dish itself first, then a <b>course rule</b> below (for example every Dessert goes to the Desserts kitchen, whatever its cuisine), then the kitchen of its <b>cuisine</b> (menu category, set above), then the default kitchen.</p>
       {msg && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</p>}
       <table className="tbl">
-        <thead><tr><th>Kitchen</th><th>Course rule: these courses come here</th><th>Barkers</th><th>Late alert</th></tr></thead>
+        <thead><tr><th>Kitchen</th><th>Course rule: these courses come here</th><th>Barkers</th><th>Kitchen alert</th></tr></thead>
         <tbody>
           {active.map(k => (
             <tr key={k.id}>
@@ -195,8 +205,8 @@ function KitchenRules({ ev, d, setD, onChanged }) {
                 </div>
               </td>
               <td><div className="seg2">{[1, 2].map(n => <button key={n} className={(Number(k.barkers) || 2) === n ? 'a' : ''} onClick={() => patch(k, { barkers: n })}>{n === 1 ? 'A only' : 'A and B'}</button>)}</div></td>
-              <td><input className="fld" type="number" min="1" placeholder={String(ev.late_minutes ?? 5)} defaultValue={k.late_minutes ?? ''} style={{ width: 64 }}
-                onBlur={e => { const v = e.target.value === '' ? null : Math.max(1, Number(e.target.value) || 5); if (v !== (k.late_minutes ?? null)) patch(k, { late_minutes: v }) }} /> min</td>
+              <td><input className="fld" type="number" min="1" placeholder={String(ev.late_minutes ?? 3)} defaultValue={k.late_minutes ?? ''} style={{ width: 64 }}
+                onBlur={e => { const v = e.target.value === '' ? null : Math.max(1, Number(e.target.value) || 3); if (v !== (k.late_minutes ?? null)) patch(k, { late_minutes: v }) }} /> min</td>
             </tr>
           ))}
           {!active.length && <tr><td colSpan={4} className="muted">Add kitchens above first.</td></tr>}
@@ -348,6 +358,180 @@ function Barkers({ ev, d, setD, onChanged }) {
           }))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+// ------------------------------------------------------------- VIP guests
+/* VIP guests of the event. The captain picks one with the VIP Guests button (or a guest with a
+   fixed table and cover is loaded by itself when that cover is opened): the allergies, dislikes
+   and notes print on every KOT of that cover, and the preferred dishes are added to its order.
+   Special dishes made only for VIP guests are menu dishes marked VIP only: captains see them on
+   a VIP guest's cover only. */
+const NEW = '__new'
+
+function VipGuests({ ev, d, setD, onChanged, onEventChange }) {
+  const [vips, setVips] = useState(null)
+  const [err, setErr] = useState('')
+  const [msg, setMsg] = useState('')
+  const [saved, setSaved] = useState(0)
+  const [special, setSpecial] = useState({ name: '', cat: '', course: '', veg: true, newCat: '', newKitchen: '', newCourse: '' })
+  const kitchensOn = d.kitchens.filter(k => k.is_active !== false)
+  const defKitchen = (kitchensOn.find(k => k.is_default) || kitchensOn[0])?.id || ''
+  const courses = coursesOf(ev)
+  const catName = id => d.cats.find(c => c.id === id)?.name || ''
+  const dishById = Object.fromEntries(d.dishes.map(x => [x.id, x]))
+  const dishOpts = [...d.dishes].sort((a, b) => catName(a.category_id).localeCompare(catName(b.category_id)) || courses.indexOf(a.course) - courses.indexOf(b.course) || String(a.name).localeCompare(b.name))
+
+  async function load() {
+    const { data, error } = await supabase.from('ms_vip_guests').select('*').eq('event_id', ev.id).eq('is_active', true).order('sort_order').order('created_at')
+    if (error) { setErr(errText(error)); setVips([]); return }
+    setErr(''); setVips(data || [])
+  }
+  useEffect(() => { load() }, [ev.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function patch(v, fields) {
+    setMsg('')
+    setVips(list => list.map(x => (x.id === v.id ? { ...x, ...fields } : x)))
+    const { error } = await supabase.from('ms_vip_guests').update(fields).eq('id', v.id)
+    if (error) setMsg(errText(error)); else setSaved(Date.now())
+  }
+  async function add() {
+    setMsg('')
+    const { data, error } = await supabase.from('ms_vip_guests').insert({ event_id: ev.id, name: 'New VIP guest', label: 'VIP', sort_order: (vips?.length || 0) + 1, dishes: [] }).select('*').maybeSingle()
+    if (error) { setMsg(errText(error)); return }
+    setVips(list => [...(list || []), data]); setSaved(Date.now())
+  }
+  async function remove(v) {
+    const { error } = await supabase.from('ms_vip_guests').update({ is_active: false }).eq('id', v.id)
+    if (error) { setMsg(errText(error)); return }
+    setVips(list => list.filter(x => x.id !== v.id))
+  }
+  const num = s => { const n = parseInt(String(s || '').replace(/\D/g, ''), 10); return n > 0 ? n : null }
+  // A special dish may need a cuisine or a course the menu does not have yet: both can be added here
+  async function addSpecial() {
+    setMsg('')
+    let cat = special.cat, course = special.course
+    if (!special.name.trim() || !cat || !course) { setMsg('Give the special dish a name, a cuisine and a course.'); return }
+    if (cat === NEW && !special.newCat.trim()) { setMsg('Type the name of the new cuisine.'); return }
+    if (course === NEW && !special.newCourse.trim()) { setMsg('Type the name of the new course.'); return }
+    if (cat === NEW) {
+      const name = special.newCat.trim()
+      const same = d.cats.find(c => c.name.trim().toLowerCase() === name.toLowerCase())
+      if (same) cat = same.id
+      else {
+        const { data: c, error } = await supabase.from('menu_categories').insert({ event_id: ev.id, name, kitchen_id: special.newKitchen || defKitchen || null,
+          sort_order: Math.max(0, ...d.cats.map(x => Number(x.sort_order) || 0)) + 1, is_visible: true }).select('*').maybeSingle()
+        if (error) { setMsg(errText(error)); return }
+        setD(s2 => ({ ...s2, cats: [...s2.cats, c] }))
+        cat = c.id
+      }
+    }
+    if (course === NEW) {
+      const name = special.newCourse.trim()
+      const same = courses.find(c => c.toLowerCase() === name.toLowerCase())
+      if (same) course = same
+      else {
+        // a new course goes before Dessert (when there is one); Service settings can move it
+        const at = courses.findIndex(c => /dessert/i.test(c))
+        const list = at >= 0 ? [...courses.slice(0, at), name, ...courses.slice(at)] : [...courses, name]
+        const { data: e2, error } = await supabase.from('events').update({ courses: list }).eq('id', ev.id).select('*').maybeSingle()
+        if (error) { setMsg(errText(error)); return }
+        if (e2 && onEventChange) onEventChange(e2)
+        course = name
+      }
+    }
+    const { data, error } = await supabase.from('menu_items').insert({ category_id: cat, name: special.name.trim(), course, is_veg: special.veg, is_available: true, vip_only: true, sort_order: 999 }).select('*').maybeSingle()
+    if (error) { setMsg(errText(error)); return }
+    setD(s2 => ({ ...s2, dishes: [...s2.dishes, data] }))
+    setSpecial({ name: '', cat, course, veg: true, newCat: '', newKitchen: '', newCourse: '' })
+    setSaved(Date.now()); onChanged()
+  }
+  // Food preferences: one tap adds or takes one off the guest's notes for the kitchen
+  const prefOn = (v, x) => splitNote(v.notes).some(y => y.toLowerCase() === x.toLowerCase())
+  const flipPref = (v, x) => {
+    const list = splitNote(v.notes)
+    const next = prefOn(v, x) ? list.filter(y => y.toLowerCase() !== x.toLowerCase()) : [...list, x]
+    patch(v, { notes: joinNote(next) || null })
+  }
+
+  return (
+    <div className="card" id="ms-vip">
+      <h3>VIP guests <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Saved at={saved} /><button className="btn btn-amber" onClick={add} disabled={!!err}>+ Add VIP guest</button></span></h3>
+      <p className="sub">Guests whose preferences are known in advance. On the captain's tablet, <b>VIP Guests</b> lists them: the captain picks the guest and the cover, and their allergies, dislikes and notes print on every KOT of that cover, and their preferred dishes are added to the order to fire one by one. A guest given a table and cover here is loaded by itself when the captain opens that cover.</p>
+      {err && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{err}. Run db/2026-10-13_maestro_v2.sql on this database first.</p>}
+      {msg && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</p>}
+      {vips === null ? <div className="muted">Loading…</div> : !vips.length && !err ? <div className="muted">No VIP guests yet.</div> : null}
+      {(vips || []).map(v => (
+        <div key={v.id} className="vipcard" data-vip={v.name}>
+          <div className="vr1">
+            <span className="vstar">★</span>
+            <input className="fld" defaultValue={v.name} key={'n' + v.id} placeholder="Name" style={{ flex: '1 1 180px', fontWeight: 800 }}
+              onBlur={e => { const x = e.target.value.trim(); if (x && x !== v.name) patch(v, { name: x }) }} />
+            <input className="fld" defaultValue={v.label || ''} key={'l' + v.id} placeholder="VIP / VVIP" style={{ width: 90 }}
+              onBlur={e => { const x = e.target.value.trim() || null; if (x !== (v.label || null)) patch(v, { label: x }) }} />
+            <label className="vsm">Table <input className="fld" defaultValue={v.table_number || ''} key={'t' + v.id} placeholder="any" style={{ width: 56 }}
+              onBlur={e => { const x = num(e.target.value); if (x !== (v.table_number || null)) patch(v, { table_number: x }) }} /></label>
+            <label className="vsm">Cover <input className="fld" defaultValue={v.cover_no || ''} key={'c' + v.id} placeholder="any" style={{ width: 56 }}
+              onBlur={e => { const x = num(e.target.value); if (x !== (v.cover_no || null)) patch(v, { cover_no: x }) }} /></label>
+            <button className="btn btn-ghost" style={{ color: 'var(--red)', padding: '4px 9px', fontSize: 12 }} onClick={() => remove(v)}>Remove</button>
+          </div>
+          <div className="vr2">
+            {[['allergies', 'Allergies', 'e.g. Peanuts, Shellfish'], ['likes', 'Likes', 'e.g. Mild Italian'], ['dislikes', 'Dislikes', 'e.g. Mushroom'], ['notes', 'Notes for the kitchen', 'e.g. Less spicy, Jain']].map(([f, label, ph]) => (
+              <label key={f} className={'vfld' + (f === 'allergies' ? ' va' : '')}><span>{label}</span>
+                <input className="fld" defaultValue={v[f] || ''} key={f + v.id + (f === 'notes' ? '|' + (v.notes || '') : '')} placeholder={ph}
+                  onBlur={e => { const x = e.target.value.trim() || null; if (x !== (v[f] || null)) patch(v, { [f]: x }) }} /></label>
+            ))}
+          </div>
+          <div className="vpref">
+            <span>Food preferences</span>
+            {PREF_CHIPS.map(x => <button key={x} className={prefOn(v, x) ? 'a' : ''} onClick={() => flipPref(v, x)}>{x}</button>)}
+          </div>
+          <div className="vr3">
+            <b>Preferred dishes</b>
+            {(v.dishes || []).map((x, i) => {
+              const dd = dishById[x.menu_item_id]
+              return (
+                <div key={x.menu_item_id + i} className="vdish">
+                  <span className="vdn">{dd ? dd.name : 'Dish no longer on the menu'}</span>
+                  <span className="muted">{dd ? `${catName(dd.category_id)} · ${dd.course || 'no course'}${dd.vip_only ? ' · VIP only' : ''}` : ''}</span>
+                  <input className="fld" defaultValue={x.note || ''} key={'dn' + v.id + i} placeholder="Note for this dish" style={{ flex: '1 1 140px' }}
+                    onBlur={e => { const note = e.target.value.trim(); if (note !== (x.note || '')) patch(v, { dishes: (v.dishes || []).map((y, j) => (j === i ? { ...y, note: note || null } : y)) }) }} />
+                  <button className="x" onClick={() => patch(v, { dishes: (v.dishes || []).filter((_, j) => j !== i) })} title="Remove">✕</button>
+                </div>
+              )
+            })}
+            <select className="fld" value="" onChange={e => { const id = e.target.value; if (id) patch(v, { dishes: [...(v.dishes || []), { menu_item_id: id, note: null }] }) }}>
+              <option value="">+ Add a preferred dish…</option>
+              {dishOpts.map(x => <option key={x.id} value={x.id}>{catName(x.category_id)} · {x.course || '—'} · {x.name}{x.vip_only ? ' (VIP only)' : ''}</option>)}
+            </select>
+          </div>
+        </div>
+      ))}
+      <div className="vspecial">
+        <b>Special dish for VIP guests only</b>
+        <span className="muted">Not on the menu for other guests; it goes to its cuisine's kitchen like any dish.</span>
+        <div className="vsr">
+          <input className="fld" value={special.name} onChange={e => setSpecial(s2 => ({ ...s2, name: e.target.value }))} placeholder="Dish name" style={{ flex: '1 1 180px' }} />
+          <select className="fld" value={special.cat} onChange={e => setSpecial(s2 => ({ ...s2, cat: e.target.value }))}>
+            <option value="">Cuisine…</option>{d.cats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value={NEW}>+ New cuisine…</option>
+          </select>
+          {special.cat === NEW && <>
+            <input className="fld" value={special.newCat} onChange={e => setSpecial(s2 => ({ ...s2, newCat: e.target.value }))} placeholder="New cuisine, e.g. Continental" style={{ flex: '1 1 150px' }} />
+            <select className="fld" value={special.newKitchen || defKitchen} onChange={e => setSpecial(s2 => ({ ...s2, newKitchen: e.target.value }))} title="The kitchen that cooks this cuisine">
+              {kitchensOn.map(k => <option key={k.id} value={k.id}>Cooked in {k.name}</option>)}
+            </select>
+          </>}
+          <select className="fld" value={special.course} onChange={e => setSpecial(s2 => ({ ...s2, course: e.target.value }))}>
+            <option value="">Course…</option>{courses.map(c => <option key={c} value={c}>{c}</option>)}
+            <option value={NEW}>+ New course…</option>
+          </select>
+          {special.course === NEW && <input className="fld" value={special.newCourse} onChange={e => setSpecial(s2 => ({ ...s2, newCourse: e.target.value }))} placeholder="New course, e.g. Chef's Special" style={{ flex: '1 1 150px' }} />}
+          <label className="vsm"><input type="checkbox" checked={special.veg} onChange={e => setSpecial(s2 => ({ ...s2, veg: e.target.checked }))} /> Veg</label>
+          <button className="btn btn-navy" onClick={addSpecial}>Add special dish</button>
+        </div>
+      </div>
     </div>
   )
 }
