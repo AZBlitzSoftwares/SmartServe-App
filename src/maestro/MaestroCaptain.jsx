@@ -13,7 +13,7 @@
    added to the cover's order. A VIP with a fixed table and cover is loaded by itself when the
    captain opens that cover.
    Two captains can share a table and split its covers (Event set-up > Captains). */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
@@ -92,6 +92,38 @@ function Toast({ toast, onClose }) {
   return <div className={'toast' + (toast.err ? ' err' : '')} onClick={onClose}>{toast.text}</div>
 }
 
+// A list that scrolls with a scroll bar that is always visible (tablets hide their own until
+// you scroll) and a "More below" button while anything is out of sight underneath
+function ScrollBox({ className, children }) {
+  const ref = useRef(null)
+  const [bar, setBar] = useState(null)   // { h, top, more } in % of the box
+  const measure = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    const { scrollTop, scrollHeight, clientHeight } = el
+    const next = scrollHeight <= clientHeight + 2 ? null : {
+      h: Math.round(Math.max(12, (clientHeight / scrollHeight) * 100)),
+      top: 0, more: scrollHeight - clientHeight - scrollTop > 6,
+    }
+    if (next) next.top = Math.round((scrollTop / (scrollHeight - clientHeight)) * (100 - next.h))
+    setBar(b => (JSON.stringify(b) === JSON.stringify(next) ? b : next))
+  }, [])
+  useEffect(() => { measure() })
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure); ro.observe(el)
+    return () => ro.disconnect()
+  }, [measure])
+  return (
+    <div className="sbx">
+      <div ref={ref} className={className} onScroll={measure}>{children}</div>
+      {bar && <div className="sbar" aria-hidden="true"><i style={{ top: bar.top + '%', height: bar.h + '%' }} /></div>}
+      {bar?.more && <button className="smore" onClick={() => ref.current?.scrollBy({ top: ref.current.clientHeight * 0.8, behavior: 'smooth' })}>More below ▾</button>}
+    </div>
+  )
+}
+
 // Note and allergy shown under a dish (or for the whole guest)
 function NoteTags({ note, allergy }) {
   const n = splitNote(note), a = splitNote(allergy)
@@ -125,6 +157,17 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const [toast, setToast] = useState(null)
   const [sheet, setSheet] = useState(null)
   const [noteOpen, setNoteOpen] = useState(null)   // the note being edited in place: 'item:<id>', 'out:<ref>' or 'guest:<cover>'
+  // Typing in the order (a note) or the dish search: on a small upright tablet the rest of the
+  // screen makes room, so the field stays above the keyboard
+  const [typing, setTyping] = useState('')
+  const typingOff = useRef(null)
+  const onFocusIn = e => {
+    const t = e.target
+    if (!t || !/^(INPUT|TEXTAREA)$/.test(t.tagName)) return
+    clearTimeout(typingOff.current)
+    setTyping(t.closest('.cart') ? 'order' : t.closest('.msearch') ? 'search' : '')
+  }
+  const onFocusOut = () => { clearTimeout(typingOff.current); typingOff.current = setTimeout(() => setTyping(''), 150) }
   const [pickTable, setPickTable] = useState(false)
   const [showAll, setShowAll] = useState(false)     // All covers: the other captain's covers as well
   const [showDelivered, setShowDelivered] = useState(0)  // until (ms)
@@ -556,8 +599,9 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     ...visibleItems.map(i => ({ kind: 'item', i, course: i.course, dish: dishById[i.menu_item_id] })),
     ...pend.map(o => ({ kind: 'out', o, course: dishById[o.menu_item_id]?.course, dish: dishById[o.menu_item_id] })).filter(l => l.dish),
   ]
-  const groupCourses = courses.filter(c => lines.some(l => l.course === c))
-  const otherCourse = [...new Set(lines.map(l => l.course).filter(c => !courses.includes(c)))]
+  // One plain list (no course headings): in course order, then in the order they were taken
+  const lineAt = l => new Date(l.kind === 'out' ? l.o.at : l.i.held_at || 0).getTime() || 0
+  const orderedLines = [...lines].sort((a, b) => courseRank(courses, a.course) - courseRank(courses, b.course) || lineAt(a) - lineAt(b))
   const nHeld = coverItems.filter(i => i.state === 'held').length + pend.filter(o => !o.cancel).length
   const nKitchen = coverItems.filter(i => i.state === 'fired').length - delivered.length
   const nLate = coverItems.filter(i => i.state === 'fired' && statusOf(i).late).length
@@ -577,8 +621,8 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
         <div className="oln" key={'o' + o.ref}>
         <div className="oit dr">
           <Veg veg={l.dish.is_veg} />
-          <div className="nmw"><span className="nm">{l.dish.name}</span>{czTag(l.dish.category_id)}<NoteTags note={o.note} allergy={o.allergy} /></div>
-          <span className={'chip ' + (o.err ? 'lt' : 'hd')} title={o.err || ''}>{o.err ? 'Not saved · retrying' : 'Saving…'}</span>
+          <div className="nmw"><span className="nm">{l.dish.name}</span>{czTag(l.dish.category_id)}{l.course && <span className="ocrs">{l.course}</span>}
+            <span className={'chip ' + (o.err ? 'lt' : 'hd')} title={o.err || ''}>{o.err ? 'Not saved · retrying' : 'Saving…'}</span><NoteTags note={o.note} allergy={o.allergy} /></div>
           <button className={'nbtn' + (noteOpen === 'out:' + o.ref ? ' act' : '')} onClick={() => toggleNote('out:' + o.ref)}>{o.note || o.allergy ? 'Note' : '+ Note'}</button>
           <button className="x" onClick={() => minusDish(l.dish)} title="Take this dish off">✕</button>
         </div>
@@ -593,7 +637,8 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
       <div className="oln" key={i.id}>
       <div className="oit">
         <Veg veg={i.veg} />
-        <div className="nmw"><span className="nm">{i.qty > 1 ? `${i.qty} × ` : ''}{i.name}</span>{l.dish ? czTag(l.dish.category_id) : null}{i.vip_guest_id && <span className="vtag">★</span>}<NoteTags note={i.note} allergy={i.allergy} /></div>
+        <div className="nmw"><span className="nm">{i.qty > 1 ? `${i.qty} × ` : ''}{i.name}</span>{l.dish ? czTag(l.dish.category_id) : null}{l.course && <span className="ocrs">{l.course}</span>}{i.vip_guest_id && <span className="vtag">★</span>}
+          {i.state !== 'held' && <span className={'chip ' + st.cls}>{st.label}</span>}<NoteTags note={i.note} allergy={i.allergy} /></div>
         {i.state === 'held' ? (
           <>
             <button className={'nbtn' + (noteOpen === 'item:' + i.id ? ' act' : '')} onClick={() => toggleNote('item:' + i.id)}>{i.note || i.allergy ? 'Note' : '+ Note'}</button>
@@ -601,10 +646,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
             <button className="x" disabled={busy} onClick={() => removeHeld(i)} title="Remove this dish">✕</button>
           </>
         ) : (
-          <>
-            <span className={'chip ' + st.cls}>{st.label}</span>
-            {canCancelFired(i) && <CancelFired disabled={busy} onCancel={() => cancelItems([i.id], i.name)} />}
-          </>
+          canCancelFired(i) && <CancelFired disabled={busy} onCancel={() => cancelItems([i.id], i.name)} />
         )}
       </div>
       {noteOpen === nk && i.state === 'held' && <NoteEditor key={nk} note={i.note} allergy={i.allergy} onSave={(n, a) => saveNote({ kind: 'item', id: i.id }, n, a)} onClose={() => setNoteOpen(null)} />}
@@ -670,9 +712,10 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
                   ? <span className="tagF">Seated</span>
                   : <button className="minib" disabled={busy} onClick={() => seat(cover)}>Mark seated{autoFirst ? ` · fires ${firstCourse}` : ''}</button>}
                 <span style={{ flex: 1 }} />
+                {(coverItems.length > 0 || cr?.guest_note || cr?.guest_allergy || vip) && <Sure label="New guest" sure="New guest?" disabled={busy} onYes={() => newGuest(cover)} />}
                 {!pinned && <button className="minib" onClick={() => setOrderOpen(false)}>Hide</button>}
-                <button className={'pin' + (pinned ? ' pd' : '')} onClick={togglePin}
-                  title={pinned ? 'Always shown. Tap to let it hide while you pick dishes' : 'Keep the order always shown'}>{pinned ? '📌 Pinned' : '📌 Pin'}</button>
+                <button className={'pin' + (pinned ? ' pd' : '')} onClick={togglePin} aria-label={pinned ? 'Pinned' : 'Pin'}
+                  title={pinned ? 'Pinned: always shown. Tap to let it hide while you pick dishes' : 'Keep the order always shown'}>{pinned ? '📌' : '📌 Pin'}</button>
               </div>
               {vip && (
                 <div className="vipb" data-testid="vip-banner">
@@ -684,36 +727,28 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
                 </div>
               )}
               {reserved && <div className="vipr">★ Reserved for {reserved.name}<button className="minib" disabled={busy} onClick={() => applyVip(reserved, cover)}>Load preferences</button></div>}
-              <div className="gnr">
+              <div className="sum">
                 <button className={'gbtn' + (noteOpen === 'guest:' + cover ? ' act' : '')} onClick={() => toggleNote('guest:' + cover)}>
                   {cr?.guest_note || cr?.guest_allergy ? 'Guest note' : '+ Guest note (all dishes)'}</button>
                 <NoteTags note={cr?.guest_note} allergy={cr?.guest_allergy} />
-                <span style={{ flex: 1 }} />
-                {(coverItems.length > 0 || cr?.guest_note || cr?.guest_allergy || vip) && <Sure label="New guest" sure="New guest?" disabled={busy} onYes={() => newGuest(cover)} />}
-              </div>
-              {noteOpen === 'guest:' + cover && (
-                <NoteEditor key={'guest:' + cover} note={cr?.guest_note} allergy={cr?.guest_allergy}
-                  onSave={(n, a) => saveNote({ kind: 'guest', cover }, n, a)} onClose={() => setNoteOpen(null)} />
-              )}
-              <div className="sum">{summary.length ? summary : <span>Nothing ordered for C{cover} yet · tap + on a dish</span>}
+                {summary.length ? summary : <span>Nothing ordered for C{cover} yet · tap + on a dish</span>}
                 {hiddenDelivered.length > 0 && (showingDelivered
                   ? <button className="shw" onClick={() => setShowDelivered(0)}>Hide delivered</button>
                   : <button className="shw" onClick={() => setShowDelivered(Date.now() + SHOW_DELIVERED_MS)}>Show delivered ({hiddenDelivered.length})</button>)}
                 {unsaved > 0 && <span className="s-u">{unsaved} not saved · retrying</span>}
               </div>
+              {noteOpen === 'guest:' + cover && (
+                <NoteEditor key={'guest:' + cover} note={cr?.guest_note} allergy={cr?.guest_allergy}
+                  onSave={(n, a) => saveNote({ kind: 'guest', cover }, n, a)} onClose={() => setNoteOpen(null)} />
+              )}
               {!isMine(cover) && <div className="helpout">Helping out: C{cover} is {ownerOf(cover) || 'another captain'}'s cover</div>}
             </div>
-            <div className="scroll olist">
-              {[...groupCourses, ...otherCourse].map(c => (
-                <div className="orow" key={c || 'none'}>
-                  <div className="oc">{c || 'Other'}</div>
-                  <div className="oi">{lines.filter(l => l.course === c).map(orderLine)}</div>
-                </div>
-              ))}
+            <ScrollBox className="scroll olist">
+              {orderedLines.map(orderLine)}
               {!lines.length && (
                 <div className="empty">{hiddenDelivered.length ? 'Everything ordered has been delivered.' : 'Tap + on a dish: it is saved at once. Each dish has its own Fire button.'}</div>
               )}
-            </div>
+            </ScrollBox>
           </>
         ) : (
           <button className="obar" onClick={() => setOrderOpen(true)}>
@@ -849,7 +884,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   )
 
   return (
-    <div className="ms cap-app">
+    <div className={'ms cap-app' + (typing ? ' typing-' + typing : '')} onFocus={onFocusIn} onBlur={onFocusOut}>
       <AppBar
         title={view === 'take' ? `Table T${table} · ${captain.name}${myRange ? ` · ${rangeText(myRange)}` : ''}` : `Table T${table} · Course board`}
         sub={view === 'take'
