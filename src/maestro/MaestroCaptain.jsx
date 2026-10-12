@@ -19,12 +19,12 @@ import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
 import {
   coursesOf, courseRank, lateMinutes, dishStatus, deliveredAt, useLive, useNow, loadMenu, rpc, rpcRetry, errText, newRef,
-  NOTE_CHIPS, ALLERGY_CHIPS, splitNote, joinNote, servedHideMinutes, ago, shortName, tc, coverRange, rangeText, tableRanges, capOrder,
+  QUICK_NOTES, splitNote, joinNote, servedHideMinutes, ago, shortName, tc, coverRange, rangeText, tableRanges, capOrder,
 } from './msData'
 
 const FOODS = ['#7DAA6A', '#7A3B2A', '#D5532F', '#A66A2C', '#C9A15B', '#B5582A', '#8E6BBF', '#3F8F8A', '#C98B2E']
 const ALL = '__all'
-const SHOW_DELIVERED_MS = 60000   // Show delivered: for a minute, then they hide again
+const SHOW_DELIVERED_MS = 10000   // Show delivered: 10 seconds to read them, then they hide again
 
 function hash(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h }
 
@@ -77,22 +77,19 @@ function Scope({ myRange, showAll, onToggle }) {
   )
 }
 
+// A short message that goes by itself (2.5 s; a problem 4 s). Nothing to tap: no Undo, so a
+// busy captain cannot undo something by mistake. A tap on it closes it sooner.
 function Toast({ toast, onClose }) {
   // Timed on the toast alone: the screen re-renders on every poll, and a new
   // onClose each time would keep restarting the timer.
   const closeRef = useRef(onClose); closeRef.current = onClose
   useEffect(() => {
     if (!toast) return
-    const t = setTimeout(() => closeRef.current(), toast.err ? 6000 : toast.undo ? 6000 : 3500)
+    const t = setTimeout(() => closeRef.current(), toast.err ? 4000 : 2500)
     return () => clearTimeout(t)
   }, [toast])
   if (!toast) return null
-  return (
-    <div className={'toast' + (toast.err ? ' err' : '')}>{toast.text}
-      {toast.undo && <button onClick={() => { const u = toast.undo; onClose(); u() }}>Undo</button>}
-      <button onClick={onClose}>OK</button>
-    </div>
-  )
+  return <div className={'toast' + (toast.err ? ' err' : '')} onClick={onClose}>{toast.text}</div>
 }
 
 // Note and allergy shown under a dish (or for the whole guest)
@@ -127,6 +124,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
   const [sheet, setSheet] = useState(null)
+  const [noteOpen, setNoteOpen] = useState(null)   // the note being edited in place: 'item:<id>', 'out:<ref>' or 'guest:<cover>'
   const [pickTable, setPickTable] = useState(false)
   const [showAll, setShowAll] = useState(false)     // All covers: the other captain's covers as well
   const [showDelivered, setShowDelivered] = useState(0)  // until (ms)
@@ -272,14 +270,26 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     if (keep.length !== outbox.length) setOutbox(keep)
   }, [liveIds, outbox, now])
 
+  // A note opened on a dish still being saved follows the dish once the server has it
+  useEffect(() => {
+    if (!noteOpen?.startsWith('out:')) return
+    const o = outbox.find(x => 'out:' + x.ref === noteOpen)
+    if (o?.ids && o.ids[0] !== 'none' && liveIds.has(o.ids[0])) setNoteOpen('item:' + o.ids[0])
+  }, [noteOpen, outbox, liveIds])
+
   // + on a dish: one more of it for this cover, saved at once
+  // + and − share one place on the dish: a quick double tap must not add and take off again
+  const lastTap = useRef({})
+  const tapOk = id => { const t = Date.now(); if (t - (lastTap.current[id] || 0) < 450) return false; lastTap.current[id] = t; return true }
   function addDish(d) {
+    if (!tapOk(d.id)) return
     const vip = vipOf(cover)
     const pref = vip && (vip.dishes || []).find(x => x.menu_item_id === d.id)
     setOutbox(list => [...list, { ref: newRef(), cover, menu_item_id: d.id, note: pref?.note || '', allergy: '', vip_guest_id: vip && pref ? vip.id : null, at: Date.now() }])
   }
   // − on a dish: the last one of it not fired yet comes off
   async function minusDish(d) {
+    if (!tapOk(d.id)) return
     const out = [...pendingOf(cover)].reverse().find(o => o.menu_item_id === d.id && !o.cancel)
     if (out) {
       // being sent this very moment: taken off as soon as the server has it
@@ -349,7 +359,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     setBusy(false)
   }
 
-  // A held dish never reached the kitchen: one tap removes it, Undo puts it back.
+  // A held dish never reached the kitchen: one tap removes it (+ on the dish adds it again).
   // Only while it is still held - if it was fired meanwhile (another tablet), nothing changes.
   async function removeHeld(i, quiet) {
     try {
@@ -357,10 +367,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
         .eq('id', i.id).eq('state', 'held').select('id')
       if (error) throw error
       if (!data?.length) { setToast({ text: `${i.name} was just sent to the kitchen - not removed` }); liveQ.reload(); return }
-      const canUndo = i.menu_item_id && dishById[i.menu_item_id]?.is_available !== false
-      setToast({ text: `${i.name} removed from C${i.cover_no}`, undo: canUndo ? () => {
-        setOutbox(list => [...list, { ref: newRef(), cover: i.cover_no, menu_item_id: i.menu_item_id, note: i.note || '', allergy: i.allergy || '', vip_guest_id: i.vip_guest_id || null, at: Date.now() }])
-      } : null, quiet })
+      if (!quiet) setToast({ text: `${i.name} removed from C${i.cover_no}` })
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
   }
@@ -414,9 +421,10 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
       } else if (target.kind === 'guest') {
         await rpc('ms_cover_guest', { p_event_id: ev.id, p_table_number: table, p_cover_no: target.cover, p_guest_note: note, p_guest_allergy: allergy })
       }
-      setSheet(null); liveQ.reload()
+      liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }); liveQ.reload() }
   }
+  const toggleNote = key => setNoteOpen(k => (k === key ? null : key))
 
   async function newGuest(c) {
     setBusy(true)
@@ -514,21 +522,23 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const czTag = id => <span className={'cz z' + (cuisineRank(id) % 6)}>{catName(id)}</span>
   const vipDishes = vip ? (vip.dishes || []).map(x => dishById[x.menu_item_id]).filter(Boolean) : []
 
-  // One compact row per dish: photo, name, cuisine, and only + and − (no quantity)
+  // One compact row per dish: photo, name, cuisine and one button: + adds it to the cover,
+  // then the same button is − and takes it off again (no quantity)
   const dishCard = (d, k = '') => {
     const n = unfiredCount(d.id)
+    const sent = itemsOf(cover).some(i => i.menu_item_id === d.id && i.state === 'fired')
     const off = d.is_available === false
     return (
       <div key={k + d.id} className={'dish drow' + (off ? ' off' : '') + (n ? ' picked' : '')}>
         <DishThumb dish={d} />
         <div className="dm">
           <div className="dn"><Veg veg={d.is_veg} />{d.name}</div>
-          <div className="dd">{czTag(d.category_id)}{query || k ? <b className="dq">{d.course}</b> : null}{d.vip_only && <b className="vtag">VIP only</b>}{d.description || ''}</div>
+          <div className="dd">{czTag(d.category_id)}{sent && !n && <b className="snt">✓ Sent</b>}{query || k ? <b className="dq">{d.course}</b> : null}{d.vip_only && <b className="vtag">VIP only</b>}{d.description || ''}</div>
         </div>
         <div className="da">
-          {off ? <span className="so">Sold out</span> : n ? (
-            <div className="pm"><button className="m" onClick={() => minusDish(d)} aria-label={`Remove one ${d.name}`}>−</button><span className="pmk">✓</span><button className="p" onClick={() => addDish(d)} aria-label={`Add ${d.name}`}>+</button></div>
-          ) : <button className="addp" onClick={() => addDish(d)} aria-label={`Add ${d.name}`}>+</button>}
+          {off ? <span className="so">Sold out</span> : n
+            ? <button className="addm" onClick={() => minusDish(d)} aria-label={`Remove ${d.name}`}>−</button>
+            : <button className="addp" onClick={() => addDish(d)} aria-label={`Add ${d.name}`}>+</button>}
         </div>
       </div>
     )
@@ -562,25 +572,31 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const orderLine = l => {
     if (l.kind === 'out') {
       const o = l.o
+      const nk = 'out:' + o.ref
       return (
-        <div className="oit dr" key={'o' + o.ref}>
+        <div className="oln" key={'o' + o.ref}>
+        <div className="oit dr">
           <Veg veg={l.dish.is_veg} />
           <div className="nmw"><span className="nm">{l.dish.name}</span>{czTag(l.dish.category_id)}<NoteTags note={o.note} allergy={o.allergy} /></div>
           <span className={'chip ' + (o.err ? 'lt' : 'hd')} title={o.err || ''}>{o.err ? 'Not saved · retrying' : 'Saving…'}</span>
-          <button className="nbtn" onClick={() => setSheet({ kind: 'note', target: { kind: 'out', ref: o.ref }, title: l.dish.name, note: o.note, allergy: o.allergy })}>{o.note || o.allergy ? 'Note' : '+ Note'}</button>
+          <button className={'nbtn' + (noteOpen === 'out:' + o.ref ? ' act' : '')} onClick={() => toggleNote('out:' + o.ref)}>{o.note || o.allergy ? 'Note' : '+ Note'}</button>
           <button className="x" onClick={() => minusDish(l.dish)} title="Take this dish off">✕</button>
+        </div>
+        {noteOpen === nk && <NoteEditor key={nk} note={o.note} allergy={o.allergy} onSave={(n, a) => saveNote({ kind: 'out', ref: o.ref }, n, a)} onClose={() => setNoteOpen(null)} />}
         </div>
       )
     }
     const i = l.i
     const st = statusOf(i)
+    const nk = 'item:' + i.id
     return (
-      <div className="oit" key={i.id}>
+      <div className="oln" key={i.id}>
+      <div className="oit">
         <Veg veg={i.veg} />
         <div className="nmw"><span className="nm">{i.qty > 1 ? `${i.qty} × ` : ''}{i.name}</span>{l.dish ? czTag(l.dish.category_id) : null}{i.vip_guest_id && <span className="vtag">★</span>}<NoteTags note={i.note} allergy={i.allergy} /></div>
         {i.state === 'held' ? (
           <>
-            <button className="nbtn" disabled={busy} onClick={() => setSheet({ kind: 'note', target: { kind: 'item', id: i.id }, title: i.name, note: i.note, allergy: i.allergy })}>{i.note || i.allergy ? 'Note' : '+ Note'}</button>
+            <button className={'nbtn' + (noteOpen === 'item:' + i.id ? ' act' : '')} onClick={() => toggleNote('item:' + i.id)}>{i.note || i.allergy ? 'Note' : '+ Note'}</button>
             <button className="firei" disabled={firing.has(i.id)} onClick={() => fireIds([i.id], `${i.name} fired for C${i.cover_no}`)}>{firing.has(i.id) ? 'Firing…' : 'Fire'}</button>
             <button className="x" disabled={busy} onClick={() => removeHeld(i)} title="Remove this dish">✕</button>
           </>
@@ -590,6 +606,8 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
             {canCancelFired(i) && <CancelFired disabled={busy} onCancel={() => cancelItems([i.id], i.name)} />}
           </>
         )}
+      </div>
+      {noteOpen === nk && i.state === 'held' && <NoteEditor key={nk} note={i.note} allergy={i.allergy} onSave={(n, a) => saveNote({ kind: 'item', id: i.id }, n, a)} onClose={() => setNoteOpen(null)} />}
       </div>
     )
   }
@@ -667,12 +685,16 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
               )}
               {reserved && <div className="vipr">★ Reserved for {reserved.name}<button className="minib" disabled={busy} onClick={() => applyVip(reserved, cover)}>Load preferences</button></div>}
               <div className="gnr">
-                <button className="gbtn" disabled={busy} onClick={() => setSheet({ kind: 'note', target: { kind: 'guest', cover }, title: `Guest note · ${tc(table, cover)}`, guest: true, note: cr?.guest_note, allergy: cr?.guest_allergy })}>
+                <button className={'gbtn' + (noteOpen === 'guest:' + cover ? ' act' : '')} onClick={() => toggleNote('guest:' + cover)}>
                   {cr?.guest_note || cr?.guest_allergy ? 'Guest note' : '+ Guest note (all dishes)'}</button>
                 <NoteTags note={cr?.guest_note} allergy={cr?.guest_allergy} />
                 <span style={{ flex: 1 }} />
                 {(coverItems.length > 0 || cr?.guest_note || cr?.guest_allergy || vip) && <Sure label="New guest" sure="New guest?" disabled={busy} onYes={() => newGuest(cover)} />}
               </div>
+              {noteOpen === 'guest:' + cover && (
+                <NoteEditor key={'guest:' + cover} note={cr?.guest_note} allergy={cr?.guest_allergy}
+                  onSave={(n, a) => saveNote({ kind: 'guest', cover }, n, a)} onClose={() => setNoteOpen(null)} />
+              )}
               <div className="sum">{summary.length ? summary : <span>Nothing ordered for C{cover} yet · tap + on a dish</span>}
                 {hiddenDelivered.length > 0 && (showingDelivered
                   ? <button className="shw" onClick={() => setShowDelivered(0)}>Hide delivered</button>
@@ -868,7 +890,6 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
         <CellSheet sheet={sheet} table={table} statusOf={statusOf} kotById={kotById} kitchenById={kitchenById} busy={busy} canCancel={canCancelFired}
           onClose={() => setSheet(null)} onServe={serveKots} onRemake={remake} onCancel={cancelItems} />
       )}
-      {sheet?.kind === 'note' && <NoteSheet sheet={sheet} onClose={() => setSheet(null)} onSave={(note, allergy) => saveNote(sheet.target, note, allergy)} />}
       {sheet?.kind === 'vip' && (
         <VipSheet vips={vips} table={table} cover={cover} covers={visibleCovers} busy={busy}
           seatOf={v => live.covers.find(c => c.vip_guest_id === v.id)} onClose={() => setSheet(null)} onApply={applyVip} />
@@ -912,65 +933,88 @@ export function Sheet({ title, text, children, onClose }) {
 
 /* Note and allergy for one dish, or for everything a guest orders: tap the usual ones, type or
    speak anything else under Other. */
-function NoteSheet({ sheet, onClose, onSave }) {
-  const known = splitNote(sheet.note).filter(x => NOTE_CHIPS.includes(x))
-  const [picked, setPicked] = useState(() => new Set(known))
-  const [other, setOther] = useState(() => splitNote(sheet.note).filter(x => !NOTE_CHIPS.includes(x)).join(', '))
-  const [alg, setAlg] = useState(() => new Set(splitNote(sheet.allergy).filter(x => ALLERGY_CHIPS.includes(x))))
-  const [algOther, setAlgOther] = useState(() => splitNote(sheet.allergy).filter(x => !ALLERGY_CHIPS.includes(x)).join(', '))
-  const [listening, setListening] = useState(false)
-  const rec = useRef(null)
-  // Voice typing needs a secure page (https or this device) - on the laptop server's http link
-  // the tablet keyboard's own mic does the same
+// Voice typing for a note: Chrome / Safari's speech recognition (needs a secure page and,
+// on most tablets, internet; otherwise a short message points to the keyboard's own mic)
+function useSpeech(onText) {
   const SR = typeof window !== 'undefined' && window.isSecureContext ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
-  const [micErr, setMicErr] = useState('')
-  const flip = (set, setter, x) => setter(s => { const n = new Set(s); n.has(x) ? n.delete(x) : n.add(x); return n })
+  const [on, setOn] = useState(false)
+  const [err, setErr] = useState('')
+  const rec = useRef(null)
+  const cb = useRef(onText); cb.current = onText
   useEffect(() => () => { try { rec.current?.abort() } catch { /* already stopped */ } }, [])
-  function speak() {
-    if (listening) { try { rec.current?.stop() } catch { /* stopped */ } return }
+  function toggle() {
+    if (on) { try { rec.current?.stop() } catch { /* stopped */ } return }
     try {
       const r = new SR()
       r.lang = 'en-IN'; r.interimResults = false; r.maxAlternatives = 1; r.continuous = false
       r.onresult = e => {
         const t = Array.from(e.results).map(x => x[0]?.transcript || '').join(' ').trim()
-        if (t) setOther(o => (o ? `${o}, ${t}` : t))
+        if (t) cb.current(t)
       }
-      r.onend = () => setListening(false)
+      r.onend = () => setOn(false)
       r.onerror = e => {
-        setListening(false)
-        setMicErr(e?.error === 'not-allowed' || e?.error === 'service-not-allowed' ? 'Allow the microphone for this page, or use the keyboard\'s mic.'
+        setOn(false)
+        setErr(e?.error === 'not-allowed' || e?.error === 'service-not-allowed' ? 'Allow the microphone for this page, or use the keyboard\'s mic.'
           : e?.error === 'network' ? 'Voice typing needs internet - use the keyboard\'s mic, or type.'
-          : e?.error === 'no-speech' ? 'Did not hear anything - tap Speak and talk.' : '')
+          : e?.error === 'no-speech' ? 'Did not hear anything - tap 🎤 and talk.' : '')
       }
       rec.current = r
-      setMicErr('')
-      r.start(); setListening(true)
-    } catch { setListening(false); setMicErr('Voice typing is not available here - use the keyboard\'s mic, or type.') }
+      setErr('')
+      r.start(); setOn(true)
+    } catch { setOn(false); setErr('Voice typing is not available here - use the keyboard\'s mic, or type.') }
   }
-  const note = joinNote([...NOTE_CHIPS.filter(x => picked.has(x)), ...splitNote(other)])
-  const allergy = joinNote([...ALLERGY_CHIPS.filter(x => alg.has(x)), ...splitNote(algOther)])
+  return { ok: !!SR, on, err, toggle }
+}
+
+// Notes in place, right under the dish (or the guest): six one-tap notes, then Other or Allergy
+// to type or speak. Every tap is saved at once - nothing to confirm, no screen to leave.
+function NoteEditor({ note, allergy, onSave, onClose }) {
+  const parts = splitNote(note)
+  const [picked, setPicked] = useState(() => new Set(parts.filter(x => QUICK_NOTES.includes(x))))
+  const [other, setOther] = useState(() => parts.filter(x => !QUICK_NOTES.includes(x)).join(', '))
+  const [alg, setAlg] = useState(allergy || '')
+  const [field, setField] = useState(() => null)   // 'other' | 'allergy' | null
+  const cur = useRef({}); cur.current = { picked, other, alg, field }
+  const saved = useRef(JSON.stringify([joinNote(parts), joinNote(splitNote(allergy))]))
+  const chain = useRef(Promise.resolve())
+  const saveRef = useRef(onSave); saveRef.current = onSave
+  // saves go one after another, so the last tap always wins
+  const save = (p = cur.current.picked, o = cur.current.other, a = cur.current.alg) => {
+    const n = joinNote([...QUICK_NOTES.filter(x => p.has(x)), ...splitNote(o)])
+    const al = joinNote(splitNote(a))
+    const key = JSON.stringify([n, al])
+    if (key === saved.current) return
+    saved.current = key
+    chain.current = chain.current.then(() => saveRef.current(n, al)).catch(() => {})
+  }
+  // typed but not saved when the note closes (cover changed, dish fired): saved anyway
+  useEffect(() => () => save(), [])
+  const flip = x => { const n = new Set(picked); n.has(x) ? n.delete(x) : n.add(x); setPicked(n); save(n) }
+  const speech = useSpeech(t => {
+    const { field: f, other: o, alg: a } = cur.current
+    if (f === 'allergy') { const v = a ? `${a}, ${t}` : t; setAlg(v); save(undefined, undefined, v) }
+    else { const v = o ? `${o}, ${t}` : t; setOther(v); setField('other'); save(undefined, v) }
+  })
+  const val = field === 'allergy' ? alg : other
+  const setVal = v => (field === 'allergy' ? setAlg(v) : setOther(v))
   return (
-    <div className="sheet-bg" onClick={onClose}>
-      <div className="sheet notesheet" onClick={e => e.stopPropagation()}>
-        <h3>{sheet.title}</h3>
-        <p>{sheet.guest ? 'For everything this guest orders: printed on every KOT of this cover.' : 'Printed clearly under this dish on its KOT and shown on the kitchen screen.'}</p>
-        <div className="nsec">Preparation</div>
-        <div className="nchips">{NOTE_CHIPS.map(x => <button key={x} className={picked.has(x) ? 'a' : ''} onClick={() => flip(picked, setPicked, x)}>{x}</button>)}</div>
-        <div className="nsec">Other</div>
-        <div className="nother">
-          <textarea value={other} onChange={e => setOther(e.target.value)} rows={2} placeholder="Type anything else, for example: no tomato in the pizza" />
-          {SR && <button className={'mic' + (listening ? ' on' : '')} onClick={speak} title="Speak the note">{listening ? '● Listening… tap to stop' : '🎤 Speak'}</button>}
-        </div>
-        {micErr && <div className="micerr">{micErr}</div>}
-        <div className="nsec al">Allergy</div>
-        <div className="nchips al">{ALLERGY_CHIPS.map(x => <button key={x} className={alg.has(x) ? 'a' : ''} onClick={() => flip(alg, setAlg, x)}>{x}</button>)}</div>
-        <input className="aother" value={algOther} onChange={e => setAlgOther(e.target.value)} placeholder="Other allergy" />
-        <div className="row" style={{ marginTop: 12 }}>
-          <button className="btn btn-navy" onClick={() => onSave(note, allergy)}>Save</button>
-          {(sheet.note || sheet.allergy) && <button className="btn btn-ghost" onClick={() => onSave('', '')}>Clear</button>}
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-        </div>
+    <div className="ned">
+      <div className="qn">
+        {QUICK_NOTES.map(x => <button key={x} className={picked.has(x) ? 'a' : ''} onClick={() => flip(x)}>{x}</button>)}
+        <button className={'qo' + (field === 'other' ? ' act' : '') + (other.trim() ? ' a' : '')} onClick={() => { save(); setField(f => (f === 'other' ? null : 'other')) }}>✎ Other</button>
+        <button className={'qal' + (field === 'allergy' ? ' act' : '') + (alg.trim() ? ' a' : '')} onClick={() => { save(); setField(f => (f === 'allergy' ? null : 'allergy')) }}>⚠ Allergy</button>
+        <button className="qd" onClick={() => { save(); onClose() }}>Done</button>
       </div>
+      {field && (
+        <div className="nin">
+          <input autoFocus value={val} onChange={e => setVal(e.target.value)} onBlur={() => save()}
+            onKeyDown={e => { if (e.key === 'Enter') { save(); setField(null) } }}
+            placeholder={field === 'allergy' ? 'Allergy: type or speak, e.g. peanuts' : 'Type or speak, e.g. no tomato in the pizza'} />
+          {speech.ok && <button className={'mic' + (speech.on ? ' act' : '')} onMouseDown={e => e.preventDefault()} onClick={speech.toggle} title="Speak">{speech.on ? '● Stop' : '🎤'}</button>}
+          <button className="ok" onMouseDown={e => e.preventDefault()} onClick={() => { save(); setField(null) }}>OK</button>
+        </div>
+      )}
+      {speech.err && <div className="micerr">{speech.err}</div>}
     </div>
   )
 }

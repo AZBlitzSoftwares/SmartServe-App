@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import './maestro.css'
-import { coursesOf, routeDish, errText, useNow, eventDishes } from './msData'
+import { coursesOf, routeDish, errText, useNow, eventDishes, PREF_CHIPS, splitNote, joinNote } from './msData'
 
 const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(:\d{1,5})?$/
 
@@ -100,7 +100,7 @@ export default function MaestroSetup({ eventData, onEventChange, onChanged, refr
       <KitchenRules ev={ev} d={d} setD={setD} onChanged={changed} />
       <DishSplit ev={ev} d={d} setD={setD} onChanged={changed} />
       <Barkers ev={ev} d={d} setD={setD} onChanged={changed} />
-      <VipGuests ev={ev} d={d} setD={setD} onChanged={changed} />
+      <VipGuests ev={ev} d={d} setD={setD} onChanged={changed} onEventChange={ev2 => { onEventChange && onEventChange(ev2); changed() }} />
     </div>
   )
 }
@@ -113,6 +113,9 @@ function Saved({ at }) {
 // ------------------------------------------------------------- settings
 function ServiceSettings({ ev, dishes = [], onEventChange }) {
   const [courses, setCourses] = useState(coursesOf(ev))
+  // a course added elsewhere (VIP special dish) shows here at once, so Save settings keeps it
+  const evCourses = coursesOf(ev).join('|')
+  useEffect(() => { setCourses(evCourses.split('|')) }, [evCourses])
   const [late, setLate] = useState(ev.late_minutes ?? 5)
   const [pacing, setPacing] = useState(ev.pacing_minutes ?? 25)
   const [hide, setHide] = useState(ev.served_hide_minutes ?? 3)
@@ -365,12 +368,16 @@ function Barkers({ ev, d, setD, onChanged }) {
    and notes print on every KOT of that cover, and the preferred dishes are added to its order.
    Special dishes made only for VIP guests are menu dishes marked VIP only: captains see them on
    a VIP guest's cover only. */
-function VipGuests({ ev, d, setD, onChanged }) {
+const NEW = '__new'
+
+function VipGuests({ ev, d, setD, onChanged, onEventChange }) {
   const [vips, setVips] = useState(null)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
   const [saved, setSaved] = useState(0)
-  const [special, setSpecial] = useState({ name: '', cat: '', course: '', veg: true })
+  const [special, setSpecial] = useState({ name: '', cat: '', course: '', veg: true, newCat: '', newKitchen: '', newCourse: '' })
+  const kitchensOn = d.kitchens.filter(k => k.is_active !== false)
+  const defKitchen = (kitchensOn.find(k => k.is_default) || kitchensOn[0])?.id || ''
   const courses = coursesOf(ev)
   const catName = id => d.cats.find(c => c.id === id)?.name || ''
   const dishById = Object.fromEntries(d.dishes.map(x => [x.id, x]))
@@ -401,14 +408,51 @@ function VipGuests({ ev, d, setD, onChanged }) {
     setVips(list => list.filter(x => x.id !== v.id))
   }
   const num = s => { const n = parseInt(String(s || '').replace(/\D/g, ''), 10); return n > 0 ? n : null }
+  // A special dish may need a cuisine or a course the menu does not have yet: both can be added here
   async function addSpecial() {
     setMsg('')
-    if (!special.name.trim() || !special.cat || !special.course) { setMsg('Give the special dish a name, a cuisine and a course.'); return }
-    const { data, error } = await supabase.from('menu_items').insert({ category_id: special.cat, name: special.name.trim(), course: special.course, is_veg: special.veg, is_available: true, vip_only: true, sort_order: 999 }).select('*').maybeSingle()
+    let cat = special.cat, course = special.course
+    if (!special.name.trim() || !cat || !course) { setMsg('Give the special dish a name, a cuisine and a course.'); return }
+    if (cat === NEW && !special.newCat.trim()) { setMsg('Type the name of the new cuisine.'); return }
+    if (course === NEW && !special.newCourse.trim()) { setMsg('Type the name of the new course.'); return }
+    if (cat === NEW) {
+      const name = special.newCat.trim()
+      const same = d.cats.find(c => c.name.trim().toLowerCase() === name.toLowerCase())
+      if (same) cat = same.id
+      else {
+        const { data: c, error } = await supabase.from('menu_categories').insert({ event_id: ev.id, name, kitchen_id: special.newKitchen || defKitchen || null,
+          sort_order: Math.max(0, ...d.cats.map(x => Number(x.sort_order) || 0)) + 1, is_visible: true }).select('*').maybeSingle()
+        if (error) { setMsg(errText(error)); return }
+        setD(s2 => ({ ...s2, cats: [...s2.cats, c] }))
+        cat = c.id
+      }
+    }
+    if (course === NEW) {
+      const name = special.newCourse.trim()
+      const same = courses.find(c => c.toLowerCase() === name.toLowerCase())
+      if (same) course = same
+      else {
+        // a new course goes before Dessert (when there is one); Service settings can move it
+        const at = courses.findIndex(c => /dessert/i.test(c))
+        const list = at >= 0 ? [...courses.slice(0, at), name, ...courses.slice(at)] : [...courses, name]
+        const { data: e2, error } = await supabase.from('events').update({ courses: list }).eq('id', ev.id).select('*').maybeSingle()
+        if (error) { setMsg(errText(error)); return }
+        if (e2 && onEventChange) onEventChange(e2)
+        course = name
+      }
+    }
+    const { data, error } = await supabase.from('menu_items').insert({ category_id: cat, name: special.name.trim(), course, is_veg: special.veg, is_available: true, vip_only: true, sort_order: 999 }).select('*').maybeSingle()
     if (error) { setMsg(errText(error)); return }
     setD(s2 => ({ ...s2, dishes: [...s2.dishes, data] }))
-    setSpecial({ name: '', cat: special.cat, course: special.course, veg: true })
+    setSpecial({ name: '', cat, course, veg: true, newCat: '', newKitchen: '', newCourse: '' })
     setSaved(Date.now()); onChanged()
+  }
+  // Food preferences: one tap adds or takes one off the guest's notes for the kitchen
+  const prefOn = (v, x) => splitNote(v.notes).some(y => y.toLowerCase() === x.toLowerCase())
+  const flipPref = (v, x) => {
+    const list = splitNote(v.notes)
+    const next = prefOn(v, x) ? list.filter(y => y.toLowerCase() !== x.toLowerCase()) : [...list, x]
+    patch(v, { notes: joinNote(next) || null })
   }
 
   return (
@@ -435,9 +479,13 @@ function VipGuests({ ev, d, setD, onChanged }) {
           <div className="vr2">
             {[['allergies', 'Allergies', 'e.g. Peanuts, Shellfish'], ['likes', 'Likes', 'e.g. Mild Italian'], ['dislikes', 'Dislikes', 'e.g. Mushroom'], ['notes', 'Notes for the kitchen', 'e.g. Less spicy, Jain']].map(([f, label, ph]) => (
               <label key={f} className={'vfld' + (f === 'allergies' ? ' va' : '')}><span>{label}</span>
-                <input className="fld" defaultValue={v[f] || ''} key={f + v.id} placeholder={ph}
+                <input className="fld" defaultValue={v[f] || ''} key={f + v.id + (f === 'notes' ? '|' + (v.notes || '') : '')} placeholder={ph}
                   onBlur={e => { const x = e.target.value.trim() || null; if (x !== (v[f] || null)) patch(v, { [f]: x }) }} /></label>
             ))}
+          </div>
+          <div className="vpref">
+            <span>Food preferences</span>
+            {PREF_CHIPS.map(x => <button key={x} className={prefOn(v, x) ? 'a' : ''} onClick={() => flipPref(v, x)}>{x}</button>)}
           </div>
           <div className="vr3">
             <b>Preferred dishes</b>
@@ -467,10 +515,19 @@ function VipGuests({ ev, d, setD, onChanged }) {
           <input className="fld" value={special.name} onChange={e => setSpecial(s2 => ({ ...s2, name: e.target.value }))} placeholder="Dish name" style={{ flex: '1 1 180px' }} />
           <select className="fld" value={special.cat} onChange={e => setSpecial(s2 => ({ ...s2, cat: e.target.value }))}>
             <option value="">Cuisine…</option>{d.cats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value={NEW}>+ New cuisine…</option>
           </select>
+          {special.cat === NEW && <>
+            <input className="fld" value={special.newCat} onChange={e => setSpecial(s2 => ({ ...s2, newCat: e.target.value }))} placeholder="New cuisine, e.g. Continental" style={{ flex: '1 1 150px' }} />
+            <select className="fld" value={special.newKitchen || defKitchen} onChange={e => setSpecial(s2 => ({ ...s2, newKitchen: e.target.value }))} title="The kitchen that cooks this cuisine">
+              {kitchensOn.map(k => <option key={k.id} value={k.id}>Cooked in {k.name}</option>)}
+            </select>
+          </>}
           <select className="fld" value={special.course} onChange={e => setSpecial(s2 => ({ ...s2, course: e.target.value }))}>
             <option value="">Course…</option>{courses.map(c => <option key={c} value={c}>{c}</option>)}
+            <option value={NEW}>+ New course…</option>
           </select>
+          {special.course === NEW && <input className="fld" value={special.newCourse} onChange={e => setSpecial(s2 => ({ ...s2, newCourse: e.target.value }))} placeholder="New course, e.g. Chef's Special" style={{ flex: '1 1 150px' }} />}
           <label className="vsm"><input type="checkbox" checked={special.veg} onChange={e => setSpecial(s2 => ({ ...s2, veg: e.target.checked }))} /> Veg</label>
           <button className="btn btn-navy" onClick={addSpecial}>Add special dish</button>
         </div>

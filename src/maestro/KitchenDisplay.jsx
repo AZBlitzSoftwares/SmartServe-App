@@ -108,7 +108,7 @@ function KitchenScreen({ session, onSignOut }) {
   const [view, setView] = useState('mine')           // mine | whole | done
   const [filter, setFilter] = useState('all')        // all | over
   const [search, setSearch] = useState('')
-  const [doneScope, setDoneScope] = useState('mine')  // Delivered view: my KOTs or the entire kitchen
+  const [doneScope, setDoneScope] = useState('mine')  // Delivered follows My dishes / Entire kitchen, whichever was last open
   // Card size for this screen, remembered on it: small for a tablet up close, large for a TV
   const [size, setSize] = useState(() => { try { return localStorage.getItem('ms_kd_size') || 'M' } catch { return 'M' } })
   const pickSize = v => { setSize(v); try { localStorage.setItem('ms_kd_size', v) } catch { /* private mode */ } }
@@ -258,7 +258,7 @@ function KitchenScreen({ session, onSignOut }) {
         r = { delivered: 1, already: [] }
       }
       if (r?.already?.length) setToast({ text: `${k.kot_no} was already delivered` })
-      else setToast({ text: `${k.kot_no} · T${k.table_number} C${k.cover_no} delivered`, undo: () => reopen(k) })
+      else setToast({ text: `${k.kot_no} · T${k.table_number} C${k.cover_no} delivered` })
       q.reload()
     } catch (e) {
       setToast({ text: `${k.kot_no} not saved as delivered: ${errText(e)}`, err: true })
@@ -301,7 +301,7 @@ function KitchenScreen({ session, onSignOut }) {
           <span className="tcv">T{k.table_number} · C{k.cover_no}</span>
           {k.course && <span className="crs" title={k.course}>{crsLabel(k.course)}</span>}
           {k.is_remake && <span className="bdg">REMAKE</span>}
-          {k.print_status === 'failed' && <span className="bdg">NOT PRINTED</span>}
+          {k.print_status === 'failed' && <span className="bdg" title="The printer did not answer (off, out of paper or not reachable). It prints by itself when the printer is back, or tap Reprint.">SLIP NOT PRINTED</span>}
         </div>
         {k.vip_name && <div className="vip">★ {k.vip_name}</div>}
         {k.guest_allergy && <div className="alg">Allergy · all dishes: {k.guest_allergy}</div>}
@@ -328,7 +328,6 @@ function KitchenScreen({ session, onSignOut }) {
   const doneMine = doneAll.filter(mine)
   const doneList = (doneScope === 'whole' ? doneAll : doneMine).filter(k => kotMatches(k, search))
   const tOut = k => { const t = k.dispatched_at || k.served_at; return k.fired_at && t ? new Date(t) - new Date(k.fired_at) : null }
-  const avgOf = xs => { const v = xs.filter(x => x != null && x >= 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null }
   const wasLate = k => (tOut(k) ?? 0) > late * 60000
   const hhmm = iso => (iso ? clockText(new Date(iso)) : '–')
 
@@ -341,16 +340,16 @@ function KitchenScreen({ session, onSignOut }) {
       <div className="top">
         <div className="ttl">
           <div className="lg"><img src={logo} alt="" /></div>
-          <h1>{title} <span>{view === 'whole' ? 'Both barkers' : view === 'done' ? 'Delivered' : `Barker ${barker.side} · ${barker.name}`}</span></h1>
+          <h1>{title} <span>{view === 'whole' ? 'Both barkers' : view === 'done' ? `Delivered · ${doneScope === 'whole' ? 'Entire kitchen' : 'My dishes'}` : `Barker ${barker.side} · ${barker.name}`}</span></h1>
         </div>
         <div className="srch">
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search KOT no., T7, C3 or dish" aria-label="Search KOTs" inputMode="search" />
           {search && <button onClick={() => setSearch('')} title="Clear">✕</button>}
         </div>
         <div className="seg">
-          <button className={view === 'mine' ? 'a' : ''} onClick={() => setView('mine')}>My dishes ({barker.side})</button>
-          <button className={view === 'whole' ? 'a' : ''} onClick={() => setView('whole')}>Entire kitchen</button>
-          <button className={view === 'done' ? 'a' : ''} onClick={() => setView('done')}>Delivered · {doneMine.length}</button>
+          <button className={view === 'mine' ? 'a' : ''} onClick={() => { setView('mine'); setDoneScope('mine') }}>My dishes ({barker.side})</button>
+          <button className={view === 'whole' ? 'a' : ''} onClick={() => { setView('whole'); setDoneScope('whole') }}>Entire kitchen</button>
+          <button className={view === 'done' ? 'a' : ''} onClick={() => setView('done')}>Delivered · {(doneScope === 'whole' ? doneAll : doneMine).length}</button>
         </div>
         <div className="rt">
           {!q.online && <span className="off">Offline</span>}
@@ -369,16 +368,6 @@ function KitchenScreen({ session, onSignOut }) {
 
       {!d || (view === 'done' && doneAll.some(k => !('kot_no' in k))) ? <div className="empty">Loading…</div> : view === 'done' ? (
         <div className="donev">
-          <div className="dsum">
-            <div className="c"><b>{doneMine.length}</b>My dishes delivered</div>
-            <div className="c"><b>{doneAll.length}</b>Entire kitchen</div>
-            <div className="c"><b>{mmss(avgOf(doneList.map(tOut)))}</b>Avg firing → delivered</div>
-            <div className="c"><b>{doneList.filter(wasLate).length}</b>Over {late} min</div>
-            <div className="seg sm">
-              <button className={doneScope === 'mine' ? 'a' : ''} onClick={() => setDoneScope('mine')}>Mine</button>
-              <button className={doneScope === 'whole' ? 'a' : ''} onClick={() => setDoneScope('whole')}>Entire kitchen</button>
-            </div>
-          </div>
           <div className="dtw">
             {doneList.length ? (
               <table className="dtab">
@@ -458,15 +447,12 @@ function BackToOpen({ busy, onBack }) {
 // What a kitchen card shows (not the whole KOT row: less to download on a weak connection)
 const KOT_COLS = 'id,kot_no,kitchen_id,table_number,cover_no,course,fired_at,created_at,barker,barker_name,items,guest_note,guest_allergy,vip_name,is_remake,is_reprint,print_status,stage,status,stage_by,served_at,dispatched_at,received_at'
 
+// A short message that goes by itself (2.5 s; a problem 4 s). No Undo: a busy barker must not
+// undo a delivery by mistake (Delivered › Back to open, two taps, if it really was a mistake).
 function KdToast({ toast, onClose }) {
   const closeRef = useRef(onClose); closeRef.current = onClose
-  useEffect(() => { const t = setTimeout(() => closeRef.current(), toast.undo ? 8000 : toast.err ? 6000 : 3000); return () => clearTimeout(t) }, [toast])
-  return (
-    <div className={'toast' + (toast.err ? ' err' : '')}>
-      {toast.text}
-      {toast.undo && <button onClick={() => { toast.undo(); onClose() }}>Undo</button>}
-    </div>
-  )
+  useEffect(() => { const t = setTimeout(() => closeRef.current(), toast.err ? 4000 : 2500); return () => clearTimeout(t) }, [toast])
+  return <div className={'toast' + (toast.err ? ' err' : '')} onClick={onClose}>{toast.text}</div>
 }
 
 function SoldOut({ eventId, kitchenId, barker, onClose, setToast }) {

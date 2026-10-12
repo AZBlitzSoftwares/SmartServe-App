@@ -22,11 +22,12 @@ export const NEXT_ACTION = {
   ready: { to: 'dispatched', label: 'Handed over', cls: 'b2' },
 }
 export const DEFAULT_COURSES = ['First Course', 'Soup', 'Starters', 'Mains', 'Dessert']
-// Notes a captain adds to a dish (or to everything a guest orders) with one tap; anything else
-// goes in Other (typed or spoken). Allergies are kept apart so they print and show clearly.
-export const NOTE_CHIPS = ['Jain', 'No onion-garlic', 'Less spicy', 'Extra spicy', 'No chilli', 'Less oil', 'Less salt',
-  'No ajinomoto', 'No cheese', 'No tomato', 'No mushroom', 'Gluten free', 'Dairy free', 'Vegan', 'Sauce on the side', 'Serve hot']
-export const ALLERGY_CHIPS = ['Nuts', 'Peanuts', 'Dairy', 'Gluten', 'Egg', 'Soy', 'Sesame', 'Shellfish', 'Fish', 'Mustard']
+// The few notes a captain adds with one tap, to a dish or to everything a guest orders;
+// anything else is typed or spoken (Other). Allergies are kept apart so they print clearly.
+export const QUICK_NOTES = ['Jain', 'No onion-garlic', 'Less spicy', 'Extra spicy', 'Less oil', 'No ajinomoto']
+// Food preferences for a VIP guest (Event set-up), a longer list: set once, before the event
+export const PREF_CHIPS = ['Jain', 'No onion', 'No garlic', 'No tomato', 'No mushroom', 'No coriander', 'Less spicy', 'Extra spicy',
+  'Less oil', 'Less salt', 'No ajinomoto', 'Gluten free', 'Dairy free', 'Vegan']
 // "Less spicy, No cheese" <-> ['Less spicy', 'No cheese']
 export const splitNote = s => String(s || '').split(',').map(x => x.trim()).filter(Boolean)
 export const joinNote = parts => [...new Set(parts.map(x => String(x).trim()).filter(Boolean))].join(', ')
@@ -149,7 +150,8 @@ export function mmss(ms) {
 }
 
 export function clockText(d = new Date()) {
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  // always 12-hour ("12:32 AM"), whatever the device's own clock setting
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
 export function ago(iso, now = Date.now()) {
