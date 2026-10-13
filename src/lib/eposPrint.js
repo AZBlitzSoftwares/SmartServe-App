@@ -131,3 +131,60 @@ export async function eposTestPrint(host, { secure = false, timeoutMs = 15000, l
   if (r.kind === 'printer') return { ok: false, kind: 'printer', text: 'The printer answered but did not print: ' + r.error.replace(/^Printer [^:]+: /, '') + '.' }
   return { ok: false, kind: r.kind, text: r.kind === 'timeout' ? `No answer from ${h} in ${Math.round(timeoutMs / 1000)} s.` : r.error }
 }
+
+/* ---- Finding Epson printers from this browser (no Print Hub) ------------------------------
+   Every address of a network (192.168.1.1 … 254) is asked, a few dozen at a time, with an empty
+   ePOS-Print document: it prints nothing, and only an Epson printer with web printing answers it
+   (anything else times out or is refused). Needs the same Chrome "devices on your local network"
+   permission as printing from this laptop. */
+const EMPTY_EPOS = '<?xml version="1.0" encoding="utf-8"?>' +
+  '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+  '<epos-print xmlns="http://www.epson-pos.com/schemas/2011/03/epos-print"></epos-print></s:Body></s:Envelope>'
+
+/** { ip, status } when an Epson printer with web printing answers at ip, else null. */
+export async function eposProbe(ip, timeoutMs = 1500) {
+  try {
+    const res = await fetch(`http://${ip}/cgi-bin/epos/service.cgi?devid=local_printer&timeout=1000`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset=utf-8', 'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT', SOAPAction: '""' },
+      body: EMPTY_EPOS,
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    const text = await res.text()
+    const m = text.match(/<response\b[^>]*>/)
+    if (!m) return null
+    const bits = Number((m[0].match(/\bstatus="(\d+)"/) || [])[1]) || 0
+    return { ip, status: bits & ASB_RECEIPT_END ? 'paper_out' : bits & ASB_RECEIPT_NEAR_END ? 'paper_low' : 'online' }
+  } catch {
+    return null
+  }
+}
+
+/** The networks to search: those of the printers already known, else the usual home/venue ones. */
+export function subnetsToSearch(knownIps = []) {
+  const known = [...new Set(knownIps.map(ip => String(ip || '').trim().match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}/)).filter(Boolean).map(m => m[1]))]
+    .filter(p => !p.startsWith('127.'))
+  return known.length ? { nets: known, known: true }
+    : { nets: ['192.168.1', '192.168.0', '192.168.29', '192.168.31', '192.168.68', '192.168.2', '10.0.0'], known: false }
+}
+
+/** Ask every address of the given networks; onFound({ip, status}) for each printer; resolves with all found. */
+export async function eposScan(prefixes, { onFound = () => {}, onProgress = () => {}, concurrency = 48, timeoutMs = 2500, stopAfterFirstNet = true } = {}) {
+  const found = []
+  for (const p of prefixes) {
+    const ips = Array.from({ length: 254 }, (_, i) => `${p}.${i + 1}`)
+    let next = 0
+    onProgress(p)
+    const worker = async () => {
+      while (next < ips.length) {
+        const ip = ips[next++]
+        const r = await eposProbe(ip, timeoutMs)
+        if (r) { found.push(r); onFound(r) }
+      }
+    }
+    await Promise.all(Array.from({ length: concurrency }, worker))
+    // the usual networks are tried one after another until one has printers
+    if (found.length && stopAfterFirstNet) break
+  }
+  return found
+}

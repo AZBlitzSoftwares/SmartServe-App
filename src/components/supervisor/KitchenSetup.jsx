@@ -5,7 +5,8 @@ import { FOLD_CSS } from '../../lib/fold'
 import { supabase } from '../../lib/supabase'
 import { tableRanges, capOrder, coversOf, chairsOf, spareCount, chairNames } from '../../maestro/msData'
 import { useKitInfo, mb } from '../../lib/kitInfo'
-import { eposTestPrint, EPOS_HOST } from '../../lib/eposPrint'
+import { eposTestPrint, EPOS_HOST, eposScan, subnetsToSearch } from '../../lib/eposPrint'
+import { stationLabel } from '../../lib/printStation'
 import { PrintStationSwitch } from './PrintStation'
 
 /* Kitchens set-up for a Captain + Multi-Kitchen event.
@@ -1245,6 +1246,8 @@ function BrowserTestPrint({ kitchens }) {
   )
 }
 
+const clock = () => Date.now()
+
 function FindPrinters({ eventId, kitchens, setKitchens }) {
   const [rows, setRows] = useState(null)        // null = not loaded / not available
   const [missing, setMissing] = useState(false) // database update not applied yet
@@ -1254,6 +1257,8 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
   const [note, setNote] = useState(null)
   const [now, setNow] = useState(() => Date.now())   // refreshed with every load, for "seen 2 min ago"
   const [claimers, setClaimers] = useState([])  // Print Hubs that took this event's KOTs lately
+  const [scan, setScan] = useState(null)        // this browser's own search: { net, n, done }
+  const scanning = useRef(false)
 
   async function load() {
     const { data, error } = await supabase.from('found_printers').select('*').eq('event_id', eventId).order('seen_at', { ascending:false })
@@ -1267,10 +1272,14 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
   useEffect(() => {
     let alive = true
     async function loadClaimers() {
-      const since = new Date(Date.now() - 10 * 60000).toISOString()
+      // only one laptop can hold printing now (print_stations); two names in the last 2 minutes
+      // means one took over from the other just now, or an old Print Hub without the lock
+      const since = new Date(Date.now() - 2 * 60000).toISOString()
       const { data, error } = await supabase.from('kots').select('print_claimed_by')
         .eq('event_id', eventId).gte('print_claimed_at', since).not('print_claimed_by', 'is', null).limit(500)
-      if (alive && !error) setClaimers([...new Set((data || []).map(r => r.print_claimed_by).filter(Boolean))])
+      // cloud printing and the virtual printers print beside a laptop without getting in its way
+      if (alive && !error) setClaimers([...new Set((data || []).map(r => r.print_claimed_by)
+        .filter(h => h && h !== 'virtual' && !h.startsWith('cloud:')))])
     }
     loadClaimers()
     const t = setInterval(loadClaimers, 30000)
@@ -1293,13 +1302,43 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
 
   async function find() {
     setNote(null)
-    const at = Date.now()
+    browserScan()
+    const at = clock()
     setSearch({ at, base: Infinity, phase:'asking' })
     const before = await load()
     const base = (before || rows || []).reduce((m, r) => Math.max(m, +new Date(r.seen_at) || 0), 0)
     const { error } = await supabase.from('events').update({ printer_scan_at: new Date(at).toISOString() }).eq('id', eventId)
     if (error) { setSearch(null); if (/printer_scan_at/.test(error.message)) setMissing(true); else setNote({ tone:'err', text: errText(error, 'sent') }); return }
-    setSearch({ at, base, phase:'waiting' })
+    setSearch(s => s && s.phase === 'done' ? s : { at, base, phase:'waiting' })
+  }
+
+  /* This browser searches too, so printers are found with no Print Hub running (Chrome on the
+     printers' Wi-Fi, "devices on your local network" allowed, as for Print from this laptop).
+     It asks every address of the networks of the printers already set (else the usual home and
+     venue networks) and puts each printer that answers in the same list. */
+  async function browserScan() {
+    if (scanning.current) return
+    scanning.current = true
+    const { nets, known } = subnetsToSearch([...kitchens.flatMap(k => [k.printer_ip, k.backup_printer_ip]), ...(rows || []).map(r => r.ip)])
+    let n = 0
+    setScan({ net: nets[0], n: 0, done: false })
+    const report = async f => {
+      n++
+      setScan(s => ({ ...s, n }))
+      await supabase.rpc('hub_found_printers', { p_event_id: eventId, p_hub: stationLabel(), p_printers: [{ ip: f.ip, mac: null, status: f.status }] })
+      await load()
+    }
+    const sent = []
+    try {
+      await eposScan(nets, { onFound: f => { sent.push(report(f).catch(() => {})) }, onProgress: net => setScan(s => ({ ...s, net })), stopAfterFirstNet: !known })
+      await Promise.all(sent)
+    } finally {
+      scanning.current = false
+      setScan(s => ({ ...s, done: true }))
+    }
+    await load()
+    if (n) { setSearch(s => ({ ...(s || {}), phase:'done', n })); setOpen(true) }
+    else setSearch(s => s && s.phase === 'done' ? s : { ...(s || {}), phase:'nohub', nets })
   }
 
   async function slip(f) {
@@ -1341,12 +1380,13 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
   const latest = all.length ? Math.max(...all.map(r => +new Date(r.seen_at))) : 0
   const list = all.filter(r => latest - new Date(r.seen_at) <= 3 * 60000)
   const older = all.length - list.length
-  const hubs = [...new Set([...claimers, ...list.filter(r => r.hub).map(r => r.hub)])]
-  const phaseText = !search ? null
-    : search.phase === 'asking' ? 'Asking the Print Hub…'
-    : search.phase === 'waiting' ? 'The Print Hub is looking at its network…'
+  const hubs = claimers
+  const scanOn = !!(scan && !scan.done)
+  const phaseText = scanOn ? 'Searching ' + scan.net + '.1–254 from this browser…' + (scan.n ? ' ' + scan.n + ' found so far' : '')
+    : !search ? null
+    : search.phase === 'asking' || search.phase === 'waiting' ? 'Searching…'
     : search.phase === 'done' ? search.n + ' printer' + (search.n === 1 ? '' : 's') + ' answered'
-    : 'No printers reported. Check that the Print Hub is running on a laptop connected to the printers’ router (download it below), then try again.'
+    : 'No printer answered' + (search.nets ? ' on ' + search.nets.map(n => n + '.x').join(', ') : '') + '. Check the printer is switched on and on the same Wi-Fi as this laptop, and that Chrome may reach “devices on your local network”; or type its IP under Edit.'
 
   return (
     <div style={{ marginTop:14, borderTop:'1px solid var(--line)', paddingTop:12 }}>
@@ -1354,21 +1394,22 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
         <Banner key={k.id} tone="ok">{k.name}’s printer came back on a new address ({k.printer_moved_from} → {keyOf(k.printer_ip, k.printer_port)}) {ago(k.printer_moved_at, now)}. The Print Hub recognised it by its hardware address and moved the kitchen; nothing to do.</Banner>
       ))}
       <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-        <button onClick={find} disabled={search?.phase === 'asking' || search?.phase === 'waiting'}
+        <button onClick={find} disabled={scanOn || search?.phase === 'asking' || search?.phase === 'waiting'} data-testid="find-printers"
           style={{ ...btn, background:'#fff', color:'var(--ink)', border:'1.5px solid var(--line)' }}>
-          {search?.phase === 'waiting' || search?.phase === 'asking' ? '🔎 Searching…' : '🔎 Find printers'}</button>
+          {scanOn || search?.phase === 'waiting' || search?.phase === 'asking' ? '🔎 Searching…' : '🔎 Find printers'}</button>
         {list.length > 0 && (
           <button onClick={() => setOpen(o => !o)} style={{ background:'none', border:'none', color:'var(--ink)', fontWeight:800, fontSize:12.5, cursor:'pointer', textDecoration:'underline' }}>
             {open ? 'Hide' : 'Show'} {list.length} printer{list.length === 1 ? '' : 's'} found</button>
         )}
         {older > 0 && <span style={{ fontSize:11.5, color:'var(--ink2)' }} title="Printers found in earlier searches that did not answer the latest one">({older} older not shown)</span>}
         <span style={{ fontSize:12, fontWeight:700, color: search?.phase === 'nohub' ? AMBER_INK : 'var(--ink2)' }}>
-          {phaseText || 'The Print Hub finds printers on its network and follows a printer that restarts on a new address.'}</span>
+          {phaseText || 'Finds the Epson printers on this laptop’s Wi-Fi (from this browser, or from a Print Hub if one runs).'}</span>
       </div>
       {hubs.length > 1 && (
         <div style={{ marginTop:8 }} data-testid="two-hubs"><Banner tone="warn">
-          {hubs.length} Print Hubs are working on this event: {hubs.join(', ')}. Only one may run: keep the one on the laptop
-          connected to the printers’ router and close the other{hubs.length > 2 ? 's' : ''}, or KOTs can fail.</Banner></div>
+          {hubs.length} laptops printed this event’s KOTs in the last 2 minutes: {hubs.join(', ')}. Only one should print: switch
+          off Print from this laptop (or close the Print Hub) on the other{hubs.length > 2 ? 's' : ''}, or KOTs can fail.
+          This goes away by itself 2 minutes after the other one stops.</Banner></div>
       )}
       {note && <div style={{ marginTop:8 }}><Banner tone={note.tone} onClose={() => setNote(null)}>{note.text}</Banner></div>}
       <PrintStationSwitch eventId={eventId}><BrowserTestPrint kitchens={kitchens} /></PrintStationSwitch>
