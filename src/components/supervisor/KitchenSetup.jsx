@@ -1036,8 +1036,8 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
         ))}
       </div>
 
-      {maestro && kitchens.length > 0 && !form && <CloudPrinting kitchens={kitchens} setKitchens={setKitchens} now={now} />}
       {kitchens.length > 0 && !form && <FindPrinters eventId={eventId} kitchens={kitchens} setKitchens={setKitchens} />}
+      {maestro && kitchens.length > 0 && !form && <CloudPrinting kitchens={kitchens} setKitchens={setKitchens} now={now} />}
     </div>
   )
 }
@@ -1053,6 +1053,7 @@ const CLOUD_SQL_HINT = 'Run 2026-10-13_maestro_v5_cloud_print.sql in Supabase fi
 function CloudPrinting({ kitchens, setKitchens, now }) {
   const [msg, setMsg] = useState(null)
   const [open, setOpen] = useState(false)
+  const [shown, setShown] = useState(false)
   const url = (typeof location !== 'undefined' ? location.origin : '') + '/api/sdp'
   const used = kitchens.filter(k => String(k.cloud_print_id || '').trim())
   const hasColumn = !kitchens.length || kitchens.some(k => 'cloud_print_id' in k)
@@ -1078,8 +1079,15 @@ function CloudPrinting({ kitchens, setKitchens, now }) {
     if (at < 15 * 60000 && ['offline', 'paper_out', 'error'].includes(k.printer_status)) return { t:'Printer problem: ' + k.printer_status.replace('_', ' '), c:RED }
     return { t:'Waiting for the printer to ask', c:AMBER_INK }
   }
+  // An option for later: one quiet line until it is opened or a kitchen uses it
+  if (!used.length && !shown) return (
+    <div data-testid="cloud-printing" style={{ marginTop:10, fontSize:12.5, color:'var(--ink2)' }}>
+      <button onClick={() => setShown(true)} style={{ background:'none', border:'none', padding:0, cursor:'pointer', color:'var(--ink)', fontWeight:800, fontSize:12.5, textDecoration:'underline' }}>
+        ☁ Cloud printing (optional)</button> — the printer collects its own KOTs from the cloud, set once in each Epson printer.
+    </div>
+  )
   return (
-    <div data-testid="cloud-printing" style={{ border:'1.5px solid #BFDBFE', background:'#F8FBFF', borderRadius:12, padding:'12px 14px', margin:'4px 0 12px' }}>
+    <div data-testid="cloud-printing" style={{ border:'1.5px solid #BFDBFE', background:'#F8FBFF', borderRadius:12, padding:'12px 14px', margin:'12px 0 0' }}>
       <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
         <div style={{ flex:'1 1 320px', minWidth:0 }}>
           <div style={{ fontSize:14, fontWeight:900 }}>☁ Cloud printing <span style={{ fontSize:11, fontWeight:800, color:'#1D4ED8' }}>· no laptop, no Print Hub</span></div>
@@ -1634,10 +1642,10 @@ function TestResult({ test }) {
   const T = {
     sending:  ['Sending…', 'var(--ink2)'],
     printing: ['Printing…', 'var(--ink2)'],
-    stuck:    ['Not picked up — is the Print Hub running on the desk laptop?', AMBER_INK],
+    stuck:    ['Not picked up: nothing is printing. Switch on Print from this laptop (below) or start the Print Hub.', AMBER_INK],
     printed:  ['Printed ✓', GREEN],
     failed:   ['Failed: ' + (test.error || 'unknown error'), RED],
-    gaveup:   ['Not picked up after 2 minutes — start the Print Hub on the desk laptop, then test again.', RED],
+    gaveup:   ['Not picked up after 2 minutes: switch on Print from this laptop (below) or start the Print Hub, then test again.', RED],
     nofinish: ['The Print Hub took the job but never reported back — test again.', RED],
   }[test.phase] || ['', 'var(--ink2)']
   return (
