@@ -1036,7 +1036,88 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
         ))}
       </div>
 
+      {maestro && kitchens.length > 0 && !form && <CloudPrinting kitchens={kitchens} setKitchens={setKitchens} now={now} />}
       {kitchens.length > 0 && !form && <FindPrinters eventId={eventId} kitchens={kitchens} setKitchens={setKitchens} />}
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------- cloud printing */
+
+/* Cloud printing (Epson Server Direct Print): the printer itself asks the Smart Serve server for
+   its KOTs every few seconds, so no Print Hub, laptop or open browser is needed at the event,
+   only internet on the printers' Wi-Fi. Each printer is given a Printer ID once, in its own
+   settings page, and here every kitchen gets the Printer ID of the printer it prints on
+   (kitchens sharing a printer share the ID). Needs db/2026-10-13_maestro_v5_cloud_print.sql. */
+const CLOUD_SQL_HINT = 'Run 2026-10-13_maestro_v5_cloud_print.sql in Supabase first, then try again.'
+function CloudPrinting({ kitchens, setKitchens, now }) {
+  const [msg, setMsg] = useState(null)
+  const [open, setOpen] = useState(false)
+  const url = (typeof location !== 'undefined' ? location.origin : '') + '/api/sdp'
+  const used = kitchens.filter(k => String(k.cloud_print_id || '').trim())
+  const hasColumn = !kitchens.length || kitchens.some(k => 'cloud_print_id' in k)
+
+  async function setId(k, raw) {
+    const v = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9_.-]/g, '').slice(0, 30) || null
+    if (v === (k.cloud_print_id || null)) return
+    setMsg(null)
+    setKitchens(prev => prev.map(x => x.id === k.id ? { ...x, cloud_print_id: v } : x))
+    const { error } = await supabase.from('kitchens').update({ cloud_print_id: v }).eq('id', k.id)
+    if (error) {
+      setKitchens(prev => prev.map(x => x.id === k.id ? { ...x, cloud_print_id: k.cloud_print_id ?? null } : x))
+      setMsg({ tone:'err', text: /cloud_print_id|schema cache|column/i.test(error.message) ? CLOUD_SQL_HINT : errText(error) })
+      return
+    }
+    setMsg({ tone:'ok', text: v ? k.name + ' prints on the printer with ID ' + v + '.' : k.name + ' no longer uses cloud printing.' })
+  }
+  const copy = () => { try { navigator.clipboard.writeText(url); setMsg({ tone:'ok', text:'Copied: ' + url }) } catch { setMsg({ tone:'info', text:url }) } }
+  const state = k => {
+    if (!String(k.cloud_print_id || '').trim()) return { t:'Not on cloud printing', c:'var(--ink2)' }
+    const at = k.printer_checked_at ? now - new Date(k.printer_checked_at) : Infinity
+    if (k.printer_status === 'online' && at < 60000) return { t:'● Online · the printer is asking', c:GREEN }
+    if (at < 15 * 60000 && ['offline', 'paper_out', 'error'].includes(k.printer_status)) return { t:'Printer problem: ' + k.printer_status.replace('_', ' '), c:RED }
+    return { t:'Waiting for the printer to ask', c:AMBER_INK }
+  }
+  return (
+    <div data-testid="cloud-printing" style={{ border:'1.5px solid #BFDBFE', background:'#F8FBFF', borderRadius:12, padding:'12px 14px', margin:'4px 0 12px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+        <div style={{ flex:'1 1 320px', minWidth:0 }}>
+          <div style={{ fontSize:14, fontWeight:900 }}>☁ Cloud printing <span style={{ fontSize:11, fontWeight:800, color:'#1D4ED8' }}>· no laptop, no Print Hub</span></div>
+          <div style={{ ...hint, marginTop:2 }}>Each Epson printer collects its own KOTs from the cloud every few seconds (Epson Server Direct Print). At the event only the printers and a Wi-Fi with internet are needed. Set each printer once ({used.length ? used.length + ' of ' + kitchens.length + ' kitchens set' : 'how: see below'}).</div>
+        </div>
+        <button onClick={() => setOpen(o => !o)} style={{ ...ghost, ...small }}>{open ? 'Hide the printer set-up' : 'How to set a printer'}</button>
+      </div>
+      {!hasColumn && <Banner tone="warn" style={{ marginTop:10, marginBottom:0 }}>{CLOUD_SQL_HINT}</Banner>}
+      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginTop:10 }}>
+        <span style={label}>Print address</span>
+        <code style={{ fontSize:13, fontWeight:800, background:'#fff', border:'1.5px solid var(--line)', borderRadius:8, padding:'5px 9px', userSelect:'all' }} data-testid="sdp-url">{url}</code>
+        <button onClick={copy} style={{ ...ghost, ...small }}>Copy</button>
+      </div>
+      <div style={{ display:'grid', gap:6, marginTop:10 }}>
+        {kitchens.map(k => {
+          const st = state(k)
+          return (
+            <div key={k.id + ':' + (k.cloud_print_id || '')} style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+              <b style={{ minWidth:130, fontSize:13.5 }}>{k.name}</b>
+              <input defaultValue={k.cloud_print_id || ''} placeholder="Printer ID, e.g. PRINTER-1" data-testid={'cloud-id-' + k.name}
+                onBlur={e => setId(k, e.target.value)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                style={{ ...input, width:210, height:34, fontSize:13, textTransform:'uppercase' }} />
+              <span style={{ fontSize:12.5, fontWeight:800, color:st.c }}>{st.t}</span>
+            </div>
+          )
+        })}
+      </div>
+      {msg && <Banner tone={msg.tone} style={{ marginTop:10, marginBottom:0 }} onClose={() => setMsg(null)}>{msg.text}</Banner>}
+      {open && (
+        <ol style={{ ...hint, fontSize:12.5, margin:'10px 0 0', paddingLeft:20 }}>
+          <li>Give each physical printer its own Printer ID above (letters, numbers, - or _), e.g. <b>PRINTER-1</b>. Kitchens that share one printer get the same ID.</li>
+          <li>On a phone or laptop on the printers' Wi-Fi, open <b>https://&lt;printer IP&gt;</b> (the IP is on the printer's status sheet: hold the Feed button while switching it on). Accept the security warning.</li>
+          <li>Sign in as administrator: user <b>epson</b>, password = the printer's <b>serial number</b> (label underneath), unless it was changed.</li>
+          <li>Open <b>Server Direct Print</b> (in the ePOS / web service settings). Switch it <b>on</b>, set <b>URL</b> to the print address above, <b>Interval</b> to <b>3</b> seconds and <b>ID</b> to the printer's Printer ID. Save: the printer restarts.</li>
+          <li>Within a few seconds this list shows <b>Online · the printer is asking</b>. Press <b>Test print</b> on the kitchen above: the slip comes out with no laptop running.</li>
+          <li>The printers' Wi-Fi needs internet. Do not run a Print Hub or “Print from this laptop” for these kitchens at the same time (they leave cloud kitchens alone anyway).</li>
+        </ol>
+      )}
     </div>
   )
 }

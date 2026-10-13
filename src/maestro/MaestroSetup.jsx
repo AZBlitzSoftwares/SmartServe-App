@@ -56,7 +56,8 @@ export function MaestroPreService({ eventData, nonce }) {
   const dishes = d.dishes
   const noCourse = dishes.filter(x => !x.course || !courses.includes(x.course))
   const noKitchen = dishes.filter(x => !routeDish(x, catsById, active).kitchen)
-  const noIp = active.filter(k => !IPV4.test(String(k.printer_ip || '').trim()))
+  // a kitchen on cloud printing (Printer ID) needs no IP: the printer collects its KOTs itself
+  const noIp = active.filter(k => !IPV4.test(String(k.printer_ip || '').trim()) && !String(k.cloud_print_id || '').trim())
   const tested = active.filter(k => ['online', 'paper_low'].includes(k.printer_status) && k.printer_checked_at && now - new Date(k.printer_checked_at) < 15 * 60000)
   const sides = active.flatMap(k => (Number(k.barkers) || 2) >= 2 ? [[k, 'A'], [k, 'B']] : [[k, 'A']])
   const noBarker = sides.filter(([k, s]) => !d.barkers.some(b => b.is_active && b.kitchen_id === k.id && b.side === s && /^\d{4,6}$/.test(String(b.pin || ''))))
@@ -65,8 +66,8 @@ export function MaestroPreService({ eventData, nonce }) {
   const firstDish = dishes.filter(x => x.course === courses[0] && x.is_available !== false)
   const checks = [
     { ok: active.length > 0, t: active.length ? `${active.length} kitchens ready to take KOTs` : 'No kitchens yet: add them below' },
-    { ok: active.length > 0 && !noIp.length, t: noIp.length ? `No printer IP: ${noIp.map(k => k.name).join(', ')}` : 'Every kitchen has a printer' },
-    { ok: active.length > 0 && tested.length === active.length, t: tested.length === active.length ? 'Every printer answered in the last 15 minutes' : `Printer not confirmed: ${active.filter(k => !tested.includes(k)).map(k => k.name).join(', ')} (switch on Print from this laptop or start the Print Hub, then Test print)` },
+    { ok: active.length > 0 && !noIp.length, t: noIp.length ? `No printer IP or Printer ID: ${noIp.map(k => k.name).join(', ')}` : 'Every kitchen has a printer' },
+    { ok: active.length > 0 && tested.length === active.length, t: tested.length === active.length ? 'Every printer answered in the last 15 minutes' : `Printer not confirmed: ${active.filter(k => !tested.includes(k)).map(k => k.name).join(', ')} (cloud printing: check the printer's Server Direct Print; otherwise switch on Print from this laptop or start the Print Hub; then Test print)` },
     { ok: dishes.length > 0 && !noKitchen.length, t: !dishes.length ? 'No dishes yet: add the menu under Menu' : noKitchen.length ? `${noKitchen.length} dishes have no kitchen` : `All ${dishes.length} dishes routed to a kitchen and a barker` },
     { ok: dishes.length > 0 && !noCourse.length, t: noCourse.length ? `${noCourse.length} dishes have no course: ${noCourse.slice(0, 3).map(x => x.name).join(', ')}${noCourse.length > 3 ? '…' : ''}` : 'Every dish has a course' },
     { ok: ev.first_course_auto === false || firstDish.length > 0, t: ev.first_course_auto === false ? `${courses[0]} is picked up by the captain` : firstDish.length ? `${courses[0]} (${firstDish.map(x => x.name).join(', ')}) is picked up when a cover is seated` : `No ${courses[0]} dish: add one, or switch the automatic ${courses[0]} off` },
