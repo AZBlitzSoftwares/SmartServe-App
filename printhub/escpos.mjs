@@ -11,6 +11,8 @@
 // commands. sanitize() takes care of both.
 
 export const WIDTH = 48; // characters per line, Font A on 80 mm paper
+// Shown when the Print Hub starts, so anyone can see which KOT layout this copy prints
+export const KOT_LAYOUT = 'Pick up, VOID, covers 1A/2A, notes in big letters on black';
 
 // Node has Buffer; a browser (printing straight from the Control Desk, src/lib/printStation.js)
 // gets the few Buffer calls used here on plain byte arrays.
@@ -432,19 +434,22 @@ function guestBlock(r, job) {
   r.dashes();
 }
 
-// "1 x Funghi Tea Soup" (tall, bold), then its note ">> JAIN <<" and allergy, bold, tall and
-// white on black, so the instruction stands out from the dish
+// "1 x Funghi Tea Soup" (tall, bold), then its note and allergy in big letters (the size of
+// VOID) on a solid black band as wide as the slip, so the instruction cannot be missed
+function bandBig(r, lines) {
+  for (const l of lines) r.reverse(true).text(' ' + l.padEnd(WIDTH / 2 - 2) + ' ').reverse(false).line();
+}
 function maestroItemLines(r, items) {
-  const marked = (text, open, close) => {
-    const ls = wrap(text, WIDTH - 10);
-    ls.forEach((l, i) => r.text('   ').reverse(true).text(`${i === 0 ? open : ' '.repeat(open.length)}${l}${i === ls.length - 1 ? close : ''}`).reverse(false).line());
-  };
   for (const it of items) {
     const prefix = `${it.qty} x `;
     r.bold(true).size(1, 2);
     for (const l of wrap(prefix + it.name, WIDTH, prefix.length)) r.line(l);
-    if (it.note) marked(it.note.toUpperCase(), '>> ', ' <<');
-    if (it.allergy) marked(`ALLERGY: ${it.allergy.toUpperCase()}`, '** ', ' **');
+    if (it.note || it.allergy) {
+      r.size(2);
+      if (it.note) bandBig(r, wrap(`NOTE: ${it.note.toUpperCase()}`, WIDTH / 2 - 2));
+      if (it.note && it.allergy) r.size(1).line().size(2);
+      if (it.allergy) bandBig(r, wrap(`ALLERGY: ${it.allergy.toUpperCase()}`, WIDTH / 2 - 2));
+    }
     r.size(1).bold(false);
   }
 }

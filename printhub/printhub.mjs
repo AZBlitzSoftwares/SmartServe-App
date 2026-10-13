@@ -16,7 +16,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildKot, formatTime, parseStatusByte, STATUS_REQUEST } from './escpos.mjs';
+import { buildKot, formatTime, parseStatusByte, STATUS_REQUEST, KOT_LAYOUT } from './escpos.mjs';
 import { findPrinters, readArp, scanHosts } from './discover.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -1295,6 +1295,7 @@ export async function main(app = null) {
       console.log('');
     }
     console.log(`Print Hub starting - server ${cfg.options.serverName} (${cfg.options.url}), hub "${cfg.options.hubName}"`);
+    console.log(`KOT layout: ${KOT_LAYOUT} (folder ${path.dirname(fileURLToPath(import.meta.url))})`);
   }
   if (app) process.title = 'SmartServe Print Hub';
   keepAwake();

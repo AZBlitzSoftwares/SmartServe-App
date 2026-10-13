@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 
 const TYPE_LABELS = {
@@ -8,33 +8,37 @@ const TYPE_EMOJI = {
 const TYPE_COLOR = {
   help: '#E8890C', sos:'#DC2626', clean_table:'#2563EB', extra_cutlery:'#7C3AED', water_refill:'#0891B2' }
 
-// This is exported so SupervisorApp can show the floating alert on ALL screens
+// This is exported so SupervisorApp can show the floating alert on ALL screens.
+// Only a request that was not open at the last look pops up: saving a setting (which hands the
+// app a new event object) must not announce an old open request again. On the first look a
+// request pops up only if it came in during the last two minutes.
 export function useSOSAlert(eventData) {
   const [openRequests, setOpenRequests] = useState([])
   const [newAlert, setNewAlert] = useState(null)
-  const prevCount = { current: 0 }
+  const seen = useRef(null)
+  const eventId = eventData?.id
 
   useEffect(() => {
-    if (!eventData) return
+    if (!eventId) return
+    let alive = true
+    seen.current = null
+    async function fetchRequests() {
+      const { data, error } = await supabase.from('sos_requests')
+        .select('*, tables(table_number), sos_request_items(item_name, quantity)').eq('event_id', eventId)
+        .eq('status', 'open').order('created_at', { ascending:false })
+      if (!alive || error) return
+      const reqs = data || []
+      const first = seen.current === null
+      const known = seen.current || new Set()
+      const fresh = reqs.filter(r => !known.has(r.id) && (!first || Date.now() - new Date(r.created_at).getTime() < 120000))
+      if (fresh.length) setNewAlert(fresh[0])
+      seen.current = new Set(reqs.map(r => r.id))
+      setOpenRequests(reqs)
+    }
     fetchRequests()
     const interval = setInterval(fetchRequests, 4000)
-    return () => clearInterval(interval)
-  }, [eventData])
-
-  async function fetchRequests() {
-    if (!eventData) return
-    const { data } = await supabase.from('sos_requests')
-      .select('*, tables(table_number), sos_request_items(item_name, quantity)').eq('event_id', eventData.id)
-      .eq('status', 'open').order('created_at', { ascending:false })
-    const reqs = data || []
-    // New open request arrived
-    if (reqs.length > prevCount.current && prevCount.current >= 0) {
-      const newest = reqs[0]
-      if (newest) setNewAlert(newest)
-    }
-    prevCount.current = reqs.length
-    setOpenRequests(reqs)
-  }
+    return () => { alive = false; clearInterval(interval) }
+  }, [eventId])
 
   return { openRequests, newAlert, clearAlert: () => setNewAlert(null) }
 }

@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import MaestroSetup, { MaestroPreService } from '../../maestro/MaestroSetup'
+import { MaestroPreService, MaestroPart, useMaestroSetup } from '../../maestro/MaestroSetup'
+import Fold from './Fold'
+import { FOLD_CSS } from '../../lib/fold'
 import { supabase } from '../../lib/supabase'
 import { tableRanges, capOrder, coversOf, chairsOf, spareCount, chairNames } from '../../maestro/msData'
 import { useKitInfo, mb } from '../../lib/kitInfo'
@@ -293,6 +295,11 @@ export default function KitchenSetup({ eventData, onEventChange }) {
   const sortedKitchens = useMemo(() => sortKitchens(kitchens), [kitchens])
   const defaultKitchen = useMemo(() => effectiveDefault(kitchens), [kitchens])
   const tableCount = eventData?.number_of_tables || null
+  // Smart Serve Maestro sections share one copy of their data; it is read again when kitchens or
+  // the menu routing change here, so the kitchen rules and dish split list the same kitchens
+  const msKey = sortedKitchens.map(k => [k.id, k.name, k.prefix, k.is_active, k.is_default].join(':')).join('|')
+    + '#' + cats.map(c => c.id + ':' + (c.kitchen_id || '')).join('|')
+  const ms = useMaestroSetup(eventData, msKey, !!eventData?.maestro)
 
   const checks = useMemo(() => {
     const active = kitchens.filter(k => k.is_active)
@@ -357,30 +364,51 @@ export default function KitchenSetup({ eventData, onEventChange }) {
     </div>
   )
 
+  /* Smart Serve Maestro: every section in the order the set-up is done, each one collapsible.
+     People (barkers, captains) come before the dish split that names them. */
+  if (eventData?.maestro) {
+    const changed = () => setMaestroNonce(n => n + 1)
+    const part = (p, step) => <MaestroPart part={p} eventData={eventData} ms={ms} step={step} onEventChange={onEventChange} onChanged={changed} />
+    return (
+      <div key={eventId}>
+        <style>{CSS + FOLD_CSS}</style>
+        <Fold id="ms-ready" title="Pre-service check"><MaestroPreService eventData={eventData} nonce={maestroNonce} /></Fold>
+        <Fold id="ks-chairs" step={1} title="Tables & chairs"><TablesChairsCard step={1} eventData={eventData} onEventChange={onEventChange} /></Fold>
+        <Fold id="ks-kitchens" step={2} title="Kitchens & printers">
+          <KitchensSection step={2} eventId={eventId} maestro kitchens={sortedKitchens} setKitchens={setKitchens}
+            cats={cats} setCats={setCats} waiters={waiters} setWaiters={setWaiters} defaultKitchen={defaultKitchen} now={now} />
+        </Fold>
+        <Fold id="ms-barkers" step={3} title="Barkers">{part('barkers', 3)}</Fold>
+        <Fold id="ks-captains" step={4} title="Captains">
+          <CaptainsSection eventId={eventId} step={4} captains={captains} setCaptains={setCaptains} tableCount={tableCount}
+            coverCount={coversOf(eventData)} coversFor={t => coversOf(eventData, t)} maestro />
+        </Fold>
+        <Fold id="ms-courses" step={5} title="Courses & service settings">{part('courses', 5)}</Fold>
+        <Fold id="ks-routing" step={6} title="Menu routing">
+          <RoutingSection step={6} cats={cats} setCats={setCats} kitchens={sortedKitchens} itemCounts={itemCounts} defaultKitchen={defaultKitchen} />
+        </Fold>
+        <Fold id="ms-rules" step={7} title="Kitchen rules">{part('rules', 7)}</Fold>
+        <Fold id="ms-dishes" step={8} title="Dishes: course and barker">{part('dishes', 8)}</Fold>
+        <Fold id="ms-vip" step={9} title="VIP guests">{part('vip', 9)}</Fold>
+        <Fold id="ms-screens" step={10} title="Big screens">{part('screens', 10)}</Fold>
+      </div>
+    )
+  }
+
   return (
     // Keyed on the event so open forms and running test prints never carry over to another event
     <div key={eventId}>
       <style>{CSS}</style>
-      {/* ss-maestro: Maestro events have their own pre-service check (barkers
-          instead of waiters, courses, printers confirmed by the Print Hub) */}
-      {eventData?.maestro
-        ? <MaestroPreService eventData={eventData} nonce={maestroNonce} />
-        : <Readiness checks={checks} onReload={load} />}
+      <Readiness checks={checks} onReload={load} />
       <ChairsCard eventData={eventData} onEventChange={onEventChange} />
-      <KitchensSection eventId={eventId} maestro={!!eventData?.maestro} kitchens={sortedKitchens} setKitchens={setKitchens}
+      <KitchensSection eventId={eventId} kitchens={sortedKitchens} setKitchens={setKitchens}
         cats={cats} setCats={setCats} waiters={waiters} setWaiters={setWaiters}
         defaultKitchen={defaultKitchen} now={now} />
       <RoutingSection cats={cats} setCats={setCats} kitchens={sortedKitchens}
         itemCounts={itemCounts} defaultKitchen={defaultKitchen} />
-      {eventData?.maestro && (
-        <MaestroSetup eventData={eventData} onEventChange={onEventChange} onChanged={() => setMaestroNonce(n => n + 1)}
-          refreshKey={sortedKitchens.map(k => [k.id, k.name, k.prefix, k.is_active, k.is_default].join(':')).join('|')
-            + '#' + cats.map(c => c.id + ':' + (c.kitchen_id || '')).join('|')} />
-      )}
       <CaptainsSection eventId={eventId} step={4} captains={captains} setCaptains={setCaptains} tableCount={tableCount}
-        coverCount={eventData?.maestro ? coversOf(eventData) : Math.max(1, Number(eventData?.chairs_per_table) || 10)}
-        coversFor={eventData?.maestro ? t => coversOf(eventData, t) : undefined} maestro={!!eventData?.maestro} />
-      {!eventData?.maestro && <WaitersSection eventId={eventId} waiters={waiters} setWaiters={setWaiters} kitchens={sortedKitchens} />}
+        coverCount={Math.max(1, Number(eventData?.chairs_per_table) || 10)} />
+      <WaitersSection eventId={eventId} waiters={waiters} setWaiters={setWaiters} kitchens={sortedKitchens} />
     </div>
   )
 }
@@ -528,6 +556,90 @@ function ChairsCard({ eventData, onEventChange }) {
   )
 }
 
+/* Smart Serve Maestro: the number of tables and the chairs at each table, in one card, with the
+   1A / 2A chairs and the tables that have their own number of chairs under them. */
+function TablesChairsCard({ step = 1, eventData, onEventChange }) {
+  const curT = Number(eventData?.number_of_tables) || 0
+  const curC = Number(eventData?.chairs_per_table) || 10
+  const [dT, setDT] = useState(String(curT || ''))
+  const [dC, setDC] = useState(String(curC))
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [warn, setWarn] = useState('')
+  // When the saved values change (here or on another screen) the boxes follow them
+  const [shown, setShown] = useState(curT + ':' + curC)
+  if (shown !== curT + ':' + curC) { setShown(curT + ':' + curC); setDT(String(curT || '')); setDC(String(curC)) }
+
+  const t = parseInt(dT, 10), c = parseInt(dC, 10)
+  const okT = /^\d+$/.test(dT) && t >= 1 && t <= 200
+  const okC = /^\d+$/.test(dC) && c >= 1 && c <= 20
+  const dirty = okT && okC && (t !== curT || c !== curC)
+  const spare = spareCount(eventData)
+  const T = okT ? t : curT, C = okC ? c : curC
+  const own = eventData?.table_covers && typeof eventData.table_covers === 'object' ? eventData.table_covers : {}
+  const total = Array.from({ length: T }, (_, i) => Number(own[String(i + 1)]) > 0 ? Number(own[String(i + 1)]) : C).reduce((a, b) => a + b, 0)
+
+  async function save(force = false) {
+    if (!okT) { setMsg({ tone:'err', text:'Tables: a number from 1 to 200.' }); return }
+    if (!okC) { setMsg({ tone:'err', text:'Chairs: a number from 1 to 20.' }); return }
+    if (!dirty) return
+    setMsg(null)
+    // Fewer tables: nothing is deleted, but say what is on the tables that go
+    if (t < curT && !force) {
+      const [it, cp] = await Promise.all([
+        supabase.from('ms_items').select('id', { count:'exact', head:true }).eq('event_id', eventData.id).gt('table_number', t).neq('state', 'cancelled'),
+        supabase.from('captains').select('id', { count:'exact', head:true }).eq('event_id', eventData.id).eq('is_active', true).gt('table_number', t),
+      ])
+      const bits = []
+      if (it.count) bits.push(plural(it.count, 'dish', 'dishes') + ' ordered')
+      if (cp.count) bits.push(plural(cp.count, 'captain') + ' linked')
+      if (bits.length) { setWarn('Tables above ' + t + ' have ' + bits.join(' and ') + '. Nothing is deleted, but captains cannot use those table numbers any more.'); return }
+    }
+    setWarn(''); setSaving(true)
+    const { data, error } = await supabase.from('events').update({ number_of_tables: t, chairs_per_table: c })
+      .eq('id', eventData.id).select().single()
+    setSaving(false)
+    if (error) { setMsg({ tone:'err', text: errText(error) }); return }
+    if (data) onEventChange?.(data)
+    setMsg({ tone:'ok', text:'Saved — ' + t + ' tables, ' + c + ' chairs at each: ' + chairNames(c, spare) })
+    setTimeout(() => setMsg(null), 3000)
+  }
+
+  const sq = { width:38, height:40, borderRadius:10, border:'1.5px solid var(--line)', background:'#fff',
+    fontSize:18, fontWeight:800, cursor:'pointer', color:'var(--ink)' }
+  const stepper = (lab, val, set, min, max, ok, testid) => (
+    <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+      <span style={label}>{lab}</span>
+      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+        <button onClick={() => set(String(Math.max(min, (parseInt(val, 10) || min) - 1)))} disabled={saving} style={sq} title="One fewer">−</button>
+        <input value={val} inputMode="numeric" disabled={saving} data-testid={testid}
+          onChange={e => { set(e.target.value.replace(/\D/g, '').slice(0, 3)); setWarn('') }}
+          onKeyDown={e => { if (e.key === 'Enter') save() }}
+          style={{ ...input, width:68, height:40, textAlign:'center', fontSize:17, fontWeight:900, borderColor: ok ? 'var(--line)' : RED }} />
+        <button onClick={() => set(String(Math.min(max, (parseInt(val, 10) || 0) + 1)))} disabled={saving} style={sq} title="One more">+</button>
+      </div>
+    </div>
+  )
+
+  return (
+    <div style={card} id="ks-chairs">
+      <SectionHead step={step} title="Tables & chairs"
+        sub={T + ' tables, ' + C + ' chairs at each table, all in: ' + chairNames(C, spare) + '. '
+          + 'Chairs at this event: ' + total + '. Captains take the order chair by chair.'} />
+      <div style={{ display:'flex', alignItems:'flex-end', gap:18, flexWrap:'wrap', paddingLeft:33 }}>
+        {stepper('Tables at this event', dT, v => setDT(v), 1, 200, okT, 'tables-count')}
+        {stepper('Chairs per table', dC, v => setDC(v), 1, 20, okC, 'chairs-count')}
+        <button onClick={() => save(!!warn)} disabled={saving || !dirty}
+          style={{ ...btn, height:40, background: dirty ? (warn ? RED : 'var(--ink)') : '#E5E7EB', color: dirty ? '#fff' : '#9CA3AF',
+            cursor: dirty ? 'pointer' : 'default' }}>{saving ? 'Saving…' : warn ? 'Save anyway' : 'Save'}</button>
+      </div>
+      {warn && <Banner tone="warn" style={{ marginTop:10, marginBottom:0 }} onClose={() => setWarn('')}>{warn}</Banner>}
+      {msg && <Banner tone={msg.tone} style={{ marginTop:10, marginBottom:0 }} onClose={() => setMsg(null)}>{msg.text}</Banner>}
+      <TableCoversEditor eventData={eventData} onEventChange={onEventChange} />
+    </div>
+  )
+}
+
 /* Smart Serve Maestro: how many chairs of each table are named 1A, 2A … (spare_covers) and
    tables with their own number of chairs (table_covers {"3": 12}, all chairs in). Captain
    tablets, the Control Desk and the KOTs follow within seconds. */
@@ -650,7 +762,7 @@ function validateKitchen(f, kitchens) {
   return e
 }
 
-function KitchensSection({ eventId, maestro, kitchens, setKitchens, setCats, waiters, setWaiters, cats, defaultKitchen, now }) {
+function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, setCats, waiters, setWaiters, cats, defaultKitchen, now }) {
   const [form, setForm]       = useState(null)
   const [tried, setTried]     = useState(false)
   const [saving, setSaving]   = useState(false)
@@ -874,7 +986,7 @@ function KitchensSection({ eventId, maestro, kitchens, setKitchens, setCats, wai
 
   return (
     <div style={card} id="ks-kitchens">
-      <SectionHead step={2} title="Kitchens & printers"
+      <SectionHead step={step} title="Kitchens & printers"
         sub={maestro
           ? "One kitchen per cuisine, plus a First Course and a Desserts kitchen if you like. Every pick-up prints one KOT per cover, per kitchen and per barker, on that kitchen's printer, from the desk laptop (Print from this laptop, below, or the Print Hub)."
           : "One kitchen per cuisine. Each order is split into one KOT per kitchen and printed on that kitchen's printer by the Print Hub on the desk laptop."}
@@ -1456,7 +1568,7 @@ function TestResult({ test }) {
 
 /* --------------------------------------------------------- menu routing */
 
-function RoutingSection({ cats, setCats, kitchens, itemCounts, defaultKitchen }) {
+function RoutingSection({ step = 3, cats, setCats, kitchens, itemCounts, defaultKitchen }) {
   const [ticks, tick] = useTicks()
   const [msg, setMsg] = useState(null)
   const activeIds = new Set(kitchens.filter(k => k.is_active).map(k => k.id))
@@ -1513,7 +1625,7 @@ function RoutingSection({ cats, setCats, kitchens, itemCounts, defaultKitchen })
 
   return (
     <div style={card} id="ks-routing">
-      <SectionHead step={3} title="Menu routing"
+      <SectionHead step={step} title="Menu routing"
         sub={'Which kitchen cooks each menu category. The categories on the left are the ones in the Menu tab (they appear here by themselves when'
           + ' you add one there); pick the kitchen whose printer and barkers get those dishes. Saved as soon as you choose.'
           + ' A category left blank goes to the default kitchen' + (defaultKitchen ? ' (' + defaultKitchen.name + ').' : '.')}

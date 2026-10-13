@@ -21,7 +21,7 @@ export default function MenuManager({ eventData, onEventChange }) {
   const [showAddCat, setShowAddCat] = useState(false)
   const [editItem, setEditItem] = useState(null)
   const [newCatName, setNewCatName] = useState('')
-  const [newItem, setNewItem] = useState({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course:'' })
+  const [newItem, setNewItem] = useState({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course:'', vip_only:false })
   const [saving, setSaving] = useState(false)
   const [uploadingImg, setUploadingImg] = useState(false)
   const imgFileRef = useRef()
@@ -81,14 +81,15 @@ export default function MenuManager({ eventData, onEventChange }) {
     if (isMs && courses.length && !courses.includes(newItem.course)) { alert('Pick the course for this dish (' + courses.join(', ') + ').'); return }
     setSaving(true)
     if (editItem) {
-      const { error } = await supabase.from('menu_items').update({ name:newItem.name.trim(), description:newItem.description.trim(), category_id:catId, is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, ...(isMs ? { course:newItem.course||null } : {}) }).eq('id', editItem.id)
+      const { error } = await supabase.from('menu_items').update({ name:newItem.name.trim(), description:newItem.description.trim(), category_id:catId, is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, ...(isMs ? { course:newItem.course||null, vip_only:!!newItem.vip_only } : {}) }).eq('id', editItem.id)
       if (error) { alert('Could not save the dish: ' + error.message); setSaving(false); return }
     } else {
-      const { error } = await supabase.from('menu_items').insert({ category_id:catId, name:newItem.name.trim(), description:newItem.description.trim(), is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, is_available:true, ...(isMs ? { course:newItem.course||null } : {}) })
-      if (!error) await syncToFoodMaster({ name:newItem.name.trim(), description:newItem.description.trim(), category:categories.find(c=>c.id===catId)?.name, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null })
+      const { error } = await supabase.from('menu_items').insert({ category_id:catId, name:newItem.name.trim(), description:newItem.description.trim(), is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, is_available:true, ...(isMs ? { course:newItem.course||null, vip_only:!!newItem.vip_only } : {}) })
+      // a VIP-only special dish stays out of the shared dish library
+      if (!error && !(isMs && newItem.vip_only)) await syncToFoodMaster({ name:newItem.name.trim(), description:newItem.description.trim(), category:categories.find(c=>c.id===catId)?.name, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null })
       if (error) { alert('Error adding dish: ' + error.message); setSaving(false); return }
     }
-    setNewItem(p => ({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course: editItem ? '' : p.course }))
+    setNewItem(p => ({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course: editItem ? '' : p.course, vip_only:false }))
     setEditItem(null); setShowAdd(false); setSaving(false)
     loadMenu()
   }
@@ -111,7 +112,7 @@ export default function MenuManager({ eventData, onEventChange }) {
   }
 
   function startEdit(item) {
-    setNewItem({ name:item.name, description:item.description||'', is_live_counter:item.is_live_counter||false, is_veg:item.is_veg!==false, photo_url:item.photo_url||'', category_id:item.category_id, course:item.course||'' })
+    setNewItem({ name:item.name, description:item.description||'', is_live_counter:item.is_live_counter||false, is_veg:item.is_veg!==false, photo_url:item.photo_url||'', category_id:item.category_id, course:item.course||'', vip_only:!!item.vip_only })
     setEditItem(item); setShowAdd(true)
   }
 
@@ -240,7 +241,7 @@ export default function MenuManager({ eventData, onEventChange }) {
           <button onClick={()=>{ setImportResult(null); setImporting2({ paste:true }) }} style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#16A34A', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
             📋 Paste from Excel
           </button>
-          <button onClick={()=>{ setEditItem(null); setNewItem({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'' }); setShowAdd(true) }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Add Dish</button>
+          <button onClick={()=>{ setEditItem(null); setNewItem({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course:'', vip_only:false }); setShowAdd(true) }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Add Dish</button>
         </div>
         <input ref={fileRef} type="file" accept=".xlsx,.xlsm,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={handleFileImport} style={{ display:'none' }} />
       </div>
@@ -421,6 +422,19 @@ export default function MenuManager({ eventData, onEventChange }) {
             <button onClick={()=>setNewItem(p=>({...p,is_veg:true}))} style={{ flex:1, background:newItem.is_veg?'#16A34A':'#fff', color:newItem.is_veg?'#fff':'#333', border:'1.5px solid', borderColor:newItem.is_veg?'#16A34A':'#ddd', borderRadius:10, padding:'10px', fontSize:13, fontWeight:700, cursor:'pointer' }}>🟢 Veg</button>
             <button onClick={()=>setNewItem(p=>({...p,is_veg:false}))} style={{ flex:1, background:!newItem.is_veg?'#DC2626':'#fff', color:!newItem.is_veg?'#fff':'#333', border:'1.5px solid', borderColor:!newItem.is_veg?'#DC2626':'#ddd', borderRadius:10, padding:'10px', fontSize:13, fontWeight:700, cursor:'pointer' }}>🔴 Non-Veg</button>
           </div>
+          {isMs && (
+            <button type="button" onClick={()=>setNewItem(p=>({...p, vip_only:!p.vip_only}))} data-testid="vip-only-toggle"
+              style={{ width:'100%', display:'flex', alignItems:'center', gap:10, textAlign:'left', marginBottom:12, cursor:'pointer',
+                border:'1.5px solid ' + (newItem.vip_only ? '#B8862B' : 'var(--line)'), background: newItem.vip_only ? '#FFF6E0' : '#fff',
+                borderRadius:10, padding:'10px 12px', fontFamily:'Manrope' }}>
+              <span style={{ width:20, height:20, borderRadius:5, flexShrink:0, border:'2px solid ' + (newItem.vip_only ? '#B8862B' : '#CBD5E1'),
+                background: newItem.vip_only ? '#B8862B' : '#fff', color:'#fff', fontSize:13, fontWeight:900, display:'inline-flex', alignItems:'center', justifyContent:'center' }}>{newItem.vip_only ? '✓' : ''}</span>
+              <span>
+                <span style={{ display:'block', fontSize:14, fontWeight:800, color:'var(--ink)' }}>★ VIP guests only</span>
+                <span style={{ display:'block', fontSize:12, fontWeight:600, color:'var(--ink2)', marginTop:1 }}>A special dish: captains see it only on a VIP guest's cover. Pick it for a guest under Control › VIP guests.</span>
+              </span>
+            </button>
+          )}
           <label style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, cursor:'pointer' }}>
             <input type="checkbox" checked={newItem.is_live_counter} onChange={e=>setNewItem(p=>({...p,is_live_counter:e.target.checked}))} />
             <span style={{ fontSize:14, fontWeight:600 }}>Live counter item</span>
@@ -452,6 +466,7 @@ export default function MenuManager({ eventData, onEventChange }) {
               </span>
               <span style={{ fontWeight:700, fontSize:15 }}>{item.name}</span>
               {item.is_live_counter && <span style={{ fontSize:11, color:'#D97706', background:'#FEF3C7', padding:'1px 6px', borderRadius:999, fontWeight:600 }}>Live</span>}
+              {isMs && item.vip_only && <span style={{ fontSize:11, color:'#7A4B00', background:'#FFF1CC', border:'1px solid #EBCB85', padding:'1px 7px', borderRadius:999, fontWeight:800 }}>★ VIP only</span>}
             </div>
             {item.description && <div style={{ fontSize:12, color:'var(--ink2)', marginTop:2 }}>{item.description}</div>}
             {isMs && (

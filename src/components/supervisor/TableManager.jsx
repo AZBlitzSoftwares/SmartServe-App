@@ -4,6 +4,8 @@ import { WaiterList, HelpItemsEditor } from './EventManager'
 import CaptainList from './CaptainList'
 import KitchenSetup from './KitchenSetup'
 import OfflineKitCard from './OfflineKitCard'
+import Fold from './Fold'
+import { jumpTo, setFold } from '../../lib/fold'
 
 /* Table management for the current event.
 
@@ -65,9 +67,11 @@ export default function TableManager({ eventData, onEventChange }) {
     self:    [['ss-ready','Ready check'], ['st-tables','Tables & tablets'], ['ss-waiters','Waiters'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
     captain: [['ss-ready','Ready check'], ['ss-captains','Captains'], ['ss-waiters','Waiters'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
     multi:   [['ks-ready','Ready check'], ['ks-chairs','Chairs'], ['ks-kitchens','Kitchens & printers'], ['ks-routing','Menu routing'], ['ks-captains','Captains'], ['ks-waiters','Waiters'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
-    maestro: [['ms-ready','Ready check'], ['ks-chairs','Chairs'], ['ks-kitchens','Kitchens & printers'], ['ks-routing','Menu routing'], ['ms-courses','Courses'], ['ms-rules','Kitchen rules'], ['ms-dishes','Dishes'], ['ms-barkers','Barkers'], ['ks-captains','Captains'], ['st-tables','Tables'], ['ss-offline','Offline kit']],
+    maestro: [['ms-ready','Ready check'], ['ks-chairs','1 Tables & chairs'], ['ks-kitchens','2 Kitchens & printers'], ['ms-barkers','3 Barkers'], ['ks-captains','4 Captains'],
+      ['ms-courses','5 Courses'], ['ks-routing','6 Menu routing'], ['ms-rules','7 Kitchen rules'], ['ms-dishes','8 Dishes'], ['ms-vip','9 VIP guests'], ['ms-screens','10 Big screens'], ['ss-offline','11 Offline kit']],
   }[mode]
-  const jump = id => document.getElementById(id)?.scrollIntoView({ behavior:'smooth', block:'start' })
+  // A collapsed section opens first (Maestro), then the page scrolls to it
+  const jump = id => jumpTo(id)
   const sectionHead = (id, title, sub) => (
     <div id={id} style={{ margin:'18px 0 8px', scrollMarginTop:70 }}>
       <h3 style={{ fontSize:16, fontWeight:900 }}>{title}</h3>
@@ -77,7 +81,7 @@ export default function TableManager({ eventData, onEventChange }) {
 
   return (
     <div key={eventData.id + ':' + mode}>
-      <style>{`#ss-setup [id]{scroll-margin-top:70px}`}</style>
+      <style>{`#ss-setup [id]{scroll-margin-top:110px}`}</style>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12, marginBottom:10, flexWrap:'wrap' }}>
         <div style={{ minWidth:0 }}>
           <h2 style={{ fontSize:20, fontWeight:800 }}>Event set-up</h2>
@@ -93,12 +97,20 @@ export default function TableManager({ eventData, onEventChange }) {
 
       {/* Jump bar - stays at the top while scrolling */}
       <div style={{ position:'sticky', top:0, zIndex:20, background:'var(--bg)', padding:'6px 0 8px', marginBottom:6,
-        display:'flex', gap:6, overflowX:'auto' }}>
+        display:'flex', gap:6, ...(mode === 'maestro' ? { flexWrap:'wrap' } : { overflowX:'auto' }) }}>
         {nav.map(([id, label]) => (
           <button key={id} onClick={() => jump(id)}
             style={{ flexShrink:0, padding:'6px 12px', borderRadius:999, fontSize:12.5, fontWeight:700, cursor:'pointer',
               border:'1.5px solid var(--line)', background:'#fff', color:'var(--ink)', whiteSpace:'nowrap' }}>{label}</button>
         ))}
+        {mode === 'maestro' && <>
+          <span style={{ flex:'1 0 8px' }} />
+          {[['Collapse all', false], ['Open all', true]].map(([label, open]) => (
+            <button key={label} onClick={() => setFold('*', open)} data-testid={open ? 'open-all' : 'collapse-all'}
+              style={{ flexShrink:0, padding:'6px 12px', borderRadius:999, fontSize:12.5, fontWeight:800, cursor:'pointer',
+                border:'1.5px solid var(--ink)', background: open ? 'var(--ink)' : '#fff', color: open ? '#fff' : 'var(--ink)', whiteSpace:'nowrap' }}>{label}</button>
+          ))}
+        </>}
       </div>
 
       <div id="ss-setup" key={nonce} style={{ paddingBottom:'45vh' /* lets the last sections scroll to the top from the jump bar */ }}>
@@ -118,7 +130,8 @@ export default function TableManager({ eventData, onEventChange }) {
           <WaiterList eventId={eventData.id} />
         </>}
 
-        {mode !== 'self' && <TablesSection eventData={eventData} onEventChange={onEventChange} showTablets={false} />}
+        {/* Maestro: the number of tables is in Tables & chairs (step 1) */}
+        {mode !== 'self' && mode !== 'maestro' && <TablesSection eventData={eventData} onEventChange={onEventChange} showTablets={false} />}
 
         {mode !== 'maestro' && <>
           {sectionHead('ss-help', 'Help requests', mode === 'self'
@@ -129,7 +142,7 @@ export default function TableManager({ eventData, onEventChange }) {
           <EventSettings eventData={eventData} onEventChange={onEventChange} />
         </>}
 
-        <OfflineKitCard />
+        {mode === 'maestro' ? <Fold id="ss-offline" step={11} title="Offline kit"><OfflineKitCard /></Fold> : <OfflineKitCard />}
       </div>
     </div>
   )

@@ -232,7 +232,7 @@ test('maestro KOT: kitchen, KOT number, barker, cover, course, firing, plates', 
   assert.match(all, /Picked up .*Pick-up #2/);
   assert.match(all, /Table captain\s+Neha/);
   assert.match(all, /1 x Crystal Veg Dim Sum/);
-  assert.match(all, />> JAIN <</);
+  assert.match(all, /NOTE: JAIN/);
   assert.match(all, /Plates: 2\s+Cover: T7-C3/);
   assert.doesNotMatch(all, /REMAKE|REPRINT|CHAIR/);
 });
@@ -245,18 +245,19 @@ test('maestro KOT: serial number printed as big as fits', () => {
   assert.ok(long && long.w === 3, 'a longer number at 3x');
 });
 
-test('maestro KOT: dish note and allergy bold, tall and white on black', () => {
+test('maestro KOT: dish note and allergy big, bold and white on black', () => {
   const d = decodeEscPos(buildKot({ ...maestroJob, items: [{ name: 'Funghi Tea Soup', qty: 1, note: 'Less spicy, sauce on side', allergy: 'Peanuts' }] }));
-  const note = d.lines.find((l) => l.text.includes('>> LESS SPICY, SAUCE ON SIDE <<'));
-  const alg = d.lines.find((l) => l.text.includes('** ALLERGY: PEANUTS **'));
-  assert.ok(note && note.bold && note.h === 2 && note.reverse, 'note line');
-  assert.ok(alg && alg.bold && alg.h === 2 && alg.reverse, 'allergy line');
+  const note = d.lines.find((l) => l.text.includes('NOTE: LESS SPICY,'));
+  const alg = d.lines.find((l) => l.text.includes('ALLERGY: PEANUTS'));
+  assert.ok(note && note.bold && note.w === 2 && note.h === 2 && note.reverse, 'note line at double size');
+  assert.ok(alg && alg.bold && alg.w === 2 && alg.h === 2 && alg.reverse, 'allergy line at double size');
+  assert.ok(note.text.length === 24 && alg.text.length === 24, 'the black band runs the full width of the slip');
   const dish = d.lines.find((l) => l.text.includes('1 x Funghi Tea Soup'));
   assert.ok(dish && !dish.reverse, 'the dish itself is not reversed');
   // a long note wraps and every line stays inside the slip, still on black
   const long = decodeEscPos(buildKot({ ...maestroJob, items: [{ name: 'Soup', qty: 1, note: 'No onion no garlic less oil less salt sauce on the side extra hot please' }] }));
   const nl = long.lines.filter((l) => l.reverse && !/KOT|VIP/.test(l.text));
-  assert.ok(nl.length >= 2 && nl.every((l) => l.text.length <= 48), 'note wraps within 48 columns');
+  assert.ok(nl.length >= 3 && nl.every((l) => l.text.length <= 24 && l.w === 2), 'note wraps within 24 double-width columns');
 });
 
 test('maestro KOT: VIP guest, whole-order allergy and guest note', () => {

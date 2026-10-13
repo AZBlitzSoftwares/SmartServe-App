@@ -5,14 +5,16 @@
      Kitchen rules       course rule, one or two barkers, late threshold
      Dish split          course of every dish, Barker A or B, auto-balance
      Barkers             who signs in on each kitchen screen, with a PIN
-     VIP guests          VIP guests of the event: preferences, allergies, preferred dishes,
-                         a fixed seat if known; special VIP-only dishes
+     VIP guests          VIP guests of the event: preferences, allergies (for all dishes or
+                         one dish), preferred dishes, a fixed seat if known
      Big screens         the view-only Control Desk screen and Kitchens screen (name + PIN)
-   and the Pre-service check shown at the top of the page. */
+   and the Pre-service check shown at the top of the page. Each section is a MaestroPart, so
+   Event set-up can place it in set-up order between the kitchen sections; they share one copy
+   of the data (useMaestroSetup). */
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import './maestro.css'
-import { coursesOf, routeDish, errText, useNow, eventDishes, PREF_CHIPS, splitNote, joinNote } from './msData'
+import { coursesOf, routeDish, errText, useNow, eventDishes, PREF_CHIPS, ALLERGY_CHIPS, splitNote, joinNote } from './msData'
 
 const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(:\d{1,5})?$/
 
@@ -20,6 +22,7 @@ function useSetupData(eventId, nonce) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   useEffect(() => {
+    if (!eventId) return
     let alive = true
     ;(async () => {
       const [k, c, m, b, cp] = await Promise.all([
@@ -82,27 +85,39 @@ export function MaestroPreService({ eventData, nonce }) {
   )
 }
 
-export default function MaestroSetup({ eventData, onEventChange, onChanged, refreshKey = '' }) {
+// The Maestro set-up data (kitchens, cuisines, dishes, barkers, captains), read once for all
+// the Maestro sections of the page. refreshKey changes when kitchens or menu routing change in
+// the kitchen sections, so the kitchen rules and dish split always list the same kitchens.
+export function useMaestroSetup(eventData, refreshKey = '', enabled = true) {
+  return useSetupData(enabled ? eventData?.id : null, refreshKey)
+}
+
+// Title of a section with its step number, like the kitchen sections of the page
+function Title({ step, children }) {
+  return <span className="mst">{step != null && <i className="mstep">{step}</i>}{children}</span>
+}
+
+// One Maestro section: courses | rules | dishes | barkers | screens | vip
+export function MaestroPart({ part, eventData, ms, step, onEventChange, onChanged }) {
   const ev = eventData
-  // refreshKey changes when kitchens or menu routing change in the sections
-  // above, so the kitchen rules and dish split always list the same kitchens.
-  const { d, err, setD } = useSetupData(ev.id, refreshKey)
   const changed = () => onChanged && onChanged()
-  if (err) return (
+  const evChange = ev2 => { onEventChange && onEventChange(ev2); changed() }
+  if (ms.err) return part !== 'barkers' ? null : (
     <div className="ms"><div className="card" style={{ borderColor: 'var(--red)' }}>
       <h3>Maestro set-up could not load</h3>
-      <p className="sub">{err}. If this mentions a missing table or column, the Smart Serve Maestro database update has not been applied yet.</p>
+      <p className="sub">{ms.err}. If this mentions a missing table or column, the Smart Serve Maestro database update has not been applied yet.</p>
     </div></div>
   )
-  if (!d) return <div className="ms"><div className="card">Loading Maestro set-up…</div></div>
+  if (!ms.d) return <div className="ms"><div className="card muted">Loading…</div></div>
+  const p = { ev, d: ms.d, setD: ms.setD, onChanged: changed, step }
   return (
     <div className="ms">
-      <ServiceSettings ev={ev} dishes={d.dishes} onEventChange={ev2 => { onEventChange && onEventChange(ev2); changed() }} />
-      <KitchenRules ev={ev} d={d} setD={setD} onChanged={changed} />
-      <DishSplit ev={ev} d={d} setD={setD} onChanged={changed} />
-      <Barkers ev={ev} d={d} setD={setD} onChanged={changed} />
-      <BigScreens ev={ev} />
-      <VipGuests ev={ev} d={d} setD={setD} onChanged={changed} onEventChange={ev2 => { onEventChange && onEventChange(ev2); changed() }} />
+      {part === 'courses' && <ServiceSettings ev={ev} dishes={ms.d.dishes} onEventChange={evChange} step={step} />}
+      {part === 'rules' && <KitchenRules {...p} />}
+      {part === 'dishes' && <DishSplit {...p} />}
+      {part === 'barkers' && <Barkers {...p} />}
+      {part === 'screens' && <BigScreens ev={ev} step={step} />}
+      {part === 'vip' && <VipGuests {...p} onEventChange={evChange} />}
     </div>
   )
 }
@@ -113,9 +128,9 @@ function Saved({ at }) {
 }
 
 // ------------------------------------------------------------- settings
-function ServiceSettings({ ev, dishes = [], onEventChange }) {
+function ServiceSettings({ ev, dishes = [], onEventChange, step }) {
   const [courses, setCourses] = useState(coursesOf(ev))
-  // a course added elsewhere (VIP special dish) shows here at once, so Save settings keeps it
+  // a course added elsewhere (a menu import) shows here at once, so Save settings keeps it
   const evCourses = coursesOf(ev).join('|')
   useEffect(() => { setCourses(evCourses.split('|')) }, [evCourses])
   const [late, setLate] = useState(ev.late_minutes ?? 5)
@@ -142,7 +157,7 @@ function ServiceSettings({ ev, dishes = [], onEventChange }) {
   }
   return (
     <div className="card" id="ms-courses">
-      <h3>Service settings <Saved at={saved} /></h3>
+      <h3><Title step={step}>Courses &amp; service settings</Title> <Saved at={saved} /></h3>
       <p className="sub">The courses of this event in the order they are served; the number after each is how many dishes the menu has in it. ‹ › move a course earlier or later, ✕ removes it, <b>Add</b> adds one, then <b>Save settings</b>. Captains see the courses in this order and fire them one after another. The dishes go into their course in the <b>Menu</b> tab: one by one, or a whole Excel menu with a Course column.</p>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
         {courses.map((c, i) => (
@@ -176,7 +191,7 @@ function ServiceSettings({ ev, dishes = [], onEventChange }) {
 }
 
 // ------------------------------------------------------------- kitchen rules
-function KitchenRules({ ev, d, setD, onChanged }) {
+function KitchenRules({ ev, d, setD, onChanged, step }) {
   const courses = coursesOf(ev)
   const [saved, setSaved] = useState(0)
   const [msg, setMsg] = useState('')
@@ -189,7 +204,7 @@ function KitchenRules({ ev, d, setD, onChanged }) {
   const active = d.kitchens.filter(k => k.is_active)
   return (
     <div className="card" id="ms-rules">
-      <h3>Kitchen rules <Saved at={saved} /></h3>
+      <h3><Title step={step}>Kitchen rules</Title> <Saved at={saved} /></h3>
       <p className="sub">Which kitchen prepares a dish: a kitchen chosen for the dish itself first, then a <b>course rule</b> below (for example every Dessert goes to the Desserts kitchen, whatever its cuisine), then the kitchen of its <b>cuisine</b> (menu category, set above), then the default kitchen.</p>
       {msg && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</p>}
       <table className="tbl">
@@ -219,7 +234,7 @@ function KitchenRules({ ev, d, setD, onChanged }) {
 }
 
 // ------------------------------------------------------------- dish split
-function DishSplit({ ev, d, setD, onChanged }) {
+function DishSplit({ ev, d, setD, onChanged, step }) {
   const courses = coursesOf(ev)
   const [kid, setKid] = useState(null)
   const [msg, setMsg] = useState('')
@@ -256,7 +271,7 @@ function DishSplit({ ev, d, setD, onChanged }) {
 
   return (
     <div className="card" id="ms-dishes">
-      <h3>Dishes: course and barker <Saved at={saved} /></h3>
+      <h3><Title step={step}>Dishes: course and barker</Title> <Saved at={saved} /></h3>
       <p className="sub">Every dish needs a course. Inside each kitchen the dishes are split between Barker A and Barker B, so a rush is shared. Choose a kitchen for a single dish only when it must go somewhere other than its rule.</p>
       {msg && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</p>}
       <div className="tabs">
@@ -295,7 +310,7 @@ function DishSplit({ ev, d, setD, onChanged }) {
 }
 
 // ------------------------------------------------------------- barkers
-function Barkers({ ev, d, setD, onChanged }) {
+function Barkers({ ev, d, setD, onChanged, step }) {
   const active = d.kitchens.filter(k => k.is_active)
   const [msg, setMsg] = useState('')
   const [saved, setSaved] = useState(0)
@@ -338,8 +353,8 @@ function Barkers({ ev, d, setD, onChanged }) {
   }
   return (
     <div className="card" id="ms-barkers">
-      <h3>Barkers <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Saved at={saved} /><button className="btn btn-ghost" onClick={givePins}>Give missing PINs</button><button className="btn btn-ghost" onClick={copy}>Copy sign-in list</button></span></h3>
-      <p className="sub">Each barker signs in on their kitchen screen with their name and PIN. The name is printed on their KOTs.</p>
+      <h3><Title step={step}>Barkers</Title> <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Saved at={saved} /><button className="btn btn-ghost" onClick={givePins}>Give missing PINs</button><button className="btn btn-ghost" onClick={copy}>Copy sign-in list</button></span></h3>
+      <p className="sub">Each barker signs in on their kitchen screen with their name and PIN. The name is printed on their KOTs. A kitchen has Barker A and Barker B; set <b>A only</b> for a small kitchen under Kitchen rules. Which dishes each barker prepares is set under Dishes.</p>
       {msg && <p style={{ color: msg.startsWith('Copied') ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{msg}</p>}
       <table className="tbl">
         <thead><tr><th>Kitchen</th><th>Side</th><th>Name</th><th>PIN</th><th /></tr></thead>
@@ -375,7 +390,7 @@ const SCREENS = [
   { role: 'screen_desk', title: 'Control Desk screen', name: 'Desk Screen', what: 'every table, kitchen, printer and alert' },
   { role: 'screen_kitchens', title: 'Kitchens screen', name: 'Kitchen Screen', what: "every kitchen's KOTs side by side" },
 ]
-function BigScreens({ ev }) {
+function BigScreens({ ev, step }) {
   const [rows, setRows] = useState(null)
   const [msg, setMsg] = useState('')
   const [saved, setSaved] = useState(0)
@@ -412,7 +427,7 @@ function BigScreens({ ev }) {
   }
   return (
     <div className="card" id="ms-screens">
-      <h3>Big screens (view only) <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Saved at={saved} /><button className="btn btn-ghost" onClick={copy}>Copy sign-in list</button></span></h3>
+      <h3><Title step={step}>Big screens (view only)</Title> <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Saved at={saved} /><button className="btn btn-ghost" onClick={copy}>Copy sign-in list</button></span></h3>
       <p className="sub">For TVs or monitors that anyone may look at: waiters, stewards, guests. Sign in at <b>{location.origin}/supervisor</b> with the name and PIN below. The screen shows everything and changes nothing; it stays signed in after a reload, and signing out needs its PIN.</p>
       {msg && <p style={{ color: msg.startsWith('Copied') ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{msg}</p>}
       <table className="tbl">
@@ -443,18 +458,15 @@ function BigScreens({ ev }) {
 /* VIP guests of the event. The captain picks one with the VIP Guests button (or a guest with a
    fixed table and cover is loaded by itself when that cover is opened): the allergies, dislikes
    and notes print on every KOT of that cover, and the preferred dishes are added to its order.
-   Special dishes made only for VIP guests are menu dishes marked VIP only: captains see them on
-   a VIP guest's cover only. */
-const NEW = '__new'
+   Special dishes made only for VIP guests are menu dishes marked VIP guests only (Menu › Add
+   Dish): captains see them on a VIP guest's cover only. Allergies are for every dish of the
+   guest, or for one preferred dish (that dish's KOT prints it). */
 
-function VipGuests({ ev, d, setD, onChanged, onEventChange }) {
+function VipGuests({ ev, d, onChanged, step }) {
   const [vips, setVips] = useState(null)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
   const [saved, setSaved] = useState(0)
-  const [special, setSpecial] = useState({ name: '', cat: '', course: '', veg: true, newCat: '', newKitchen: '', newCourse: '' })
-  const kitchensOn = d.kitchens.filter(k => k.is_active !== false)
-  const defKitchen = (kitchensOn.find(k => k.is_default) || kitchensOn[0])?.id || ''
   const courses = coursesOf(ev)
   const catName = id => d.cats.find(c => c.id === id)?.name || ''
   const dishById = Object.fromEntries(d.dishes.map(x => [x.id, x]))
@@ -485,45 +497,6 @@ function VipGuests({ ev, d, setD, onChanged, onEventChange }) {
     setVips(list => list.filter(x => x.id !== v.id))
   }
   const num = s => { const n = parseInt(String(s || '').replace(/\D/g, ''), 10); return n > 0 ? n : null }
-  // A special dish may need a cuisine or a course the menu does not have yet: both can be added here
-  async function addSpecial() {
-    setMsg('')
-    let cat = special.cat, course = special.course
-    if (!special.name.trim() || !cat || !course) { setMsg('Give the special dish a name, a cuisine and a course.'); return }
-    if (cat === NEW && !special.newCat.trim()) { setMsg('Type the name of the new cuisine.'); return }
-    if (course === NEW && !special.newCourse.trim()) { setMsg('Type the name of the new course.'); return }
-    if (cat === NEW) {
-      const name = special.newCat.trim()
-      const same = d.cats.find(c => c.name.trim().toLowerCase() === name.toLowerCase())
-      if (same) cat = same.id
-      else {
-        const { data: c, error } = await supabase.from('menu_categories').insert({ event_id: ev.id, name, kitchen_id: special.newKitchen || defKitchen || null,
-          sort_order: Math.max(0, ...d.cats.map(x => Number(x.sort_order) || 0)) + 1, is_visible: true }).select('*').maybeSingle()
-        if (error) { setMsg(errText(error)); return }
-        setD(s2 => ({ ...s2, cats: [...s2.cats, c] }))
-        cat = c.id
-      }
-    }
-    if (course === NEW) {
-      const name = special.newCourse.trim()
-      const same = courses.find(c => c.toLowerCase() === name.toLowerCase())
-      if (same) course = same
-      else {
-        // a new course goes before Dessert (when there is one); Service settings can move it
-        const at = courses.findIndex(c => /dessert/i.test(c))
-        const list = at >= 0 ? [...courses.slice(0, at), name, ...courses.slice(at)] : [...courses, name]
-        const { data: e2, error } = await supabase.from('events').update({ courses: list }).eq('id', ev.id).select('*').maybeSingle()
-        if (error) { setMsg(errText(error)); return }
-        if (e2 && onEventChange) onEventChange(e2)
-        course = name
-      }
-    }
-    const { data, error } = await supabase.from('menu_items').insert({ category_id: cat, name: special.name.trim(), course, is_veg: special.veg, is_available: true, vip_only: true, sort_order: 999 }).select('*').maybeSingle()
-    if (error) { setMsg(errText(error)); return }
-    setD(s2 => ({ ...s2, dishes: [...s2.dishes, data] }))
-    setSpecial({ name: '', cat, course, veg: true, newCat: '', newKitchen: '', newCourse: '' })
-    setSaved(Date.now()); onChanged()
-  }
   // Food preferences: one tap adds or takes one off the guest's notes for the kitchen
   const prefOn = (v, x) => splitNote(v.notes).some(y => y.toLowerCase() === x.toLowerCase())
   const flipPref = (v, x) => {
@@ -531,10 +504,18 @@ function VipGuests({ ev, d, setD, onChanged, onEventChange }) {
     const next = prefOn(v, x) ? list.filter(y => y.toLowerCase() !== x.toLowerCase()) : [...list, x]
     patch(v, { notes: joinNote(next) || null })
   }
+  // Allergies: the same one-tap list, for every dish of the guest
+  const algOn = (v, x) => splitNote(v.allergies).some(y => y.toLowerCase() === x.toLowerCase())
+  const flipAlg = (v, x) => {
+    const list = splitNote(v.allergies)
+    const next = algOn(v, x) ? list.filter(y => y.toLowerCase() !== x.toLowerCase()) : [...list, x]
+    patch(v, { allergies: joinNote(next) || null })
+  }
+  const setDish = (v, i, fields) => patch(v, { dishes: (v.dishes || []).map((y, j) => (j === i ? { ...y, ...fields } : y)) })
 
   return (
     <div className="card" id="ms-vip">
-      <h3>VIP guests <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Saved at={saved} /><button className="btn btn-amber" onClick={add} disabled={!!err}>+ Add VIP guest</button></span></h3>
+      <h3><Title step={step}>VIP guests</Title> <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Saved at={saved} /><button className="btn btn-amber" onClick={add} disabled={!!err}>+ Add VIP guest</button></span></h3>
       <p className="sub">Guests whose preferences are known in advance. On the captain's tablet, <b>VIP Guests</b> lists them: the captain picks the guest and the cover, and their allergies, dislikes and notes print on every KOT of that cover, and their preferred dishes are added to the order to fire one by one. A guest given a table and cover here is loaded by itself when the captain opens that cover.</p>
       {err && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{err}. Run db/2026-10-13_maestro_v2.sql on this database first.</p>}
       {msg && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</p>}
@@ -556,9 +537,13 @@ function VipGuests({ ev, d, setD, onChanged, onEventChange }) {
           <div className="vr2">
             {[['allergies', 'Allergies', 'e.g. Peanuts, Shellfish'], ['likes', 'Likes', 'e.g. Mild Italian'], ['dislikes', 'Dislikes', 'e.g. Mushroom'], ['notes', 'Notes for the kitchen', 'e.g. Less spicy, Jain']].map(([f, label, ph]) => (
               <label key={f} className={'vfld' + (f === 'allergies' ? ' va' : '')}><span>{label}</span>
-                <input className="fld" defaultValue={v[f] || ''} key={f + v.id + (f === 'notes' ? '|' + (v.notes || '') : '')} placeholder={ph}
+                <input className="fld" defaultValue={v[f] || ''} key={f + v.id + (f === 'notes' || f === 'allergies' ? '|' + (v[f] || '') : '')} placeholder={ph}
                   onBlur={e => { const x = e.target.value.trim() || null; if (x !== (v[f] || null)) patch(v, { [f]: x }) }} /></label>
             ))}
+          </div>
+          <div className="vpref va">
+            <span>Allergies (all dishes)</span>
+            {ALLERGY_CHIPS.map(x => <button key={x} className={algOn(v, x) ? 'a' : ''} onClick={() => flipAlg(v, x)}>{x}</button>)}
           </div>
           <div className="vpref">
             <span>Food preferences</span>
@@ -573,7 +558,9 @@ function VipGuests({ ev, d, setD, onChanged, onEventChange }) {
                   <span className="vdn">{dd ? dd.name : 'Dish no longer on the menu'}</span>
                   <span className="muted">{dd ? `${catName(dd.category_id)} · ${dd.course || 'no course'}${dd.vip_only ? ' · VIP only' : ''}` : ''}</span>
                   <input className="fld" defaultValue={x.note || ''} key={'dn' + v.id + i} placeholder="Note for this dish" style={{ flex: '1 1 140px' }}
-                    onBlur={e => { const note = e.target.value.trim(); if (note !== (x.note || '')) patch(v, { dishes: (v.dishes || []).map((y, j) => (j === i ? { ...y, note: note || null } : y)) }) }} />
+                    onBlur={e => { const note = e.target.value.trim(); if (note !== (x.note || '')) setDish(v, i, { note: note || null }) }} />
+                  <input className="fld vda" defaultValue={x.allergy || ''} key={'da' + v.id + i + (x.allergy || '')} placeholder="Allergy for this dish" list="ms-allergy-list" style={{ flex: '1 1 130px' }}
+                    onBlur={e => { const a = e.target.value.trim(); if (a !== (x.allergy || '')) setDish(v, i, { allergy: a || null }) }} />
                   <button className="x" onClick={() => patch(v, { dishes: (v.dishes || []).filter((_, j) => j !== i) })} title="Remove">✕</button>
                 </div>
               )
@@ -585,30 +572,8 @@ function VipGuests({ ev, d, setD, onChanged, onEventChange }) {
           </div>
         </div>
       ))}
-      <div className="vspecial">
-        <b>Special dish for VIP guests only</b>
-        <span className="muted">Not on the menu for other guests; it goes to its cuisine's kitchen like any dish.</span>
-        <div className="vsr">
-          <input className="fld" value={special.name} onChange={e => setSpecial(s2 => ({ ...s2, name: e.target.value }))} placeholder="Dish name" style={{ flex: '1 1 180px' }} />
-          <select className="fld" value={special.cat} onChange={e => setSpecial(s2 => ({ ...s2, cat: e.target.value }))}>
-            <option value="">Cuisine…</option>{d.cats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            <option value={NEW}>+ New cuisine…</option>
-          </select>
-          {special.cat === NEW && <>
-            <input className="fld" value={special.newCat} onChange={e => setSpecial(s2 => ({ ...s2, newCat: e.target.value }))} placeholder="New cuisine, e.g. Continental" style={{ flex: '1 1 150px' }} />
-            <select className="fld" value={special.newKitchen || defKitchen} onChange={e => setSpecial(s2 => ({ ...s2, newKitchen: e.target.value }))} title="The kitchen that cooks this cuisine">
-              {kitchensOn.map(k => <option key={k.id} value={k.id}>Cooked in {k.name}</option>)}
-            </select>
-          </>}
-          <select className="fld" value={special.course} onChange={e => setSpecial(s2 => ({ ...s2, course: e.target.value }))}>
-            <option value="">Course…</option>{courses.map(c => <option key={c} value={c}>{c}</option>)}
-            <option value={NEW}>+ New course…</option>
-          </select>
-          {special.course === NEW && <input className="fld" value={special.newCourse} onChange={e => setSpecial(s2 => ({ ...s2, newCourse: e.target.value }))} placeholder="New course, e.g. Chef's Special" style={{ flex: '1 1 150px' }} />}
-          <label className="vsm"><input type="checkbox" checked={special.veg} onChange={e => setSpecial(s2 => ({ ...s2, veg: e.target.checked }))} /> Veg</label>
-          <button className="btn btn-navy" onClick={addSpecial}>Add special dish</button>
-        </div>
-      </div>
+      <datalist id="ms-allergy-list">{ALLERGY_CHIPS.map(x => <option key={x} value={x} />)}</datalist>
+      <p className="sub" style={{ margin: '10px 0 0' }}><b>Special dishes for VIP guests only:</b> add them under <b>Menu › + Add Dish</b> with <b>VIP guests only</b> switched on (or Edit an existing dish). They are offered on a VIP guest's cover only, and can be picked above as a preferred dish.</p>
     </div>
   )
 }

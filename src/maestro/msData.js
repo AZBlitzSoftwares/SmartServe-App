@@ -28,6 +28,8 @@ export const QUICK_NOTES = ['Jain', 'No onion-garlic', 'Less spicy', 'Extra spic
 // Food preferences for a VIP guest (Event set-up), a longer list: set once, before the event
 export const PREF_CHIPS = ['Jain', 'No onion', 'No garlic', 'No tomato', 'No mushroom', 'No coriander', 'Less spicy', 'Extra spicy',
   'Less oil', 'Less salt', 'No ajinomoto', 'Gluten free', 'Dairy free', 'Vegan']
+// Allergies a VIP guest's card offers with one tap (more can be typed)
+export const ALLERGY_CHIPS = ['Peanuts', 'Tree nuts', 'Dairy', 'Gluten', 'Egg', 'Soy', 'Shellfish', 'Fish', 'Sesame', 'Mustard']
 // "Less spicy, No cheese" <-> ['Less spicy', 'No cheese']
 export const splitNote = s => String(s || '').split(/[,|]/).map(x => x.trim()).filter(Boolean)
 export const joinNote = parts => [...new Set(parts.map(x => String(x).trim()).filter(Boolean))].join(', ')
