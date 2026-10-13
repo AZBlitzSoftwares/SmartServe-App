@@ -57,8 +57,10 @@ export function MaestroPreService({ eventData, nonce }) {
   const noCourse = dishes.filter(x => !x.course || !courses.includes(x.course))
   const noKitchen = dishes.filter(x => !routeDish(x, catsById, active).kitchen)
   // a kitchen on cloud printing (Printer ID) needs no IP: the printer collects its KOTs itself
-  const noIp = active.filter(k => !IPV4.test(String(k.printer_ip || '').trim()) && !String(k.cloud_print_id || '').trim())
-  const tested = active.filter(k => ['online', 'paper_low'].includes(k.printer_status) && k.printer_checked_at && now - new Date(k.printer_checked_at) < 15 * 60000)
+  const virtual = k => /^VIRTUAL-[1-9]$/i.test(String(k.printer_ip || '').trim())
+  const noIp = active.filter(k => !IPV4.test(String(k.printer_ip || '').trim()) && !virtual(k) && !String(k.cloud_print_id || '').trim())
+  // a virtual printer is always there
+  const tested = active.filter(k => virtual(k) || (['online', 'paper_low'].includes(k.printer_status) && k.printer_checked_at && now - new Date(k.printer_checked_at) < 15 * 60000))
   const sides = active.flatMap(k => (Number(k.barkers) || 2) >= 2 ? [[k, 'A'], [k, 'B']] : [[k, 'A']])
   const noBarker = sides.filter(([k, s]) => !d.barkers.some(b => b.is_active && b.kitchen_id === k.id && b.side === s && /^\d{4,6}$/.test(String(b.pin || ''))))
   const tables = Math.max(1, Number(ev.number_of_tables) || 0)

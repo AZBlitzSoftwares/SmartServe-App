@@ -77,6 +77,8 @@ export function parseEndpoint(value, defaultPort = 9100) {
   const text = String(value);
   const s = text.trim();
   if (!s) return null;
+  // a virtual printer (VIRTUAL-1 …) lives in the cloud: the server prints its KOTs itself
+  if (/^virtual-\d+$/i.test(s)) return null;
   const m = s.match(/^([^:\s]+):(\d{1,5})$/);
   const host = m ? m[1] : s;
   const port = m ? Number(m[2]) : Number(defaultPort) || 9100;

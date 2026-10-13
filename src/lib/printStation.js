@@ -8,13 +8,19 @@
    The KOT is the Print Hub's own layout (printhub/escpos.mjs), sent as raw ESC/POS.
 
    Needs: this laptop on the printers' Wi-Fi, Chrome (allow "devices on your local network"),
-   and this page open. Only one printer of the event's KOTs should be running: a Print Hub
-   elsewhere would take KOTs too (the desk warns about two). */
+   and this page open.
+
+   One printing laptop per event (db/2026-10-14_maestro_v6.sql, print_stations): switching on
+   asks the server for the event (ps_take). While another laptop or a Print Hub is printing and
+   answering, this one cannot switch on, except with an admin PIN (it then takes printing over and
+   the other one stops by itself). A printing laptop silent for 90 seconds can be replaced without
+   the PIN. A laptop that loses printing to another one switches itself off and says so. */
 import { supabase } from './supabase'
 import { eposBase, eposCommandXml, eposLinesXml, eposSend } from './eposPrint'
 
 const KEY = 'ss_print_station'
 const NAME_KEY = 'ss_print_station_name'
+const LABEL_KEY = 'ss_print_station_label'
 const CHANGED = 'ss-print-station'
 
 // ---- on / off, per laptop and event --------------------------------------------------------
@@ -54,9 +60,41 @@ export function stationName() {
   return n
 }
 
+/** The name people see for this laptop ("Desk laptop"), chosen when printing is switched on. */
+export function stationLabel() {
+  let n = null
+  try { n = localStorage.getItem(LABEL_KEY) } catch { /* no storage */ }
+  if (n) return n
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  const os = /Windows/i.test(ua) ? 'Windows' : /Android/i.test(ua) ? 'Android' : /iPad|iPhone/i.test(ua) ? 'iPad' : /Mac/i.test(ua) ? 'Mac' : 'This'
+  return `${os} laptop ${stationName().slice(-4)}`
+}
+export function setStationLabel(v) {
+  try { localStorage.setItem(LABEL_KEY, String(v || '').trim().slice(0, 40)) } catch { /* no storage */ }
+}
+
+/** Who prints for the event: { station, label, taken_at, seen_at, active, mine } (null: unknown). */
+export async function stationStatus(eventId) {
+  const { data, error } = await supabase.rpc('ps_status', { p_event_id: eventId })
+  if (error) return { error: /ps_status|PGRST202|42883|schema cache/i.test(`${error.code} ${error.message}`) ? 'no-sql' : error.message }
+  const d = data || {}
+  return d.station ? { ...d, mine: d.station === stationName() } : {}
+}
+
+/** Ask to be the event's printing laptop; an admin PIN takes it over from a working one. */
+export async function takeStation(eventId, pin = null) {
+  const { data, error } = await supabase.rpc('ps_take', { p_event_id: eventId, p_station: stationName(), p_label: stationLabel(), p_pin: pin })
+  if (error) {
+    // the database update is not there yet: printing works as before, without the lock
+    if (/ps_take|PGRST202|42883|schema cache/i.test(`${error.code} ${error.message}`)) return { ok: true, noLock: true }
+    return { ok: false, error: error.message }
+  }
+  return data || { ok: false }
+}
+
 // ---- live numbers for the screen ------------------------------------------------------------
 const listeners = new Set()
-export const stats = { printed: 0, failed: 0, last: null, error: null, running: false }
+export const stats = { printed: 0, failed: 0, last: null, error: null, running: false, notice: null }
 function changed() { for (const f of listeners) f({ ...stats }) }
 export function onStats(fn) { listeners.add(fn); fn({ ...stats }); return () => listeners.delete(fn) }
 
@@ -138,8 +176,26 @@ export function createStation({ eventId, onLog = () => {} }) {
     }
   }
 
+  // Still the event's printing laptop? Another one may have taken over with the admin PIN.
+  let lastCheck = 0
+  async function stillMine() {
+    if (Date.now() - lastCheck < 10000) return true
+    lastCheck = Date.now()
+    const st = await stationStatus(eventId)
+    if (st.error || !st.station || st.mine || !st.active) return true
+    lose(`Printing moved to “${st.label || st.station}”. This laptop stopped printing.`)
+    return false
+  }
+  function lose(text) {
+    stats.notice = text
+    changed()
+    setStation(eventId, false)   // the runner stops this station
+  }
+
+  let ready = false   // the event's printing laptop is settled (takeStation below)
   async function round() {
-    if (stopped) return
+    if (stopped || !ready) return
+    if (!(await stillMine().catch(() => true)) || stopped) return
     heartbeat().catch(() => {})
     if (busy) { again = true; return }
     busy = true
@@ -193,13 +249,21 @@ export function createStation({ eventId, onLog = () => {} }) {
 
   stats.running = true
   stats.error = null
+  stats.notice = null
   changed()
-  round()
+  // switched on (or still on after a reload): hold the event, unless another laptop prints
+  takeStation(eventId).then(r => {
+    if (stopped) return
+    if (r.ok) { ready = true; round(); return }
+    if (r.error) { stats.error = 'Could not reach the server: ' + r.error; changed(); ready = true; round(); return }
+    lose(`Printing is on at “${r.label || r.station}”. This laptop does not print.`)
+  }, () => { if (!stopped) { ready = true; round() } })
 
   return function stop() {
     stopped = true
     stats.running = false
     changed()
+    supabase.rpc('ps_release', { p_event_id: eventId, p_station: hub }).then(() => {}, () => {})
     if (worker) worker.terminate()
     if (timer) clearInterval(timer)
     if (channel) supabase.removeChannel(channel)

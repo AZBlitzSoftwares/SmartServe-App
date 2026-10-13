@@ -27,6 +27,10 @@ import { PrintStationSwitch } from './PrintStation'
 
 const QUICK_CUISINES = ['Indian', 'Arabic', 'Chinese', 'Italian', 'Mexican', 'Turkish', 'Continental', 'Desserts', 'Bar']
 const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
+// The always-on virtual printers in the cloud (db/2026-10-14_maestro_v6.sql)
+const VIRTUAL = /^VIRTUAL-[1-9]$/i
+const VIRTUAL_COUNT = 5
+const isPrinter = ip => IPV4.test(String(ip || '').trim()) || VIRTUAL.test(String(ip || '').trim())
 const STATUS_POLL_MS = 10000   // printer health is written by the Print Hub; re-read it this often
 const TEST_POLL_MS   = 1500
 const TEST_STUCK_MS  = 15000   // a running Print Hub claims a job within a few seconds
@@ -311,7 +315,7 @@ export default function KitchenSetup({ eventData, onEventChange }) {
         : kitchens.length ? 'Every kitchen is switched off — orders cannot be placed'
         : 'No kitchens yet — add one in step 2' })
 
-    const noIp = sortKitchens(active).filter(k => !IPV4.test(String(k.printer_ip || '').trim()))
+    const noIp = sortKitchens(active).filter(k => !isPrinter(k.printer_ip))
     out.push({ key:'printers', target:'ks-kitchens', title:'Printers', ok: active.length > 0 && noIp.length === 0,
       detail: !active.length ? 'Add a kitchen first'
         : noIp.length ? 'No printer IP: ' + listNames(noIp)
@@ -753,7 +757,7 @@ function validateKitchen(f, kitchens) {
     if (clash) e.prefix = clash.name + ' already uses ' + p
   }
   const ip = f.printer_ip.trim()
-  if (ip && !IPV4.test(ip)) e.printer_ip = 'Not an IP address — e.g. 192.168.1.104'
+  if (ip && !isPrinter(ip)) e.printer_ip = 'Not an IP address — e.g. 192.168.1.104, or a virtual printer'
   const port = Number(f.printer_port)
   if (!/^\d+$/.test(String(f.printer_port).trim()) || port < 1 || port > 65535) e.printer_port = '1–65535, usually 9100'
   const b = f.backup_printer_ip.trim()
@@ -990,7 +994,12 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
         sub={maestro
           ? "One kitchen per cuisine, plus a First Course and a Desserts kitchen if you like. Every pick-up prints one KOT per cover, per kitchen and per barker, on that kitchen's printer, from the desk laptop (Print from this laptop, below, or the Print Hub)."
           : "One kitchen per cuisine. Each order is split into one KOT per kitchen and printed on that kitchen's printer by the Print Hub on the desk laptop."}
-        right={!form && <button onClick={() => openAdd('')} style={btn}>+ Add kitchen</button>} />
+        right={!form && <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <a href={'/printers?event=' + eventId} target="_blank" rel="noreferrer" data-testid="open-virtual-printers"
+            title="The slips of kitchens on Virtual printer 1–5, live (opens a new tab)"
+            style={{ ...ghost, display:'inline-flex', alignItems:'center', textDecoration:'none' }}>🖨 Virtual printers ↗</a>
+          <button onClick={() => openAdd('')} style={btn}>+ Add kitchen</button>
+        </div>} />
 
       {msg && <Banner tone={msg.tone} onClose={() => setMsg(null)}>{msg.text}</Banner>}
 
@@ -1449,8 +1458,18 @@ function KitchenForm({ form, setField, setForm, kitchens, tried, saving, error, 
             style={{ ...inp(show('prefix', form.prefix)), letterSpacing:'2px', textTransform:'uppercase', fontWeight:900 }} />,
           show('prefix', form.prefix), /^[A-Z]{2,3}$/.test(form.prefix) ? kotHint : null, 'ks-f-prefix')}
         {field('printer_ip', 'Printer IP',
-          <input value={form.printer_ip} onChange={e => setField('printer_ip', e.target.value.replace(/[^\d.]/g, ''))}
-            onKeyDown={enter} placeholder="192.168.1.104" inputMode="decimal" style={inp(show('printer_ip', form.printer_ip))} />,
+          <>
+            <input value={form.printer_ip} onKeyDown={enter} placeholder="192.168.1.104" style={inp(show('printer_ip', form.printer_ip))}
+              onChange={e => { const v = e.target.value; setField('printer_ip', /^v/i.test(v) ? v.toUpperCase().replace(/[^A-Z0-9-]/g, '') : v.replace(/[^\d.]/g, '')) }} />
+            <span style={{ display:'flex', gap:4, flexWrap:'wrap', marginTop:5 }} title="Virtual printers: always on, the slips show on the Virtual printers screen">
+              {Array.from({ length: VIRTUAL_COUNT }, (_, i) => 'VIRTUAL-' + (i + 1)).map((v, i) => (
+                <button key={v} type="button" onClick={e => { e.preventDefault(); setField('printer_ip', v) }}
+                  style={{ border:'1.5px solid ' + (form.printer_ip === v ? 'var(--ink)' : 'var(--line)'), background: form.printer_ip === v ? 'var(--ink)' : '#fff',
+                    color: form.printer_ip === v ? '#fff' : 'var(--ink)', borderRadius:999, padding:'2px 8px', fontSize:11, fontWeight:800, cursor:'pointer', fontFamily:'Manrope' }}>
+                  Virtual {i + 1}</button>
+              ))}
+            </span>
+          </>,
           show('printer_ip', form.printer_ip),
           shared && shared.length ? 'Same printer as ' + listNames(shared) : !form.printer_ip.trim() ? 'Can be added later' : null, 'ks-f-ip')}
         {field('printer_port', 'Port',
@@ -1509,7 +1528,8 @@ function KitchenForm({ form, setField, setForm, kitchens, tried, saving, error, 
 
 function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith, confirm, counts,
   onMove, onEdit, onTest, onMakeDefault, onAskDelete, onCancelDelete, onDelete, onActive }) {
-  const hasIp = IPV4.test(String(k.printer_ip || '').trim())
+  const hasIp = isPrinter(k.printer_ip)
+  const virtual = VIRTUAL.test(String(k.printer_ip || '').trim())
   const st = k.printer_status ? (PRINTER[k.printer_status] || PRINTER.unknown) : null
   const ago = agoText(k.printer_checked_at, now)
   const staleMs = k.printer_checked_at ? now - new Date(k.printer_checked_at).getTime() : null
@@ -1554,10 +1574,10 @@ function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith,
           <div className="ks-c-printer" style={{ minWidth:0, fontSize:13 }}>
             {hasIp ? (
               <>
-                <span style={{ fontWeight:800, fontVariantNumeric:'tabular-nums' }}>🖨 {k.printer_ip}</span>
-                <span style={{ color:'var(--ink2)', fontWeight:600 }}>:{k.printer_port ?? 9100}</span>
+                <span style={{ fontWeight:800, fontVariantNumeric:'tabular-nums' }}>🖨 {virtual ? 'Virtual printer ' + String(k.printer_ip).trim().slice(8) : k.printer_ip}</span>
+                {!virtual && <span style={{ color:'var(--ink2)', fontWeight:600 }}>:{k.printer_port ?? 9100}</span>}
                 <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:1 }}>
-                  {k.backup_printer_ip ? 'Backup ' + k.backup_printer_ip : 'No backup printer'}
+                  {virtual ? 'On screen: Virtual printers' : k.backup_printer_ip ? 'Backup ' + k.backup_printer_ip : 'No backup printer'}
                   {sharedWith.length > 0 && ' · shared with ' + listNames(sharedWith)}
                 </div>
               </>
@@ -1579,7 +1599,7 @@ function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith,
             )}
             <div style={{ fontSize:11.5, fontWeight:600, marginTop:3,
               color: staleMs != null && staleMs > 180000 ? AMBER_INK : 'var(--ink2)' }}>
-              {ago ? 'checked ' + ago : hasIp ? 'waiting for the Print Hub' : '\u00a0'}
+              {virtual ? 'always on, nothing to start' : ago ? 'checked ' + ago : hasIp ? 'waiting for the Print Hub' : '\u00a0'}
             </div>
           </div>
 
