@@ -551,15 +551,15 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const shown = query
     ? dishesShown.filter(d => `${d.name} ${d.description || ''} ${catName(d.category_id)} ${d.course || ''}`.toLowerCase().includes(query))
     : dishesShown.filter(d => (activeCourse === ALL || courseOf(d) === activeCourse) && (activeCuisine === ALL || d.category_id === activeCuisine))
-  // One heading per cuisine and course: "Italian · Soup", "Italian · Main Course 1" ... then the next cuisine
+  // The menu course by course (Soup, Appetizer ...); in each course the dishes cuisine by cuisine,
+  // each card naming its cuisine
   const groupsShown = []
   if (!query) {
-    const czs = activeCuisine === ALL ? cuisineAll : cuisineAll.filter(c => c.id === activeCuisine)
-    for (const cz of czs) {
-      for (const c of [...courses, 'Other']) {
-        const list = shown.filter(d => d.category_id === cz.id && courseOf(d) === c)
-        if (list.length) groupsShown.push({ key: cz.id + c, title: activeCuisine === ALL ? `${cz.name} · ${c}` : c, sub: `${list.length} ${list.length === 1 ? 'dish' : 'dishes'}`, list })
-      }
+    for (const c of [...courses, 'Other']) {
+      const list = shown.filter(d => courseOf(d) === c).sort((a, b) => cuisineRank(a.category_id) - cuisineRank(b.category_id))
+      if (!list.length) continue
+      const czNames = [...new Set(list.map(d => catName(d.category_id)))].join(', ')
+      groupsShown.push({ key: c, title: c, sub: `${list.length} ${list.length === 1 ? 'dish' : 'dishes'}${activeCuisine === ALL ? ` · ${czNames}` : ''}`, list })
     }
   }
   const czTag = id => <span className={'cz z' + (cuisineRank(id) % 6)}>{catName(id)}</span>
