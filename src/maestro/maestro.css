@@ -59,7 +59,7 @@
 .ms input,.ms select,.ms textarea{font-family:inherit}
 
 /* ---------------- Captain App ---------------- */
-.ms.cap-app{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);z-index:5}
+.ms.cap-app{position:fixed;inset:0;bottom:var(--kb,0px);display:flex;flex-direction:column;background:var(--bg);z-index:5}
 .ms .covers{background:#fff;border-bottom:1px solid var(--line);padding:8px 14px;display:flex;align-items:center;gap:7px;overflow-x:auto;flex:none}
 .ms .covers .l{font-size:12px;font-weight:800;color:var(--muted);margin-right:4px;text-transform:uppercase;letter-spacing:.06em}
 .ms .cv{min-width:62px;border-radius:10px;border:1.5px solid var(--line);text-align:center;padding:5px 2px;background:#fff;flex:none}
@@ -279,8 +279,10 @@
 /* Tablets in portrait and small screens: a narrower order panel, a shorter top bar */
 @media screen and (max-width:1100px){
   .ms .cart{width:300px}
+  .ms .body:not(.bd) .cart{width:330px}
   .ms.cap-app .appbar{padding:8px 12px;gap:8px}
   .ms.cap-app .appbar .t{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ms.cap-app .appbar .s{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ms.cap-app .appbar .lft{flex:1;min-width:0}
   .ms.cap-app .appbar .lft > div:last-child{min-width:0;overflow:hidden}
   .ms.cap-app .appbar .r{flex-wrap:nowrap;gap:6px}
@@ -332,7 +334,11 @@
 @media screen and (max-width:700px), screen and (orientation:portrait) and (max-width:1100px){
   .ms .body:not(.bd){flex-direction:column}
   .ms .body:not(.bd) .menu{flex:1 1 0;min-height:0}
-  .ms .body:not(.bd) .cart{width:auto;flex:none;max-height:64%;min-height:0;border-left:0;border-top:2px solid var(--line);box-shadow:0 -6px 18px rgba(23,41,91,.08)}
+  .ms .body:not(.bd) .cart{width:auto;flex:none;max-height:42%;min-height:0;border-left:0;border-top:2px solid var(--line);box-shadow:0 -6px 18px rgba(23,41,91,.08)}
+  /* typing a note: the order gets the screen; searching dishes: the menu does */
+  .ms.cap-app.typing-order .covers,.ms.cap-app.typing-order .body:not(.bd) .menu{display:none}
+  .ms.cap-app.typing-order .body:not(.bd) .cart{max-height:none;flex:1 1 auto}
+  .ms.cap-app.typing-search .body:not(.bd) .cart{display:none}
   .ms .body:not(.bd) .acts{flex-direction:row;padding:8px 12px 10px}
   .ms .body:not(.bd) .acts > *{flex:1}
   .ms .body:not(.bd) .acts .save{padding:8px}
@@ -352,7 +358,10 @@
 .ms .minib{border:1px solid var(--line);background:#fff;border-radius:7px;padding:3px 9px;font-size:11.5px;font-weight:700;color:var(--ink)}
 .ms .pin{border:1px solid var(--line);background:#fff;border-radius:7px;padding:3px 9px;font-size:11.5px;font-weight:800;color:var(--slate);white-space:nowrap;flex:none}
 .ms .pin.pd{background:var(--navy);border-color:var(--navy);color:#fff}
-.ms .sum{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;font-size:11.5px;font-weight:700;color:var(--muted)}
+.ms .sum{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:5px;font-size:11.5px;font-weight:700;color:var(--muted)}
+.ms .sum .ntags{width:auto}
+.ms .sum .ntags .ntg{background:#EEF1F5;color:#334155}
+.ms .sum .ntags .atg{background:#FFE7B0;color:#5A3A00}
 .ms .sum span{border-radius:5px;padding:1px 7px;background:var(--bg)}
 .ms .sum .s-d{background:var(--amberl);color:#8A5A00}
 .ms .sum .s-h{background:#EEF1F5;color:#475569}
@@ -362,12 +371,11 @@
 .ms .orow{display:grid;grid-template-columns:64px minmax(0,1fr);gap:6px;align-items:start;padding:6px 12px;border-bottom:1px dashed var(--line)}
 .ms .orow .oc{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding-top:4px;line-height:1.2}
 .ms .orow .oi{min-width:0}
-.ms .orow .oi .ned{margin-left:-70px}
 .ms .orow .of{padding-top:1px}
 .ms .oit{display:flex;align-items:center;gap:6px;min-height:26px;font-size:13px}
 .ms .oit .nm{flex:1;min-width:0;font-weight:600;line-height:1.25}
 .ms .oit .chip{flex:none;font-size:10.5px;font-weight:800;border-radius:5px;padding:1px 7px;white-space:nowrap}
-.ms .oit .x{flex:none;border:0;background:var(--slatel);color:var(--slate);border-radius:6px;font-weight:800;font-size:12px;padding:7px 11px;min-height:34px}
+.ms .oit .x{flex:none;border:0;background:var(--slatel);color:var(--slate);border-radius:6px;font-weight:800;font-size:12px;padding:5px 11px;min-height:31px}
 .ms .oit .x.arm{background:var(--red);color:#fff}
 .ms .oit.dr{background:#FFF8E8;border-radius:6px;padding:0 4px;margin:1px -4px}
 .ms .oit .nbtn{flex:none;border:0;background:none;color:var(--blue);font-size:11.5px;font-weight:800;padding:8px 6px}
@@ -515,7 +523,7 @@
 .ms .pm .pmk{width:26px;text-align:center;color:var(--green);font-weight:900;font-size:15px}
 .ms .vtag{display:inline-block;font-size:10px;font-weight:800;border-radius:4px;padding:0 5px;margin-right:5px;background:#FFF1CC;color:#7A4B00;border:1px solid #EBCB85;vertical-align:1px}
 .ms .ghead.vh{color:#7A4B00;border-bottom-color:#EBCB85}
-.ms .oit{align-items:flex-start;padding:3px 0}
+.ms .oit{align-items:center;padding:1px 0}
 .ms .oit .nmw{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;padding-top:2px}
 .ms .oit .nmw .nm{flex:none;max-width:100%}
 .ms .oit .nmw .cz{margin-right:0}
@@ -523,7 +531,7 @@
 .ms .ntags{display:flex;flex-wrap:wrap;gap:3px;width:100%}
 .ms .ntg{font-size:10.5px;font-weight:800;border-radius:4px;padding:0 6px;background:#EEF1F5;color:#334155}
 .ms .atg{font-size:10.5px;font-weight:900;border-radius:4px;padding:0 6px;background:#FFE7B0;color:#5A3A00}
-.ms .firei{flex:none;border:0;background:var(--amber);color:#2B1B00;font-size:13px;font-weight:900;border-radius:8px;padding:7px 14px;min-width:58px;min-height:34px}
+.ms .firei{flex:none;border:0;background:var(--amber);color:#2B1B00;font-size:13px;font-weight:900;border-radius:8px;padding:6px 14px;min-width:58px;min-height:32px}
 .ms .firei:disabled{opacity:.5}
 .ms .minib.arm{background:var(--amber);border-color:var(--amber);color:#2b1d00}
 .ms .vipb{margin-top:7px;background:#FFF6DF;border:1.5px solid #EBCB85;border-radius:9px;padding:6px 9px;font-size:12px;color:#5A3A00}
@@ -592,3 +600,25 @@
 .ms .vdish .vdn{font-weight:800}
 .ms .vdish .x{border:0;background:var(--slatel);color:var(--slate);border-radius:6px;font-weight:800;font-size:12px;padding:3px 8px}
 .ms .vspecial{border-top:1px dashed var(--line);padding-top:10px;margin-top:4px;display:flex;flex-direction:column;gap:6px;font-size:13px}
+
+/* ---------- Captain: the order as one plain list, with a scroll bar that is always visible ---------- */
+.ms .olist .oln{padding:2px 12px;border-bottom:1px dashed var(--line)}
+.ms .olist .oln:last-child{border-bottom:0}
+.ms .ocrs{font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.ms .sbx{position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.ms .sbx > .scroll{flex:1 1 auto;min-height:0;overflow-y:auto;padding-right:8px;padding-bottom:4px;scrollbar-width:none}
+.ms .sbx > .scroll::-webkit-scrollbar{display:none}
+.ms .sbar{position:absolute;top:4px;bottom:4px;right:3px;width:7px;border-radius:4px;background:#E3E8F0;pointer-events:none}
+.ms .sbar i{position:absolute;left:0;right:0;border-radius:4px;background:#7D89A3}
+.ms .smore{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);border:0;background:var(--navy);color:#fff;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:800;box-shadow:0 4px 12px rgba(23,41,91,.28);white-space:nowrap}
+/* a short screen (a small tablet, or any tablet with the keyboard up) while typing in the order:
+   the top bars step aside so the note stays in view */
+@media screen and (max-height:620px){
+  .ms.cap-app.typing-order .appbar,.ms.cap-app.typing-order .covers{display:none}
+}
+/* small upright tablets: the cover bar keeps My covers | All covers in view */
+@media screen and (max-width:640px){
+  .ms .covers > .l:first-child{display:none}
+  .ms .cv{min-width:48px;padding-left:6px;padding-right:6px}
+  .ms .scope button{padding:6px 9px}
+}
