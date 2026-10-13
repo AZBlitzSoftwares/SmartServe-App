@@ -229,11 +229,10 @@ test('maestro KOT: kitchen, KOT number, barker, cover, course, firing, plates', 
   assert.ok(lines.includes('Barker A - Rohit'));
   assert.ok(lines.includes('T7 - C3'));
   assert.ok(lines.includes('COURSE: STARTERS'));
-  assert.match(all, /Fired .*Firing #2/);
+  assert.match(all, /Picked up .*Pick-up #2/);
   assert.match(all, /Table captain\s+Neha/);
   assert.match(all, /1 x Crystal Veg Dim Sum/);
-  assert.match(all, /NOTE: JAIN/);
-  assert.doesNotMatch(all, />> JAIN <</);
+  assert.match(all, />> JAIN <</);
   assert.match(all, /Plates: 2\s+Cover: T7-C3/);
   assert.doesNotMatch(all, /REMAKE|REPRINT|CHAIR/);
 });
@@ -246,12 +245,18 @@ test('maestro KOT: serial number printed as big as fits', () => {
   assert.ok(long && long.w === 3, 'a longer number at 3x');
 });
 
-test('maestro KOT: dish note and allergy bold and tall, not white on black', () => {
+test('maestro KOT: dish note and allergy bold, tall and white on black', () => {
   const d = decodeEscPos(buildKot({ ...maestroJob, items: [{ name: 'Funghi Tea Soup', qty: 1, note: 'Less spicy, sauce on side', allergy: 'Peanuts' }] }));
-  const note = d.lines.find((l) => l.text.includes('NOTE: LESS SPICY, SAUCE ON SIDE'));
+  const note = d.lines.find((l) => l.text.includes('>> LESS SPICY, SAUCE ON SIDE <<'));
   const alg = d.lines.find((l) => l.text.includes('** ALLERGY: PEANUTS **'));
-  assert.ok(note && note.bold && note.h === 2 && !note.reverse, 'note line');
-  assert.ok(alg && alg.bold && alg.h === 2 && !alg.reverse, 'allergy line');
+  assert.ok(note && note.bold && note.h === 2 && note.reverse, 'note line');
+  assert.ok(alg && alg.bold && alg.h === 2 && alg.reverse, 'allergy line');
+  const dish = d.lines.find((l) => l.text.includes('1 x Funghi Tea Soup'));
+  assert.ok(dish && !dish.reverse, 'the dish itself is not reversed');
+  // a long note wraps and every line stays inside the slip, still on black
+  const long = decodeEscPos(buildKot({ ...maestroJob, items: [{ name: 'Soup', qty: 1, note: 'No onion no garlic less oil less salt sauce on the side extra hot please' }] }));
+  const nl = long.lines.filter((l) => l.reverse && !/KOT|VIP/.test(l.text));
+  assert.ok(nl.length >= 2 && nl.every((l) => l.text.length <= 48), 'note wraps within 48 columns');
 });
 
 test('maestro KOT: VIP guest, whole-order allergy and guest note', () => {
@@ -262,6 +267,10 @@ test('maestro KOT: VIP guest, whole-order allergy and guest note', () => {
   assert.match(all, /VIP GUEST\nVVIP - MR. VIKRAM SETHI/);
   assert.match(all, /ALLERGY \(ALL DISHES\): SHELLFISH/);
   assert.match(all, /GUEST NOTE: LESS SPICY \| DISLIKES: MUSHROOM/);
+  for (const t of ['ALLERGY (ALL DISHES): SHELLFISH', 'GUEST NOTE: LESS SPICY']) {
+    const l = d.lines.find((x) => x.text.includes(t));
+    assert.ok(l && l.reverse && l.bold && l.h === 2 && l.text.length <= 48, `${t} on a black band`);
+  }
   assert.ok(all.indexOf('VIP GUEST') < all.indexOf('1 x Crystal Veg Dim Sum'), 'guest details before the dishes');
   const banner = d.lines.find((l) => l.text.trim() === 'VIP GUEST');
   assert.ok(banner.reverse && banner.w === 2, 'VIP banner stands out');
@@ -273,12 +282,22 @@ test('maestro KOT: remake and reprint banners', () => {
   assert.match(all, /REPRINT/);
 });
 
-test('maestro cancel slip keeps the cover and says do not dispatch', () => {
+test('maestro void slip keeps the cover and says do not dispatch', () => {
   const all = textLines(buildKot({ ...maestroJob, kind: 'cancel', items: [{ name: 'Szechuan Eggplant', qty: 1 }] })).join('\n');
-  assert.match(all, /CANCELLED/);
+  assert.match(all, /\*\*\* VOID \*\*\*/);
+  assert.doesNotMatch(all, /CANCELLED/);
   assert.match(all, /DO NOT PREPARE \/ DISPATCH/);
   assert.match(all, /T7 - C3/);
-  assert.match(all, /Plates cancelled: 1/);
+  assert.match(all, /Plates voided: 1/);
+});
+
+test('maestro KOT for an extra chair prints 1A, not C101', () => {
+  const all = textLines(buildKot({ ...maestroJob, cover_no: 101 })).map((l) => l.trim()).join('\n');
+  assert.match(all, /^T7 - 1A$/m);
+  assert.match(all, /Cover: T7-1A/);
+  assert.doesNotMatch(all, /C101|101/);
+  const second = textLines(buildKot({ ...maestroJob, kind: 'cancel', cover_no: 102 })).join('\n');
+  assert.match(second, /T7 - 2A/);
 });
 
 test('a KOT without a cover still prints the multi-kitchen layout', () => {

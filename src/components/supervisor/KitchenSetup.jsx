@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import MaestroSetup, { MaestroPreService } from '../../maestro/MaestroSetup'
 import { supabase } from '../../lib/supabase'
-import { tableRanges } from '../../maestro/msData'
+import { tableRanges, capOrder, coversOf, chairsOf, spareCount, chairNames } from '../../maestro/msData'
 import { useKitInfo, mb } from '../../lib/kitInfo'
 import { eposTestPrint, EPOS_HOST } from '../../lib/eposPrint'
 import { PrintStationSwitch } from './PrintStation'
@@ -378,7 +378,8 @@ export default function KitchenSetup({ eventData, onEventChange }) {
             + '#' + cats.map(c => c.id + ':' + (c.kitchen_id || '')).join('|')} />
       )}
       <CaptainsSection eventId={eventId} step={4} captains={captains} setCaptains={setCaptains} tableCount={tableCount}
-        coverCount={Math.max(1, Number(eventData?.chairs_per_table) || 10)} maestro={!!eventData?.maestro} />
+        coverCount={eventData?.maestro ? coversOf(eventData) : Math.max(1, Number(eventData?.chairs_per_table) || 10)}
+        coversFor={eventData?.maestro ? t => coversOf(eventData, t) : undefined} maestro={!!eventData?.maestro} />
       {!eventData?.maestro && <WaitersSection eventId={eventId} waiters={waiters} setWaiters={setWaiters} kitchens={sortedKitchens} />}
     </div>
   )
@@ -489,7 +490,7 @@ function ChairsCard({ eventData, onEventChange }) {
       return
     }
     if (data) onEventChange?.(data)
-    setMsg({ tone:'ok', text:'Saved — ' + v + ' chairs at every table' })
+    setMsg({ tone:'ok', text:'Saved — ' + v + ' chairs at every table' + (eventData?.maestro ? ': ' + chairNames(v, spareCount(eventData)) : '') })
     setTimeout(() => setMsg(null), 2500)
   }
 
@@ -501,9 +502,10 @@ function ChairsCard({ eventData, onEventChange }) {
     <div style={card} id="ks-chairs">
       <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
         <div style={{ flex:'1 1 280px', minWidth:0 }}>
-          <SectionHead step={1} title={eventData?.maestro ? 'Covers per table' : 'Chairs per table'}
+          <SectionHead step={1} title="Chairs per table"
             sub={(eventData?.maestro
-                ? 'Captains take the order cover by cover, C1 to C' + (valid ? v : current) + '. '
+                ? 'Every chair at the table, all in: ' + (valid ? v : current) + ' chairs are ' + chairNames(valid ? v : current, spareCount(eventData))
+                  + '. Captains take the order chair by chair. '
                 : 'Captains pick chairs 1 to ' + (valid ? v : current) + ' when they take an order. ')
               + (eventData?.number_of_tables ? 'Tables at this event: ' + eventData.number_of_tables + ' (change under Tables, at the bottom of this page).' : '')} />
         </div>
@@ -518,6 +520,93 @@ function ChairsCard({ eventData, onEventChange }) {
           <button onClick={save} disabled={saving || !dirty}
             style={{ ...btn, height:40, background: dirty ? 'var(--ink)' : '#E5E7EB', color: dirty ? '#fff' : '#9CA3AF',
               cursor: dirty ? 'pointer' : 'default' }}>{saving ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+      {msg && <Banner tone={msg.tone} style={{ marginBottom:0 }} onClose={() => setMsg(null)}>{msg.text}</Banner>}
+      {eventData?.maestro && <TableCoversEditor eventData={eventData} onEventChange={onEventChange} />}
+    </div>
+  )
+}
+
+/* Smart Serve Maestro: how many chairs of each table are named 1A, 2A … (spare_covers) and
+   tables with their own number of chairs (table_covers {"3": 12}, all chairs in). Captain
+   tablets, the Control Desk and the KOTs follow within seconds. */
+const TABLES_SQL_HINT = 'Run 2026-10-13_maestro_v3.sql in Supabase first, then try again.'
+
+function TableCoversEditor({ eventData, onEventChange }) {
+  const std = Math.max(1, Number(eventData?.chairs_per_table) || 10)
+  const tables = Math.max(0, Number(eventData?.number_of_tables) || 0)
+  const own = eventData?.table_covers && typeof eventData.table_covers === 'object' ? eventData.table_covers : {}
+  const spare = spareCount(eventData)
+  const [pick, setPick] = useState({ table:'', covers:'' })
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  async function patch(fields, okText) {
+    setSaving(true); setMsg(null)
+    const before = { table_covers: eventData.table_covers ?? null, spare_covers: eventData.spare_covers ?? null }
+    onEventChange?.({ ...eventData, ...fields })
+    const { data, error } = await supabase.from('events').update(fields).eq('id', eventData.id).select().single()
+    setSaving(false)
+    if (error) {
+      onEventChange?.({ ...eventData, ...before })
+      setMsg({ tone:'err', text: /table_covers|spare_covers|schema cache|column/i.test(error.message) ? TABLES_SQL_HINT : errText(error) })
+      return false
+    }
+    if (data) onEventChange?.(data)
+    setMsg({ tone:'ok', text: okText }); setTimeout(() => setMsg(null), 2500)
+    return true
+  }
+  const setSpare = n => { const v = Math.min(6, Math.max(0, n)); if (v !== spare) patch({ spare_covers: v }, 'A table of ' + std + ' chairs: ' + chairNames(std, v)) }
+  async function addOwn() {
+    const t = parseInt(pick.table, 10), c = parseInt(pick.covers, 10)
+    if (!t || t < 1 || (tables && t > tables)) { setMsg({ tone:'err', text:'Choose a table' + (tables ? ' from 1 to ' + tables : '') + '.' }); return }
+    if (!c || c < 1 || c > 30) { setMsg({ tone:'err', text:'Chairs: a number from 1 to 30.' }); return }
+    const next = { ...own }
+    if (c === std) delete next[String(t)]; else next[String(t)] = c
+    if (await patch({ table_covers: next }, 'T' + t + ' has ' + c + ' chairs: ' + chairNames(c, spare))) setPick({ table:'', covers:'' })
+  }
+  const removeOwn = t => { const next = { ...own }; delete next[String(t)]; patch({ table_covers: next }, 'T' + t + ' back to ' + std + ' chairs') }
+  const list = Object.entries(own).map(([t, c]) => [Number(t), Number(c)]).filter(([t, c]) => t > 0 && c > 0).sort((a, b) => a[0] - b[0])
+  const total = (tables ? Array.from({ length: tables }, (_, i) => chairsOf(eventData, i + 1)).reduce((a, b) => a + b, 0) : 0)
+  const sq = { width:34, height:34, borderRadius:9, border:'1.5px solid var(--line)', background:'#fff', fontSize:17, fontWeight:800, cursor:'pointer', color:'var(--ink)' }
+
+  return (
+    <div style={{ borderTop:'1px solid var(--line)', marginTop:12, paddingTop:12, display:'grid', gap:12 }} data-testid="table-covers">
+      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+        <div style={{ flex:'1 1 260px', minWidth:0 }}>
+          <div style={{ fontWeight:800, fontSize:14 }}>Chairs named 1A, 2A at every table</div>
+          <div style={{ fontSize:12.5, color:'var(--ink2)', marginTop:2 }}>
+            {spare ? 'The last ' + (spare === 1 ? 'chair is' : spare + ' chairs are') + ' named ' + Array.from({ length: spare }, (_, i) => (i + 1) + 'A').join(', ')
+              + ' instead of a C number; the table keeps its ' + std + ' chairs (' + chairNames(std, spare) + '). 1A is Table Captain 1’s, 2A Table Captain 2’s.'
+              : 'None: every chair has a C number (C1–C' + std + ').'}</div>
+        </div>
+        <button style={sq} disabled={saving || spare <= 0} onClick={() => setSpare(spare - 1)} title="One fewer">−</button>
+        <b style={{ minWidth:24, textAlign:'center', fontSize:17 }}>{spare}</b>
+        <button style={sq} disabled={saving || spare >= 6} onClick={() => setSpare(spare + 1)} title="One more">+</button>
+      </div>
+      <div>
+        <div style={{ fontWeight:800, fontSize:14 }}>Tables with a different number of chairs</div>
+        <div style={{ fontSize:12.5, color:'var(--ink2)', marginTop:2, marginBottom:8 }}>
+          Every other table has {std} chairs ({chairNames(std, spare)}).{tables ? ' Chairs at this event: ' + total + ' across ' + tables + ' tables.' : ''}</div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+          {list.map(([t, c]) => (
+            <span key={t} style={{ display:'inline-flex', alignItems:'center', gap:6, border:'1.5px solid var(--line)', borderRadius:999, padding:'4px 6px 4px 12px', fontWeight:800, fontSize:13 }}>
+              <span title={chairNames(c, spare)}>T{t} · {c} chairs</span>
+              <button onClick={() => removeOwn(t)} disabled={saving} title={'Back to ' + std + ' chairs'}
+                style={{ border:'none', background:'var(--bg)', borderRadius:999, width:24, height:24, cursor:'pointer', fontWeight:800 }}>✕</button>
+            </span>
+          ))}
+          <select value={pick.table} onChange={e => setPick(p => ({ ...p, table: e.target.value }))} disabled={saving}
+            style={{ ...input, width:110, height:36 }}>
+            <option value="">Table…</option>
+            {Array.from({ length: Math.max(tables, 1) }, (_, i) => i + 1).map(t => <option key={t} value={t}>T{t}{own[String(t)] ? ' (' + own[String(t)] + ')' : ''}</option>)}
+          </select>
+          <input value={pick.covers} inputMode="numeric" placeholder="Chairs" disabled={saving}
+            onChange={e => setPick(p => ({ ...p, covers: e.target.value.replace(/\D/g, '').slice(0, 2) }))}
+            onKeyDown={e => { if (e.key === 'Enter') addOwn() }}
+            style={{ ...input, width:90, height:36, textAlign:'center' }} />
+          <button onClick={addOwn} disabled={saving || !pick.table || !pick.covers} style={{ ...btn, height:36 }}>{saving ? 'Saving…' : 'Set'}</button>
         </div>
       </div>
       {msg && <Banner tone={msg.tone} style={{ marginBottom:0 }} onClose={() => setMsg(null)}>{msg.text}</Banner>}
@@ -787,7 +876,7 @@ function KitchensSection({ eventId, maestro, kitchens, setKitchens, setCats, wai
     <div style={card} id="ks-kitchens">
       <SectionHead step={2} title="Kitchens & printers"
         sub={maestro
-          ? "One kitchen per cuisine, plus a First Course and a Desserts kitchen if you like. Every firing prints one KOT per cover, per kitchen and per barker, on that kitchen's printer, from the desk laptop (Print from this laptop, below, or the Print Hub)."
+          ? "One kitchen per cuisine, plus a First Course and a Desserts kitchen if you like. Every pick-up prints one KOT per cover, per kitchen and per barker, on that kitchen's printer, from the desk laptop (Print from this laptop, below, or the Print Hub)."
           : "One kitchen per cuisine. Each order is split into one KOT per kitchen and printed on that kitchen's printer by the Print Hub on the desk laptop."}
         right={!form && <button onClick={() => openAdd('')} style={btn}>+ Add kitchen</button>} />
 
@@ -1036,9 +1125,13 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
     keyOf(k.printer_ip, k.printer_port) === f.ip ? k.name : null,
     keyOf(k.backup_printer_ip) === f.ip ? k.name + ' (backup)' : null]).filter(Boolean)
   const moved = kitchens.filter(k => k.printer_moved_at && now - new Date(k.printer_moved_at) < 12 * 3600e3)
-  const list = rows || []
-  const latest = list.length ? Math.max(...list.map(r => +new Date(r.seen_at))) : 0
-  const hubs = [...new Set([...claimers, ...list.filter(r => r.hub && latest - new Date(r.seen_at) < 3 * 60000).map(r => r.hub)])]
+  // Only the printers that answered the latest search: older finds (another router, a printer
+  // since switched off or moved) stay in the database but not in the list, so it never grows
+  const all = rows || []
+  const latest = all.length ? Math.max(...all.map(r => +new Date(r.seen_at))) : 0
+  const list = all.filter(r => latest - new Date(r.seen_at) <= 3 * 60000)
+  const older = all.length - list.length
+  const hubs = [...new Set([...claimers, ...list.filter(r => r.hub).map(r => r.hub)])]
   const phaseText = !search ? null
     : search.phase === 'asking' ? 'Asking the Print Hub…'
     : search.phase === 'waiting' ? 'The Print Hub is looking at its network…'
@@ -1058,6 +1151,7 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
           <button onClick={() => setOpen(o => !o)} style={{ background:'none', border:'none', color:'var(--ink)', fontWeight:800, fontSize:12.5, cursor:'pointer', textDecoration:'underline' }}>
             {open ? 'Hide' : 'Show'} {list.length} printer{list.length === 1 ? '' : 's'} found</button>
         )}
+        {older > 0 && <span style={{ fontSize:11.5, color:'var(--ink2)' }} title="Printers found in earlier searches that did not answer the latest one">({older} older not shown)</span>}
         <span style={{ fontSize:12, fontWeight:700, color: search?.phase === 'nohub' ? AMBER_INK : 'var(--ink2)' }}>
           {phaseText || 'The Print Hub finds printers on its network and follows a printer that restarts on a new address.'}</span>
       </div>
@@ -1504,7 +1598,7 @@ function capRange(c, coverCount) {
 const capRangeText = r => r ? (r.from === r.to ? 'C' + r.from : 'C' + r.from + '–C' + r.to) : 'all covers'
 const COVER_SQL_HINT = 'Run 2026-10-10_maestro_covers.sql in Supabase (maestro-sql folder) first, then try again.'
 
-function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount, coverCount = 10, maestro = false }) {
+function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount, coverCount = 10, coversFor = () => coverCount, maestro = false }) {
   const [ticks, tick] = useTicks()
   const [msg, setMsg] = useState(null)
   const [add, setAdd] = useState({ name:'', pin:'', table:'' })
@@ -1519,39 +1613,51 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount,
   // A table's captains in the order they were added (Table Captain 1, 2 on the tablet), split ones by their covers
   const capsAt = t => captains.filter(c => c.table_number === t)
     .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.name).localeCompare(String(b.name)))
-  const capsByCover = t => [...capsAt(t)].sort((a, b) => (capRange(a, coverCount)?.from || 99) - (capRange(b, coverCount)?.from || 99))
-  const unsplit = shared.filter(t => capsAt(t).every(c => !capRange(c, coverCount)))
+  const capsByCover = t => [...capsAt(t)].sort((a, b) => (capRange(a, coversFor(t))?.from || 99) - (capRange(b, coversFor(t))?.from || 99))
+  const unsplit = shared.filter(t => capsAt(t).every(c => !capRange(c, coversFor(t))))
   const [splitting, setSplitting] = useState(false)
   // Cover split needs 2026-10-10_maestro_covers.sql: until it has run, no cover boxes
   const hasCovers = !captains.length || captains.some(c => 'cover_from' in c)
   // Maestro: a shared table with no split set is split evenly in captain order (as the tablets do)
   const autoOf = c => {
-    if (!maestro || !c.table_number || capRange(c, coverCount)) return null
-    const r = tableRanges(captains, c.table_number, coverCount).get(c.id)
+    if (!maestro || !c.table_number || capRange(c, coversFor(c.table_number))) return null
+    const r = tableRanges(captains, c.table_number, coversFor(c.table_number)).get(c.id)
     return r?.auto ? r : null
   }
-  const rangeLabel = c => { const r = capRange(c, coverCount); if (r) return capRangeText(r); const a = autoOf(c); return a ? capRangeText(a) + ' (automatic)' : 'all covers' }
+  const rangeLabel = c => { const r = capRange(c, coversFor(c.table_number)); if (r) return capRangeText(r); const a = autoOf(c); return a ? capRangeText(a) + ' (automatic)' : 'all covers' }
+  // Tables whose captains all have covers set by hand that leave some covers out (for example
+  // after the table was given more covers): those covers have no captain
+  const gaps = maestro ? Object.keys(perTable).map(Number).sort((a, b) => a - b).map(t => {
+    const list = capsAt(t), n = coversFor(t)
+    if (!list.length || list.some(c => !capRange(c, n))) return null
+    const missing = Array.from({ length: n }, (_, i) => i + 1).filter(x => !list.some(c => { const r = capRange(c, n); return x >= r.from && x <= r.to }))
+    return missing.length ? { t, missing } : null
+  }).filter(Boolean) : []
+  // Shared tables with covers set by hand past the table's C covers (for example C6–C10 set
+  // before a table of 10 chairs became C1–C8, 1A, 2A): split evenly again in one tap
+  const stale = maestro && hasCovers ? shared.filter(t => { const n = coversFor(t); return capsAt(t).some(c => Number(c.cover_to) > n || Number(c.cover_from) > n) }) : []
   // Captains whose covers overlap another captain's at the same table
   const overlapOf = c => {
-    const r = capRange(c, coverCount)
+    const r = capRange(c, coversFor(c.table_number))
     if (!r || !c.table_number) return ''
     return captains.filter(x => x.id !== c.id && x.table_number === c.table_number)
-      .filter(x => { const o = capRange(x, coverCount); return o && o.from <= r.to && r.from <= o.to }).map(x => x.name).join(', ')
+      .filter(x => { const o = capRange(x, coversFor(c.table_number)); return o && o.from <= r.to && r.from <= o.to }).map(x => x.name).join(', ')
   }
 
-  // Shared tables with no split yet: covers divided evenly, in captain order (Rahul C1–C5, Imran C6–C10)
-  async function splitEvenly() {
+  // Shared tables with no split yet (or one set for more covers): covers divided evenly, in
+  // captain order, each captain keeping their side (Rahul C1–C4, Imran C5–C8)
+  async function splitEvenly(tables = unsplit) {
     setSplitting(true)
-    for (const t of unsplit) {
-      const list = capsAt(t)
+    for (const t of tables) {
+      const list = [...capsAt(t)].sort(capOrder), n = coversFor(t)
       for (let i = 0; i < list.length; i++) {
-        const from = Math.floor(i * coverCount / list.length) + 1, to = Math.floor((i + 1) * coverCount / list.length)
+        const from = Math.floor(i * n / list.length) + 1, to = Math.floor((i + 1) * n / list.length)
         if (from > to) continue
         if (!(await save(list[i], { cover_from: from, cover_to: to }))) { setSplitting(false); return }
       }
     }
     setSplitting(false)
-    setMsg({ tone:'ok', text: 'Covers split for table' + (unsplit.length === 1 ? ' ' : 's ') + ranges(unsplit) + '. Change any range in the captain’s row.' })
+    setMsg({ tone:'ok', text: 'Covers split for table' + (tables.length === 1 ? ' ' : 's ') + ranges(tables) + '. Change any range in the captain’s row.' })
   }
 
   // One write for any field of one captain, with the old value put back if it fails
@@ -1615,7 +1721,8 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount,
       <SectionHead step={step} title="Captains"
         sub={'Everything about captains is here: name, sign-in PIN, the table they serve'
           + (tableCount ? ' (1–' + tableCount + ')' : '') + ' and, when two captains share a table, the covers each one looks after (1–'
-          + coverCount + '). On the tablet a captain signs in with name and PIN; the event, table and covers are found automatically.'
+          + coverCount + (maestro ? ', C numbers only, unless the table has its own number of chairs). 1A is always Table Captain 1’s and 2A Table Captain 2’s; with no range set, the C covers are split evenly (C1–C4 / C5–C8).' : ').')
+          + ' On the tablet a captain signs in with name and PIN; the event, table and covers are found automatically.'
           + ' A captain sees their own covers first and taps All covers when needed.'} />
 
       {msg && <Banner tone={msg.tone} onClose={() => setMsg(null)}>{msg.text}</Banner>}
@@ -1639,10 +1746,23 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount,
                 <span key={t}>{i ? '  ·  ' : ''}T{t} {capsByCover(t).map(c => c.name + ' ' + rangeLabel(c)).join(', ')}</span>
               ))}
               {unsplit.length > 0 && (
-                <button onClick={splitEvenly} disabled={splitting}
+                <button onClick={() => splitEvenly(unsplit)} disabled={splitting}
                   style={{ ...btn, height:28, padding:'0 10px', fontSize:12, marginLeft:8, background:'#fff', color:'var(--ink)', border:'1.5px solid var(--line)' }}>
                   {splitting ? 'Splitting…' : 'Split covers evenly: table' + (unsplit.length === 1 ? ' ' : 's ') + unsplit.join(', ')}</button>
               )}
+            </div>
+          )}
+          {stale.length > 0 && (
+            <div style={{ marginTop:4, color:AMBER_INK, fontWeight:800 }} data-testid="cover-stale">
+              {stale.map(t => 'T' + t + ' has C1–C' + coversFor(t)).join(', ')} now, but covers set by hand go further.
+              <button onClick={() => splitEvenly(stale)} disabled={splitting}
+                style={{ ...btn, height:28, padding:'0 10px', fontSize:12, marginLeft:8, background:'#fff', color:'var(--ink)', border:'1.5px solid var(--line)' }}>
+                {splitting ? 'Splitting…' : 'Split evenly again: table' + (stale.length === 1 ? ' ' : 's ') + stale.join(', ')}</button>
+            </div>
+          )}
+          {hasCovers && gaps.length > 0 && (
+            <div style={{ marginTop:4, color:AMBER_INK, fontWeight:800 }} data-testid="cover-gaps">
+              No captain for {gaps.map(g => 'T' + g.t + ' ' + ranges(g.missing).replace(/(\d+)/g, 'C$1')).join(', ')}: widen a captain’s covers in their row below.
             </div>
           )}
         </div>
@@ -1652,7 +1772,7 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount,
         <div className="ks-caps" style={{ marginBottom:12 }}>
           {byTable(captains).map(c => (
             <CaptainRow key={c.id + ':' + (c.table_number ?? '') + ':' + (c.pin ?? '')}
-              c={c} tableCount={tableCount} coverCount={hasCovers ? coverCount : 0} autoLabel={rangeLabel(c)}
+              c={c} tableCount={tableCount} coverCount={hasCovers ? coversFor(c.table_number) : 0} autoLabel={rangeLabel(c)}
               onSave={save} onRemove={remove} saved={!!ticks[c.id]}
               crowd={c.table_number ? perTable[c.table_number] : 0} overlap={overlapOf(c)} />
           ))}

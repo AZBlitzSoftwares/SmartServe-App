@@ -3,17 +3,19 @@
    The whole service at a glance: every kitchen's queue and printer, the
    progress of every table (click one to see its covers and every order, as
    the captain sees it) and what needs attention (sorted by urgency, each
-   with its action). The same laptop runs the Print Hub. */
+   with its action). The same laptop runs the Print Hub.
+   readOnly: the Control Desk screen, a big screen anyone may look at: everything is shown,
+   nothing can be changed (no actions on alerts, no reprint or void in a table). */
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
 import TableView from './TableView'
-import { lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, ago, tc, eventDishes, captainsForCover } from './msData'
+import { lateMinutes, useLive, useNow, rpc, errText, mmss, clockText, ago, tc, eventDishes, captainsForCover, coversOf, chairsOf } from './msData'
 
 const WAIT_MS = 2 * 60000      // a plate Ready this long without a steward is an alert
 
-export default function ControlDesk({ eventData, onShowPrinters }) {
+export default function ControlDesk({ eventData, onShowPrinters, readOnly = false }) {
   const ev = eventData
   const now = useNow(1000)
   const [acked, setAcked] = useState({})   // alert key -> until (ms)
@@ -64,7 +66,8 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
   const plates = (d?.items || []).filter(i => i.state !== 'cancelled')
   const platesOrdered = plates.length
   const tables = Math.max(1, Number(E.number_of_tables) || 0)
-  const covers = tables * (Number(E.chairs_per_table) || 10)
+  // every chair counts: C1–C8, 1A, 2A at a table of 10 (a table can have its own number)
+  const covers = Array.from({ length: tables }, (_, i) => chairsOf(E, i + 1)).reduce((a, b) => a + b, 0)
   const seatedN = (d?.covers || []).filter(c => c.seated_at).length
 
   // ---------------------------------------------------------------- alerts
@@ -142,11 +145,11 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
       const last = Math.max(new Date(c.seated_at).getTime(), ...its.filter(i => i.fired_at).map(i => new Date(i.fired_at).getTime()))
       const open = its.some(i => i.state === 'fired' && !i.served_at)
       if (!open && now - last > pacing * 60000) {
-        const cap = captainsForCover(d.caps, c.table_number, c.cover_no, E.chairs_per_table).map(x => x.name).join(', ')
+        const cap = captainsForCover(d.caps, c.table_number, c.cover_no, coversOf(E, c.table_number)).map(x => x.name).join(', ')
         const key = `pace-${c.table_number}-${c.cover_no}`
         alerts.push({
           key, w: 60, icon: 'P', color: 'var(--blue)',
-          title: `Pacing: nothing fired for ${tc(c.table_number, c.cover_no)} in ${Math.floor((now - last) / 60000)} min`,
+          title: `Pacing: nothing picked up for ${tc(c.table_number, c.cover_no)} in ${Math.floor((now - last) / 60000)} min`,
           sub: `Held: ${[...new Set(held.map(i => i.course))].join(', ')}${cap ? ' · table captain ' + cap : ''}`,
           action: 'Seen', onAct: () => ack(key, 10),
         })
@@ -193,6 +196,8 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
       if (i.served_at) t.served++
     }
     for (const k of orders) if (isLate(k)) (m[k.table_number] ||= { ordered: 0, served: 0, late: false }).late = true
+    // dishes picked up and still in the kitchen, per table
+    for (const k of orders) if (!doneAt(k)) { const t = (m[k.table_number] ||= { ordered: 0, served: 0, late: false }); t.kit = (t.kit || 0) + 1 }
     for (const c of d?.covers || []) if (c.seated_at) { const t = (m[c.table_number] ||= { ordered: 0, served: 0, late: false }); t.seated = (t.seated || 0) + 1 }
     for (const s of d?.sos || []) { const n = s.tables?.table_number ?? s.table_number; if (n) (m[n] ||= { ordered: 0, served: 0, late: false }).help = true }
     return m
@@ -218,10 +223,11 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
         </div>
         <div className="r">
           <span className="pill">Plates ordered {platesOrdered}</span>
-          <span className="pill">Avg. firing to delivered {mmss(avgFR)}</span>
+          <span className="pill">Avg. pick-up to delivered {mmss(avgFR)}</span>
           {!q.online && <span className="pill" style={{ background: 'var(--red)' }}>Offline</span>}
+          {readOnly && <span className="pill">View only</span>}
           <span className="pill">{clockText(new Date(now))}</span>
-          {onShowPrinters && <button className="pill" onClick={onShowPrinters}>Printers &amp; print queue</button>}
+          {onShowPrinters && !readOnly && <button className="pill" onClick={onShowPrinters}>Printers &amp; print queue</button>}
         </div>
       </div>
       {!d ? <div className="empty">Loading the service…</div> : (
@@ -253,7 +259,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
                   return (
                     <button className={'tb' + (s.late ? ' l' : '') + (s.help ? ' h' : '')} key={t} onClick={() => setOpenTable(t)} title={`Open table T${t}`}>
                       <b>T{t}{s.help && <i className="hdot" title="Help requested" />}</b>{s.served}/{s.ordered} delivered
-                      <small>{s.seated || 0} seated{s.late ? ' · late' : ''}</small>
+                      <small>{s.seated || 0} seated · {s.kit || 0} in kitchen{s.late ? ' · late' : ''}</small>
                       <div className="pbar"><i style={{ width: (s.ordered ? Math.round(100 * s.served / s.ordered) : 0) + '%', background: s.late ? 'var(--red)' : undefined }} /></div>
                     </button>
                   )
@@ -266,7 +272,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
                   <div className="al" key={a.key}>
                     <div className="ic" style={{ background: a.color }}>{a.icon}</div>
                     <div style={{ minWidth: 0 }}><b>{a.title}</b><small>{a.sub}</small></div>
-                    <button className="ac" disabled={busy} onClick={a.onAct}>{a.action}</button>
+                    {!readOnly && <button className="ac" disabled={busy} onClick={a.onAct}>{a.action}</button>}
                   </div>
                 )) : <div className="empty">All clear. Late dishes, printer problems, waiting plates, pacing, help requests and sold-out dishes appear here.</div>}
               </div>
@@ -274,7 +280,7 @@ export default function ControlDesk({ eventData, onShowPrinters }) {
           </div>
         </>
       )}
-      {openTable != null && <TableView ev={E} table={openTable} caps={d?.caps || []} kitchens={d?.kitchens || []} onClose={() => setOpenTable(null)} />}
+      {openTable != null && <TableView ev={E} table={openTable} caps={d?.caps || []} kitchens={d?.kitchens || []} readOnly={readOnly} onClose={() => setOpenTable(null)} />}
       {toast && (
         <div className={'toast' + (toast.err ? ' err' : '')}>
           {toast.text}<button onClick={() => setToast(null)}>OK</button>

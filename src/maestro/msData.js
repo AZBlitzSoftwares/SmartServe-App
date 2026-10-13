@@ -29,13 +29,13 @@ export const QUICK_NOTES = ['Jain', 'No onion-garlic', 'Less spicy', 'Extra spic
 export const PREF_CHIPS = ['Jain', 'No onion', 'No garlic', 'No tomato', 'No mushroom', 'No coriander', 'Less spicy', 'Extra spicy',
   'Less oil', 'Less salt', 'No ajinomoto', 'Gluten free', 'Dairy free', 'Vegan']
 // "Less spicy, No cheese" <-> ['Less spicy', 'No cheese']
-export const splitNote = s => String(s || '').split(',').map(x => x.trim()).filter(Boolean)
+export const splitNote = s => String(s || '').split(/[,|]/).map(x => x.trim()).filter(Boolean)
 export const joinNote = parts => [...new Set(parts.map(x => String(x).trim()).filter(Boolean))].join(', ')
 // Delivered dishes leave the captain's order this long after delivery (event setting)
 export const servedHideMinutes = ev => { const n = Number(ev?.served_hide_minutes); return n > 0 ? n : 3 }
 
 /* Covers a table captain looks after. Two captains can share a table and
-   split its covers (Neha C1-C5, Arjun C6-C10): set in Event set-up >
+   split its covers (Neha C1-C4, Arjun C5-C8): set in Event set-up >
    Captains. No range set: every cover of the table. Either captain can still
    open the other's covers on the tablet when needed. */
 export function coverRange(cap, coverCount) {
@@ -49,9 +49,52 @@ export function coverRange(cap, coverCount) {
 }
 export const servesCover = (cap, c, coverCount) => { const r = coverRange(cap, coverCount); return !r || (c >= r.from && c <= r.to) }
 export const rangeText = r => r ? (r.from === r.to ? `C${r.from}` : `C${r.from}–C${r.to}`) : 'all covers'
-// C1–C3, C7–C10 for a list of cover numbers
+
+/* Chairs and covers: a table has its chairs (10, or the table's own number), and the last of
+   them are named 1A, 2A … instead of a C number: 10 chairs are C1 … C8, 1A, 2A. 1A belongs to
+   Table Captain 1, 2A to Table Captain 2 (one captain: all of them). Kept as covers 101, 102 … */
+export const EXTRA_BASE = 100
+export const isExtraCover = c => Number(c) > EXTRA_BASE
+// "C3" for a C-numbered cover, "1A" for the first A chair
+export const coverLabel = c => (isExtraCover(c) ? `${Number(c) - EXTRA_BASE}A` : `C${c}`)
+
+// Chairs at one table, all in: its own number when set (Event set-up › Chairs per table), else the event's
+export function chairsOf(ev, table) {
+  const own = Number(ev?.table_covers?.[String(table)])
+  return Math.max(1, own > 0 ? Math.round(own) : Math.round(Number(ev?.chairs_per_table)) || 10)
+}
+// How many chairs of a table are named 1A, 2A …: 2 unless set
+export function spareCount(ev) {
+  const n = Number(ev?.spare_covers)
+  return ev?.spare_covers == null || !Number.isFinite(n) ? 2 : Math.min(6, Math.max(0, Math.round(n)))
+}
+// The A chairs at one table (a table keeps at least C1)
+export const sparesAt = (ev, table) => Math.max(0, Math.min(spareCount(ev), chairsOf(ev, table) - 1))
+// C-numbered covers at one table: its chairs less the A chairs (10 chairs: C1–C8)
+export const coversOf = (ev, table) => chairsOf(ev, table) - sparesAt(ev, table)
+// "C1–C8, 1A, 2A" for a number of chairs
+export function chairNames(chairs, spare = 2) {
+  const n = Math.max(1, Number(chairs) || 1), s = Math.max(0, Math.min(spare, n - 1)), c = n - s
+  return [c === 1 ? 'C1' : `C1–C${c}`, ...Array.from({ length: s }, (_, i) => `${i + 1}A`)].join(', ')
+}
+// Every cover of a table in order: C1 … Cn, then 1A, 2A …, and any other cover already used
+// (an order taken before the table had fewer chairs keeps its cover)
+export function tableCovers(ev, table, used = []) {
+  const n = coversOf(ev, table)
+  const spare = Array.from({ length: sparesAt(ev, table) }, (_, i) => EXTRA_BASE + i + 1)
+  const more = used.map(Number).filter(c => c > 0 && (isExtraCover(c) || c > n))
+  return [...Array.from({ length: n }, (_, i) => i + 1), ...[...new Set([...spare, ...more])].sort((a, b) => a - b)]
+}
+// The table captain of a spare cover: 1A Table Captain 1, 2A Table Captain 2, 3A Table Captain 1 …
+export function spareOwner(capsInOrder, c) {
+  const at = capsInOrder || []
+  return at.length ? at[(Number(c) - EXTRA_BASE - 1) % at.length] : null
+}
+
+// C1–C3, C6–C8, 1A for a list of cover numbers
 export function coversText(nums) {
-  const xs = [...new Set(nums)].sort((a, b) => a - b)
+  const all = [...new Set(nums)].sort((a, b) => a - b)
+  const xs = all.filter(c => !isExtraCover(c))
   const out = []
   for (let i = 0; i < xs.length; i++) {
     let j = i
@@ -59,6 +102,7 @@ export function coversText(nums) {
     out.push(i === j ? `C${xs[i]}` : `C${xs[i]}–C${xs[j]}`)
     i = j
   }
+  for (const c of all.filter(isExtraCover)) out.push(coverLabel(c))
   return out.join(', ')
 }
 // Table Captain 1, 2 ...: by the covers set, then in the order they were added
@@ -67,7 +111,7 @@ export const capOrder = (a, b) => (Number(a.cover_from) || 99) - (Number(b.cover
 
 /* The covers each captain of a table looks after: id -> {from, to, auto?} or null (all).
    Ranges set in Event set-up win. A table with two or more captains and no range set is
-   split evenly in captain order: of 10 covers, Table Captain 1 gets C1-C5, TC2 C6-C10. */
+   split evenly in captain order: of C1-C8, Table Captain 1 gets C1-C4, TC2 C5-C8. */
 export function tableRanges(caps, table, coverCount) {
   const n = Math.max(1, Number(coverCount) || 10)
   const at = (caps || []).filter(c => c.is_active !== false && Number(c.table_number) === Number(table)).sort(capOrder)
@@ -85,6 +129,7 @@ export function tableRanges(caps, table, coverCount) {
 // no range (all covers); else every captain of the table
 export function captainsForCover(caps, table, c, coverCount) {
   const at = (caps || []).filter(x => x.is_active !== false && Number(x.table_number) === Number(table)).sort(capOrder)
+  if (isExtraCover(c)) { const o = spareOwner(at, c); return o ? [o] : [] }
   const ranges = tableRanges(caps, table, coverCount)
   const own = at.filter(x => { const r = ranges.get(x.id); return r && c >= r.from && c <= r.to })
   if (own.length) return own
@@ -197,7 +242,7 @@ export async function rpcRetry(name, args, { tries = 4, waitMs = 1200 } = {}) {
    steward). Not delivered within the kitchen alert time: late. */
 export function dishStatus(item, kot, now, lateMin) {
   if (item.state === 'cancelled') return { cls: 'cx', label: 'Cancelled', rank: 9 }
-  if (item.state === 'held') return { cls: 'hd', label: 'Not fired', rank: 0 }
+  if (item.state === 'held') return { cls: 'hd', label: 'To pick up', rank: 0 }
   if (item.served_at || kot?.served_at || kot?.stage === 'dispatched' || kot?.status === 'delivered') return { cls: 'sv', label: 'Delivered', rank: 5 }
   const fired = new Date(kot?.fired_at || item.fired_at || now).getTime()
   if (now - fired > lateMin * 60000) return { cls: 'lt', label: 'Late ' + mmss(now - fired), rank: 2, late: true }
@@ -337,9 +382,9 @@ export function shortName(name, max = 22) {
   return s.length > max ? s.slice(0, max - 1) + '…' : s
 }
 
-// "T7 · C3"
+// "T7 · C3", or "T7 · 1A" for an extra chair
 export function tc(table, cover) {
-  return `T${table} · C${cover}`
+  return `T${table} · ${coverLabel(cover)}`
 }
 
 // A KOT matches a search for "21", "IT-A 021", "T7", "T7 C3", "C3" or a dish name
@@ -356,6 +401,9 @@ export function kotMatches(k, query) {
   if (tc) return Number(k.table_number) === Number(tc[1]) && (!tc[2] || Number(k.cover_no) === Number(tc[2]))
   const c = q.match(/^c\s*(\d+)$/)
   if (c) return Number(k.cover_no) === Number(c[1])
+  // an extra chair: "1a", "t7 1a"
+  const xa = q.match(/^(?:t\s*(\d+)\s*[·.\- ]?\s*)?(\d+)\s*a$/)
+  if (xa) return Number(k.cover_no) === EXTRA_BASE + Number(xa[2]) && (!xa[1] || Number(k.table_number) === Number(xa[1]))
   // "a 2" / "b2": barker letter plus serial number
   const bs = q.match(/^([a-z])\s*-?\s*(\d+)$/)
   if (bs) return new RegExp('-' + bs[1] + '\\s*0*' + Number(bs[2]) + '$').test(no)

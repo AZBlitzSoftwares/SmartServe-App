@@ -65,7 +65,7 @@ export default function TableManager({ eventData, onEventChange }) {
     self:    [['ss-ready','Ready check'], ['st-tables','Tables & tablets'], ['ss-waiters','Waiters'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
     captain: [['ss-ready','Ready check'], ['ss-captains','Captains'], ['ss-waiters','Waiters'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
     multi:   [['ks-ready','Ready check'], ['ks-chairs','Chairs'], ['ks-kitchens','Kitchens & printers'], ['ks-routing','Menu routing'], ['ks-captains','Captains'], ['ks-waiters','Waiters'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
-    maestro: [['ms-ready','Ready check'], ['ks-chairs','Covers'], ['ks-kitchens','Kitchens & printers'], ['ks-routing','Menu routing'], ['ms-courses','Courses'], ['ms-rules','Kitchen rules'], ['ms-dishes','Dishes'], ['ms-barkers','Barkers'], ['ks-captains','Captains'], ['st-tables','Tables'], ['ss-offline','Offline kit']],
+    maestro: [['ms-ready','Ready check'], ['ks-chairs','Chairs'], ['ks-kitchens','Kitchens & printers'], ['ks-routing','Menu routing'], ['ms-courses','Courses'], ['ms-rules','Kitchen rules'], ['ms-dishes','Dishes'], ['ms-barkers','Barkers'], ['ks-captains','Captains'], ['st-tables','Tables'], ['ss-offline','Offline kit']],
   }[mode]
   const jump = id => document.getElementById(id)?.scrollIntoView({ behavior:'smooth', block:'start' })
   const sectionHead = (id, title, sub) => (

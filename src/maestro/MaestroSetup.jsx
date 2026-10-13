@@ -7,6 +7,7 @@
      Barkers             who signs in on each kitchen screen, with a PIN
      VIP guests          VIP guests of the event: preferences, allergies, preferred dishes,
                          a fixed seat if known; special VIP-only dishes
+     Big screens         the view-only Control Desk screen and Kitchens screen (name + PIN)
    and the Pre-service check shown at the top of the page. */
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
@@ -65,7 +66,7 @@ export function MaestroPreService({ eventData, nonce }) {
     { ok: active.length > 0 && tested.length === active.length, t: tested.length === active.length ? 'Every printer answered in the last 15 minutes' : `Printer not confirmed: ${active.filter(k => !tested.includes(k)).map(k => k.name).join(', ')} (switch on Print from this laptop or start the Print Hub, then Test print)` },
     { ok: dishes.length > 0 && !noKitchen.length, t: !dishes.length ? 'No dishes yet: add the menu under Menu' : noKitchen.length ? `${noKitchen.length} dishes have no kitchen` : `All ${dishes.length} dishes routed to a kitchen and a barker` },
     { ok: dishes.length > 0 && !noCourse.length, t: noCourse.length ? `${noCourse.length} dishes have no course: ${noCourse.slice(0, 3).map(x => x.name).join(', ')}${noCourse.length > 3 ? '…' : ''}` : 'Every dish has a course' },
-    { ok: ev.first_course_auto === false || firstDish.length > 0, t: ev.first_course_auto === false ? `${courses[0]} is fired by the captain` : firstDish.length ? `${courses[0]} (${firstDish.map(x => x.name).join(', ')}) fires when a cover is seated` : `No ${courses[0]} dish: add one, or switch the automatic ${courses[0]} off` },
+    { ok: ev.first_course_auto === false || firstDish.length > 0, t: ev.first_course_auto === false ? `${courses[0]} is picked up by the captain` : firstDish.length ? `${courses[0]} (${firstDish.map(x => x.name).join(', ')}) is picked up when a cover is seated` : `No ${courses[0]} dish: add one, or switch the automatic ${courses[0]} off` },
     { ok: sides.length > 0 && !noBarker.length, t: noBarker.length ? `No barker with a PIN: ${noBarker.map(([k, s]) => `${k.name} ${s}`).join(', ')}` : `${d.barkers.filter(b => b.is_active).length} barkers can sign in on the kitchen screens` },
     { ok: tablesWithCap.size >= tables, t: `${tablesWithCap.size} of ${tables} tables have a table captain` },
   ]
@@ -100,6 +101,7 @@ export default function MaestroSetup({ eventData, onEventChange, onChanged, refr
       <KitchenRules ev={ev} d={d} setD={setD} onChanged={changed} />
       <DishSplit ev={ev} d={d} setD={setD} onChanged={changed} />
       <Barkers ev={ev} d={d} setD={setD} onChanged={changed} />
+      <BigScreens ev={ev} />
       <VipGuests ev={ev} d={d} setD={setD} onChanged={changed} onEventChange={ev2 => { onEventChange && onEventChange(ev2); changed() }} />
     </div>
   )
@@ -156,17 +158,17 @@ function ServiceSettings({ ev, dishes = [], onEventChange }) {
         <button className="btn btn-ghost" disabled={!add.trim()} onClick={() => { setCourses(c => [...c, add.trim()]); setAdd('') }}>Add</button>
       </div>
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
-        <label>Kitchen alert after <input className="fld" type="number" min="1" value={late} onChange={e => setLate(e.target.value)} style={{ width: 64 }} /> min from firing</label>
+        <label>Kitchen alert after <input className="fld" type="number" min="1" value={late} onChange={e => setLate(e.target.value)} style={{ width: 64 }} /> min from pick-up</label>
         <label>Delivered dishes leave the captain's order after <input className="fld" type="number" min="1" max="30" value={hide} onChange={e => setHide(e.target.value)} style={{ width: 64 }} /> min</label>
-        <label>Pacing alert after <input className="fld" type="number" min="5" value={pacing} onChange={e => setPacing(e.target.value)} style={{ width: 64 }} /> min with nothing fired</label>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> Fire the {courses[0] || 'first course'} automatically when a cover is seated</label>
+        <label>Pacing alert after <input className="fld" type="number" min="5" value={pacing} onChange={e => setPacing(e.target.value)} style={{ width: 64 }} /> min with nothing picked up</label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> Pick up the {courses[0] || 'first course'} automatically when a cover is seated</label>
         <button className="btn btn-navy" onClick={save}>Save settings</button>
         {msg && <span style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</span>}
       </div>
       <p className="sub" style={{ marginTop: 10, marginBottom: 0 }}>
-        <b>Kitchen alert:</b> a KOT not delivered this many minutes after it was fired flashes on the kitchen screen until the barker taps Delivered, and is listed under Needs attention on the Control Desk (3 minutes is usual).{' '}
+        <b>Kitchen alert:</b> a KOT not delivered this many minutes after it was picked up flashes on the kitchen screen until the barker taps Delivered, and is listed under Needs attention on the Control Desk (3 minutes is usual).{' '}
         <b>Delivered dishes:</b> on the captain's tablet a delivered dish stays in the cover's order this long (3 or 5 minutes), then hides; <i>Show delivered</i> brings it back for a moment.{' '}
-        <b>Pacing alert:</b> a seated table where nothing has been fired for this long is listed on the Control Desk with <i>Remind captain</i>, so no table waits too long between courses.{' '}
+        <b>Pacing alert:</b> a seated table where nothing has been picked up for this long is listed on the Control Desk with <i>Remind captain</i>, so no table waits too long between courses.{' '}
         <b>Automatic first course:</b> when ticked, seating a cover sends the {courses[0] || 'first course'} straight to the kitchen (for a course every guest gets, like a welcome bite); leave it off when guests choose it.
       </p>
     </div>
@@ -356,6 +358,81 @@ function Barkers({ ev, d, setD, onChanged }) {
               </tr>
             )
           }))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ------------------------------------------------------------- big screens
+/* Two view-only users for big screens anyone may look at: the Control Desk screen (every
+   table, kitchen, printer and alert) and the Kitchens screen (every kitchen's KOTs side by
+   side). They sign in at /supervisor with the name and PIN set here; nothing on those screens
+   can change anything. Kept in supervisors with role screen_desk / screen_kitchens. */
+const newPin = () => String(1000 + Math.floor(Math.random() * 9000))
+const nowMs = () => Date.now()
+const SCREENS = [
+  { role: 'screen_desk', title: 'Control Desk screen', name: 'Desk Screen', what: 'every table, kitchen, printer and alert' },
+  { role: 'screen_kitchens', title: 'Kitchens screen', name: 'Kitchen Screen', what: "every kitchen's KOTs side by side" },
+]
+function BigScreens({ ev }) {
+  const [rows, setRows] = useState(null)
+  const [msg, setMsg] = useState('')
+  const [saved, setSaved] = useState(0)
+  useEffect(() => {
+    let alive = true
+    supabase.from('supervisors').select('*').eq('event_id', ev.id).in('role', SCREENS.map(x => x.role)).eq('is_active', true)
+      .then(({ data, error }) => { if (alive) { if (error) setMsg(errText(error)); setRows(data || []) } })
+    return () => { alive = false }
+  }, [ev.id])
+  async function upsert(sc, fields) {
+    setMsg('')
+    const cur = (rows || []).find(r => r.role === sc.role)
+    if (cur) {
+      const { error } = await supabase.from('supervisors').update(fields).eq('id', cur.id)
+      if (error) { setMsg(errText(error)); return }
+      setRows(rs => rs.map(r => (r.id === cur.id ? { ...r, ...fields } : r)))
+    } else {
+      const row = { event_id: ev.id, name: fields.name || sc.name, pin: fields.pin || newPin(), role: sc.role, is_active: true }
+      const { data, error } = await supabase.from('supervisors').insert(row).select('*').maybeSingle()
+      if (error) { setMsg(/role/i.test(error.message) ? 'Run 2026-10-13_maestro_v3.sql in Supabase first, then try again.' : errText(error)); return }
+      setRows(rs => [...(rs || []), data])
+    }
+    setSaved(nowMs())
+  }
+  async function remove(r) {
+    const { error } = await supabase.from('supervisors').update({ is_active: false }).eq('id', r.id)
+    if (error) { setMsg(errText(error)); return }
+    setRows(rs => rs.filter(x => x.id !== r.id))
+  }
+  function copy() {
+    const lines = [`${ev.name} · Big screens (view only): ${location.origin}/supervisor`]
+    for (const sc of SCREENS) { const r = (rows || []).find(x => x.role === sc.role); if (r) lines.push(`${sc.title}: ${r.name} · PIN ${r.pin}`) }
+    try { navigator.clipboard.writeText(lines.join('\n')); setMsg('Copied the sign-in list.') } catch { setMsg(lines.join(' | ')) }
+  }
+  return (
+    <div className="card" id="ms-screens">
+      <h3>Big screens (view only) <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Saved at={saved} /><button className="btn btn-ghost" onClick={copy}>Copy sign-in list</button></span></h3>
+      <p className="sub">For TVs or monitors that anyone may look at: waiters, stewards, guests. Sign in at <b>{location.origin}/supervisor</b> with the name and PIN below. The screen shows everything and changes nothing; it stays signed in after a reload, and signing out needs its PIN.</p>
+      {msg && <p style={{ color: msg.startsWith('Copied') ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{msg}</p>}
+      <table className="tbl">
+        <thead><tr><th>Screen</th><th>Shows</th><th>Sign-in name</th><th>PIN</th><th /></tr></thead>
+        <tbody>
+          {SCREENS.map(sc => {
+            const r = (rows || []).find(x => x.role === sc.role)
+            return (
+              <tr key={sc.role}>
+                <td><b>{sc.title}</b></td>
+                <td className="muted">{sc.what}</td>
+                <td>{r
+                  ? <input className="fld" defaultValue={r.name} key={r.id + r.name} onBlur={e => { const v = e.target.value.trim(); if (v && v !== r.name) upsert(sc, { name: v }) }} />
+                  : <button className="btn btn-navy" disabled={!rows} onClick={() => upsert(sc, { name: sc.name })}>+ Add {sc.title}</button>}</td>
+                <td>{r && <input className="fld" defaultValue={r.pin} key={r.id + 'p' + r.pin} style={{ width: 90 }}
+                  onBlur={e => { const v = e.target.value.replace(/\D/g, '').slice(0, 6); if (v.length >= 4 && v !== r.pin) upsert(sc, { pin: v }) }} />}</td>
+                <td>{r && <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12, color: 'var(--red)' }} onClick={() => remove(r)}>Remove</button>}</td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>

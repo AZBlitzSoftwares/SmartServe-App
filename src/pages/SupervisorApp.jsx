@@ -17,6 +17,15 @@ import { setUnsavedCheck } from '../lib/appUpdate'
 // ss-maestro: course-firing events get their own desk and reports, loaded only when used
 const ControlDesk = lazyPage(() => import('../maestro/ControlDesk'), 'controldesk')
 const MaestroReports = lazyPage(() => import('../maestro/MaestroReports'), 'msreports')
+const BigScreen = lazyPage(() => import('../maestro/BigScreen'), 'bigscreen')
+
+// View-only big screens (Control Desk screen, Kitchens screen): signed in once, they stay
+// signed in on that TV or monitor after a reload or a power cut, until signed out with their PIN
+const SCREEN_ROLES = ['screen_desk', 'screen_kitchens']
+const SCREEN_KEY = 'ss_big_screen'
+function savedScreen() {
+  try { const s = JSON.parse(localStorage.getItem(SCREEN_KEY) || 'null'); return s && SCREEN_ROLES.includes(s.role) ? s : null } catch { return null }
+}
 
 
 // ─── Event Status Helper ───────────────────────────────────────────────────
@@ -39,11 +48,11 @@ const TYPE_LABELS = { sos:'Call Waiter', call_waiter:'Call Waiter', clean_table:
 const TYPE_EMOJI  = { sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', water_refill:'💧' }
 
 export default function SupervisorApp() {
-  const [authed, setAuthed] = useState(false)
+  const [authed, setAuthed] = useState(() => !!savedScreen())
   // A new version never reloads the desk by itself: it would land on the sign-in
   // screen. The Update button at the top is there when the operator is ready.
   useEffect(() => { setUnsavedCheck(() => authed); return () => setUnsavedCheck(null) }, [authed])
-  const [currentUser, setCurrentUser] = useState(null)
+  const [currentUser, setCurrentUser] = useState(() => savedScreen())
   const [chosenTab, setActiveTab] = useState('kot')
   const [deskView, setDeskView] = useState('desk')   // ss-maestro: Control Desk or printer board
   const [eventData, setEventData] = useState(null)
@@ -233,7 +242,16 @@ export default function SupervisorApp() {
   const feedbackTab = !eventData || eventData.service_mode !== 'captain'
   // Feedback was open and the desk switched to a captain event: show its first tab instead
   const activeTab = chosenTab === 'feedback' && !feedbackTab ? 'kot' : chosenTab
-  if (!authed) return <SupervisorLogin onLogin={(user) => { setCurrentUser(user); setAuthed(true) }} />
+  if (!authed) return <SupervisorLogin onLogin={(user) => {
+    if (SCREEN_ROLES.includes(user?.role)) { try { localStorage.setItem(SCREEN_KEY, JSON.stringify(user)) } catch { /* private mode */ } }
+    setCurrentUser(user); setAuthed(true)
+  }} />
+  if (SCREEN_ROLES.includes(currentUser?.role)) return (
+    <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'#888' }}>Loading…</div>}>
+      <BigScreen user={currentUser} event={currentUser.assignedEvent}
+        onSignOut={() => { try { localStorage.removeItem(SCREEN_KEY) } catch { /* private mode */ } setCurrentUser(null); setAuthed(false) }} />
+    </Suspense>
+  )
 
   const isAdmin = currentUser?.role === 'admin'
 

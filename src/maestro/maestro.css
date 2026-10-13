@@ -622,3 +622,69 @@
   .ms .cv{min-width:48px;padding-left:6px;padding-right:6px}
   .ms .scope button{padding:6px 9px}
 }
+
+/* ---------- Round 13: notes highlighted dark (as on the KOT slip), spare covers, Void ---------- */
+/* Instructions read at a glance: white on dark, the way the KOT slip prints them */
+.ms .ntg,.ms .sum .ntags .ntg{background:#1E2433;color:#fff;font-weight:800}
+.ms .atg,.ms .sum .ntags .atg{background:#5A2D00;color:#fff;font-weight:900}
+.ms.kd .it1 .nt{display:inline-block;background:var(--kink);color:#fff;border-radius:6px;padding:2px 8px;margin-top:3px;font-weight:800}
+.ms.kd .it1 .ia{display:inline-block;background:#5A2D00;color:#fff;border-radius:6px;padding:2px 8px;margin:3px 0 0 4px;font-weight:900;font-size:calc(14px * var(--kz))}
+.ms.kd .gn{background:var(--kink);color:#fff;font-weight:800}
+.ms.kd .alg{background:#5A2D00;color:#fff}
+.ms .tvg{background:#1E2433;color:#fff}
+.ms .tvg.alg{background:#5A2D00;color:#fff}
+.ms .tvg.vip{background:#FFF6DC;color:#5B3F2A}
+/* Spare covers 1A, 2A …: a dashed gold chip */
+.ms .cv.xc:not(.sel){border-style:dashed;border-color:var(--gold2);background:#FFFBF2}
+.ms .cv.xc b{color:#7A561A}
+.ms .cv.xc.sel b{color:#2b1d00}
+/* Void: a fired dish taken back (a VOID slip prints) */
+.ms .oit .x.void{background:#fff;border:1.5px solid var(--navy);color:var(--navy);padding:4px 10px}
+
+/* ---------- Big screens (view only): Kitchens screen ---------- */
+.ms.kd.ks .vo{background:#fff;border:1.5px solid var(--kline);color:var(--coffee);border-radius:999px;padding:6px 14px;font-weight:800;font-size:14px;white-space:nowrap}
+.ms.kd.ks .cols{flex:1;min-height:0;display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:10px}
+.ms.kd.ks .col{background:#FBF8F3;border:1.5px solid var(--kline);border-radius:14px;display:flex;flex-direction:column;min-height:0;min-width:0;cursor:pointer;overflow:hidden}
+.ms.kd.ks .col:hover{border-color:var(--coffee2)}
+.ms.kd.ks .chd{background:#fff;border-bottom:1.5px solid var(--kline);padding:10px 12px;flex:none}
+.ms.kd.ks .chd h2{font-family:Georgia,serif;font-size:22px;font-weight:700;margin:0;display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--kink);white-space:nowrap;overflow:hidden}
+.ms.kd.ks .n3k{display:flex;gap:6px;margin-top:8px}
+.ms.kd.ks .n3k div{flex:1;background:var(--kbg);border-radius:8px;text-align:center;padding:4px 0 5px;font-size:11.5px;font-weight:700;color:var(--kmut)}
+.ms.kd.ks .n3k b{display:block;font-size:24px;line-height:1.1;color:var(--kink);font-family:Georgia,serif;font-variant-numeric:tabular-nums}
+.ms.kd.ks .n3k .l{background:var(--kgoldl)}
+.ms.kd.ks .n3k .l b{color:#9A6400}
+.ms.kd.ks .cl{flex:1;min-height:0;overflow:hidden;padding:8px;display:flex;flex-direction:column;gap:8px;position:relative;--kz:.8}
+.ms.kd.ks .cl .kc{flex:none}
+.ms.kd.ks .cl .empty{padding:24px 8px;font-size:14px}
+.ms.kd.ks .more{flex:none;text-align:center;font-weight:800;color:#fff;background:var(--coffee);font-size:14px;padding:7px}
+.ms.kd.ks .fk{gap:14px}
+.ms.kd.ks .fk .n3k{margin:0;min-width:320px}
+.ms.kd.ks .fkn .pr{font-size:13px;padding:4px 10px}
+/* the screen's own sign-out: small, out of the way, asks for the screen's PIN */
+.ss-exit{position:fixed;right:10px;bottom:10px;z-index:80;width:34px;height:34px;border-radius:50%;border:1px solid rgba(0,0,0,.12);background:rgba(255,255,255,.75);color:#8A8F99;font-size:15px;cursor:pointer}
+.ms.kd.ks .foot{padding-right:46px}
+/* Control Desk screen: the desk fills the TV */
+.ss-screen{min-height:100vh;background:#F6F4EF}
+.ss-screen .ms.desk{min-height:100vh;border-radius:0}
+.ms.kd.ks .fk .n3k div{background:#fff;border:1.5px solid var(--kline)}
+
+/* ---------- Round 15: captain dish list as tiles (no photo) ----------
+   3 to a row on the captain tablet; wider screens fit more, a phone 2. Course headings run
+   across the row; cuisine on top of every tile, then the name, one line of description and
+   the + / − button. */
+.ms .dlist.tiles{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;align-items:stretch}
+@media screen and (min-width:1000px){.ms .dlist.tiles{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}}
+@media screen and (max-width:420px){.ms .dlist.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.ms .dlist.tiles .empty{grid-column:1/-1}
+.ms .dish.dtile{flex-direction:column;padding:8px 9px;border-radius:10px;min-height:104px;gap:3px;text-align:left}
+.ms .dish.dtile.picked{border:2px solid var(--amber);background:#FFFBF0;padding:7px 8px}
+.ms .dtile .dtop{display:flex;align-items:center;flex-wrap:wrap;gap:4px 5px;min-height:16px}
+.ms .dtile .dtop .cz,.ms .dtile .dtop .vtag{margin-right:0}
+.ms .dtile .dtop .dq{font-size:10.5px;font-weight:700;color:#7A561A;margin:0}
+.ms .dtile .dtop .snt{margin:0 0 0 auto}
+.ms .dtile .dn{font-size:14px;line-height:1.24;font-weight:700;align-items:flex-start;gap:6px}
+.ms .dtile .dn .veg{margin-top:3px}
+.ms .dtile .dn .dnt{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;min-width:0;overflow-wrap:anywhere}
+.ms .dish.dtile .dd{display:block;margin:0;font-size:11px;color:var(--muted);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:18px}
+.ms .dtile .dbot{display:flex;align-items:flex-end;justify-content:flex-end;margin-top:auto;padding-top:4px}
+.ms .dtile .so{font-size:11.5px;font-weight:800;color:var(--red);padding:9px 2px}

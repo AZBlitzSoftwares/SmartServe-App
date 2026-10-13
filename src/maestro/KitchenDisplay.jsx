@@ -16,7 +16,7 @@ import { setSignOutReason, takeSignOutReason, setUnsavedCheck } from '../lib/app
 import logo from '../assets/janus_logo.jpg'
 import LaptopServerSwitch from '../components/LaptopServerSwitch'
 import './maestro.css'
-import { lateMinutes, useLive, useNow, rpc, rpcRetry, isMissingFn, errText, mmss, clockText, loadMenu, coursesOf, shortCourses, splitNote, kotMatches } from './msData'
+import { lateMinutes, useLive, useNow, rpc, rpcRetry, isMissingFn, errText, mmss, clockText, loadMenu, coursesOf, shortCourses, splitNote, kotMatches, tc } from './msData'
 
 const SESSION = 'ms_barker_session'
 
@@ -258,7 +258,7 @@ function KitchenScreen({ session, onSignOut }) {
         r = { delivered: 1, already: [] }
       }
       if (r?.already?.length) setToast({ text: `${k.kot_no} was already delivered` })
-      else setToast({ text: `${k.kot_no} · T${k.table_number} C${k.cover_no} delivered` })
+      else setToast({ text: `${k.kot_no} · ${tc(k.table_number, k.cover_no)} delivered` })
       q.reload()
     } catch (e) {
       setToast({ text: `${k.kot_no} not saved as delivered: ${errText(e)}`, err: true })
@@ -298,7 +298,7 @@ function KitchenScreen({ session, onSignOut }) {
           <span className="tm">{mmss(age(k))}</span>
         </div>
         <div className="km">
-          <span className="tcv">T{k.table_number} · C{k.cover_no}</span>
+          <span className="tcv">{tc(k.table_number, k.cover_no)}</span>
           {k.course && <span className="crs" title={k.course}>{crsLabel(k.course)}</span>}
           {k.is_remake && <span className="bdg">REMAKE</span>}
           {k.print_status === 'failed' && <span className="bdg" title="The printer did not answer (off, out of paper or not reachable). It prints by itself when the printer is back, or tap Reprint.">SLIP NOT PRINTED</span>}
@@ -371,12 +371,12 @@ function KitchenScreen({ session, onSignOut }) {
           <div className="dtw">
             {doneList.length ? (
               <table className="dtab">
-                <thead><tr><th>KOT</th><th>Table</th><th>Course</th><th>Dishes</th><th>Fired</th><th>Delivered</th><th>Total</th><th /></tr></thead>
+                <thead><tr><th>KOT</th><th>Table</th><th>Course</th><th>Dishes</th><th>Picked up</th><th>Delivered</th><th>Total</th><th /></tr></thead>
                 <tbody>
                   {doneList.map(k => (
                     <tr key={k.id} className={wasLate(k) ? 'l' : ''}>
                       <td><b className="dsn">{k.kot_no}</b>{k.is_remake && <span className="bdg">REMAKE</span>}</td>
-                      <td>T{k.table_number} · C{k.cover_no}</td>
+                      <td>{tc(k.table_number, k.cover_no)}</td>
                       <td>{k.course || ''}</td>
                       <td className="dl">{(k.items || []).map(it => `${it.qty > 1 ? it.qty + ' × ' : ''}${it.name}`).join(', ')}</td>
                       <td>{hhmm(k.fired_at)}</td>
@@ -402,7 +402,7 @@ function KitchenScreen({ session, onSignOut }) {
       )}
 
       <div className="foot">
-        <span>Each KOT is one dish for one table and cover · the timer runs from firing · it flashes after {late} minutes until delivered</span>
+        <span>Each KOT is one dish for one table and cover · the timer runs from pick-up · it flashes after {late} minutes until delivered</span>
         <span>Delivered this service: {doneAll.length}</span>
       </div>
 

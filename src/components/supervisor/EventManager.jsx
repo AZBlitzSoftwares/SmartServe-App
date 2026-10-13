@@ -1578,6 +1578,8 @@ export default function EventManager({ onEventChange }) {
                   <div key={sup.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', marginBottom:6, background:'var(--bg)', borderRadius:10 }}>
                     <div>
                       <span style={{ fontWeight:700, fontSize:14 }}>{sup.name}</span>
+                      {sup.role === 'screen_desk' && <span style={{ fontSize:11, fontWeight:800, color:'#7C3AED', marginLeft:8 }}>Control Desk screen · view only</span>}
+                      {sup.role === 'screen_kitchens' && <span style={{ fontSize:11, fontWeight:800, color:'#7C3AED', marginLeft:8 }}>Kitchens screen · view only</span>}
                       <span style={{ fontSize:12, color:'#888', marginLeft:8 }}>PIN: {sup.pin}</span>
                       {sup.mobile && <span style={{ fontSize:12, color:'#888', marginLeft:8 }}>📞 {sup.mobile}</span>}
                       <div style={{ fontSize:11, color:'var(--ink2)', marginTop:1 }}>Login: <strong>{sup.name}</strong> / <strong>{sup.pin}</strong></div>

@@ -11,7 +11,7 @@ import { useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
-import { coursesOf, courseRank, lateMinutes, useLive, mmss } from './msData'
+import { coursesOf, courseRank, lateMinutes, useLive, mmss, coverLabel, chairsOf } from './msData'
 
 const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null)
 const pct = (a, b) => (b ? (100 * a / b).toFixed(1) + '%' : '–')
@@ -63,7 +63,7 @@ export default function MaestroReports({ eventData }) {
     }
     const items = d.items.filter(i => i.state !== 'cancelled')
     const served = items.filter(i => i.served_at)
-    const coversSet = (Number(E.number_of_tables) || 0) * (Number(E.chairs_per_table) || 10)
+    const coversSet = Array.from({ length: Number(E.number_of_tables) || 0 }, (_, i) => chairsOf(E, i + 1)).reduce((a, b) => a + b, 0)
     const coversServed = new Set(served.map(i => i.table_number + '|' + i.cover_no)).size
     const printed = orders.filter(k => k.print_status === 'printed').length
     const lateK = live.filter(isLate)
@@ -135,12 +135,12 @@ export default function MaestroReports({ eventData }) {
   function exportAll() {
     const stamp = new Date().toISOString().slice(0, 10)
     const base = `${(r.E.name || 'event').replace(/[^\w-]+/g, '_')}_${stamp}`
-    download(`${base}_kitchens.csv`, [['Kitchen', 'KOTs', 'Firing to ready (min:sec)', 'Late KOTs', 'Ready to dispatched (min:sec)', 'Remakes'],
+    download(`${base}_kitchens.csv`, [['Kitchen', 'KOTs', 'Pick-up to ready (min:sec)', 'Late KOTs', 'Ready to dispatched (min:sec)', 'Remakes'],
       ...r.kitchenRows.map(x => [x.k.name, x.kots, mmss(x.fr), x.late, mmss(x.rd), x.remakes])])
     download(`${base}_dishes.csv`, [['Dish', 'Course', 'Kitchen', 'Plates', 'Served', 'Remakes', 'Cancelled'],
       ...r.dishRows.map(x => [x.name, x.course, x.kitchen, x.plates, x.served, x.remakes, x.cancelled])])
-    download(`${base}_kots.csv`, [['KOT', 'Kitchen', 'Barker', 'Table', 'Cover', 'Course', 'Dishes', 'Fired', 'Received', 'In preparation', 'Ready', 'Dispatched', 'Served', 'Remake'],
-      ...r.orders.map(k => [k.kot_no, k.kitchen_name, k.barker + (k.barker_name ? ' ' + k.barker_name : ''), k.table_number, k.cover_no, k.course,
+    download(`${base}_kots.csv`, [['KOT', 'Kitchen', 'Barker', 'Table', 'Cover', 'Course', 'Dishes', 'Picked up', 'Received', 'In preparation', 'Ready', 'Dispatched', 'Served', 'Remake'],
+      ...r.orders.map(k => [k.kot_no, k.kitchen_name, k.barker + (k.barker_name ? ' ' + k.barker_name : ''), k.table_number, coverLabel(k.cover_no), k.course,
         (k.items || []).map(i => `${i.qty} x ${i.name}${i.note ? ' (' + i.note + ')' : ''}`).join('; '),
         k.fired_at, k.received_at, k.in_prep_at, k.ready_at, k.dispatched_at, k.served_at, k.is_remake ? 'yes' : ''])])
   }
@@ -163,21 +163,21 @@ export default function MaestroReports({ eventData }) {
         <div className="kpi"><small>Covers served</small><b>{kpi.coversServed}</b><span>of {kpi.coversSet} covers set</span></div>
         <div className="kpi"><small>Plates served</small><b>{kpi.plates.toLocaleString()}</b><span>{kpi.perCover ? kpi.perCover.toFixed(1) + ' per cover' : '–'}</span></div>
         <div className="kpi"><small>KOTs</small><b>{kpi.kots.toLocaleString()}</b><span>{kpi.printed} printed · one cover each</span></div>
-        <div className="kpi"><small>Firing → ready</small><b>{mmss(kpi.fr)}</b><span>average, min:sec</span></div>
+        <div className="kpi"><small>Pick-up → ready</small><b>{mmss(kpi.fr)}</b><span>average, min:sec</span></div>
         <div className="kpi"><small>Late KOTs</small><b>{pct(kpi.late, kpi.kots)}</b><span>{kpi.late} of {kpi.kots}</span></div>
         <div className="kpi"><small>Ready → dispatched</small><b>{mmss(kpi.rd)}</b><span>average at the pass</span></div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: 12 }}>
         <div className="card">
-          <h3>Average time from firing to ready, by kitchen</h3>
-          <p className="sub">Minutes from firing to the plate being ready at the pass</p>
+          <h3>Average time from pick-up to ready, by kitchen</h3>
+          <p className="sub">Minutes from pick-up to the plate being ready at the pass</p>
           {r.kitchenRows.map(x => (
             <div className="hbar" key={x.k.id}><span className="lb">{x.k.name}</span><span className="tr2"><i style={{ width: (100 * (x.fr || 0) / maxFr) + '%' }} /></span><span className="v">{mmss(x.fr)}</span></div>
           ))}
         </div>
         <div className="card">
-          <h3>KOTs fired per 10 minutes</h3>
-          <p className="sub">Each wave is a course being fired across the tables</p>
+          <h3>KOTs picked up per 10 minutes</h3>
+          <p className="sub">Each wave is a course being picked up across the tables</p>
           {r.buckets.length ? (
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 150, borderBottom: '1px solid var(--line)' }}>
               {r.buckets.map(b => (
@@ -187,7 +187,7 @@ export default function MaestroReports({ eventData }) {
                 </div>
               ))}
             </div>
-          ) : <div className="muted">No KOTs fired yet.</div>}
+          ) : <div className="muted">No KOTs picked up yet.</div>}
           {r.buckets.length > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
             <span>{new Date(r.buckets[0].t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
             <span>{new Date(r.buckets[r.buckets.length - 1].t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></div>}
@@ -195,13 +195,13 @@ export default function MaestroReports({ eventData }) {
       </div>
       <div className="card">
         <h3>Kitchen summary</h3>
-        <table className="tbl"><thead><tr><th>Kitchen</th><th className="n">KOTs</th><th className="n">Firing → ready</th><th className="n">Late</th><th className="n">Ready → dispatched</th><th className="n">Remakes</th></tr></thead>
+        <table className="tbl"><thead><tr><th>Kitchen</th><th className="n">KOTs</th><th className="n">Pick-up → ready</th><th className="n">Late</th><th className="n">Ready → dispatched</th><th className="n">Remakes</th></tr></thead>
           <tbody>{r.kitchenRows.map(x => <tr key={x.k.id}><td>{x.k.name}</td><td className="n">{x.kots}</td><td className="n">{mmss(x.fr)}</td><td className="n">{pct(x.late, x.kots)}</td><td className="n">{mmss(x.rd)}</td><td className="n">{x.remakes}</td></tr>)}</tbody></table>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: 12 }}>
         <div className="card">
           <h3>Barkers</h3>
-          <table className="tbl"><thead><tr><th>Kitchen · barker</th><th className="n">KOTs</th><th className="n">Firing → ready</th><th className="n">Late</th></tr></thead>
+          <table className="tbl"><thead><tr><th>Kitchen · barker</th><th className="n">KOTs</th><th className="n">Pick-up → ready</th><th className="n">Late</th></tr></thead>
             <tbody>{r.barkerRows.map(x => <tr key={x.kitchen + x.side}><td>{x.kitchen} · {x.side}{x.name ? ' ' + x.name : ''}</td><td className="n">{x.kots}</td><td className="n">{mmss(x.fr)}</td><td className="n">{x.late}</td></tr>)}</tbody></table>
         </div>
         <div className="card">

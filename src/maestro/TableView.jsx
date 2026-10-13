@@ -6,16 +6,17 @@
      Right  the cover picked on the left: each dish with its kitchen, KOT,
             barker and times (fired, delivered), and Reprint for its KOT.
    Covers carry the captain who looks after them (cover split).
-   The desk can cancel a fired dish at any stage before it is served (a captain
-   only until the kitchen starts it); the kitchen gets a CANCEL slip. */
+   The desk can void a fired dish at any stage before it is served (a captain
+   only until the kitchen starts it); the kitchen gets a VOID slip.
+   A table's last chairs are 1A, 2A … (10 chairs: C1–C8, 1A, 2A); a table can have its own number of chairs. */
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { coursesOf, lateMinutes, dishStatus, useLive, useNow, rpc, errText, mmss, clockText, rangeText, tableRanges, capOrder, captainsForCover } from './msData'
+import { coursesOf, lateMinutes, dishStatus, useLive, useNow, rpc, errText, mmss, clockText, rangeText, tableRanges, capOrder, captainsForCover, coverLabel, tc, coversOf, tableCovers } from './msData'
 
-export default function TableView({ ev, table, caps = [], kitchens = [], onClose }) {
+export default function TableView({ ev, table, caps = [], kitchens = [], readOnly = false, onClose }) {
   const now = useNow(1000)
   const courses = coursesOf(ev)
-  const coverCount = Math.max(1, Number(ev.chairs_per_table) || 10)
+  const coverCount = coversOf(ev, table)
   const [pick, setPick] = useState(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
@@ -49,7 +50,7 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
   // Who looks after each cover: the split set in Event set-up, or an even split by captain order
   const ranges = tableRanges(caps, table, coverCount)
   const ownerOf = c => captainsForCover(caps, table, c, coverCount).map(x => x.name).join(', ')
-  const covers = Array.from({ length: coverCount }, (_, i) => i + 1)
+  const covers = tableCovers(ev, table, [...d.covers.map(x => x.cover_no), ...d.items.map(i => i.cover_no)])
   const cover = pick ?? (covers.find(c => itemsOf(c).length) || 1)
   const extra = [...new Set(live.map(i => i.course).filter(c => !courses.includes(c)))]
   const cols = [...courses, ...extra]
@@ -67,7 +68,7 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
     setBusy(true)
     try {
       await rpc('ms_cancel', { p_item_ids: [i.id], p_by: 'Control Desk' })
-      setMsg({ text: `${i.name} cancelled for C${i.cover_no}${['printing', 'printed'].includes(k?.print_status) ? ' · a CANCEL slip prints in the kitchen' : ' · taken off the kitchen screen'}` })
+      setMsg({ text: `${i.name} voided for ${coverLabel(i.cover_no)}${['printing', 'printed'].includes(k?.print_status) ? ' · a VOID slip prints in the kitchen' : ' · taken off the kitchen screen'}` })
       q.reload()
     }
     catch (e) { setMsg({ text: errText(e), err: true }) }
@@ -99,7 +100,7 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
             <h3>Table T{table}</h3>
             <p>
               {tcaps.length ? tcaps.map(c => `${c.name} · ${rangeText(ranges.get(c.id))}`).join('   |   ') : 'No table captain'}
-              {'   ·   '}{seatedN}/{coverCount} covers seated · {served}/{live.length} dishes delivered
+              {'   ·   '}{seatedN}/{covers.length} covers seated · {served}/{live.length} dishes delivered
             </p>
           </div>
           <button className="btn btn-ghost" onClick={onClose}>Close</button>
@@ -114,7 +115,7 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
                 <tbody>
                   {covers.map(c => (
                     <tr key={c} className={c === cover ? 'cur' : ''}>
-                      <td className="cvc" style={{ cursor: 'pointer' }} onClick={() => setPick(c)}>C{c}{vipOf(c) ? ' ★' : ''}<small>{ownerOf(c) || (seatedAt(c) ? 'seated' : '')}</small></td>
+                      <td className="cvc" style={{ cursor: 'pointer' }} onClick={() => setPick(c)}>{coverLabel(c)}{vipOf(c) ? ' ★' : ''}<small>{ownerOf(c) || (seatedAt(c) ? 'seated' : '')}</small></td>
                       {cols.map(course => cellOf(c, course))}
                     </tr>
                   ))}
@@ -123,14 +124,14 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
             </div>
           </div>
           <div className="tvr">
-            <h4>T{table} · C{cover}{ownerOf(cover) ? <span> · {ownerOf(cover)}</span> : null}</h4>
+            <h4>{tc(table, cover)}{ownerOf(cover) ? <span> · {ownerOf(cover)}</span> : null}</h4>
             <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
               {seatedAt(cover) ? `Seated ${t(seatedAt(cover))}` : 'Not seated yet'} · {mine.length} {mine.length === 1 ? 'dish' : 'dishes'}
             </p>
             {vipOf(cover) && <div className="tvg vip">★ {[vipOf(cover).label, vipOf(cover).name].filter(Boolean).join(' - ')}</div>}
             {coverRow(cover).guest_allergy && <div className="tvg alg">Allergy · all dishes: {coverRow(cover).guest_allergy}</div>}
             {coverRow(cover).guest_note && <div className="tvg">Guest note: {coverRow(cover).guest_note}</div>}
-            {!byCourse.length && <div className="empty">Nothing ordered for C{cover} yet.</div>}
+            {!byCourse.length && <div className="empty">Nothing ordered for {coverLabel(cover)} yet.</div>}
             {byCourse.map(g => (
               <div className="tvc" key={g.course}>
                 <div className="h">{g.course}</div>
@@ -148,16 +149,16 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
                       </div>
                       <div className="r2">
                         {kitchenById[i.kitchen_id]?.name || ''}
-                        {k ? ` · ${k.kot_no} · Barker ${k.barker || 'A'}${k.barker_name ? ' ' + k.barker_name : ''}` : ' · not fired yet'}
+                        {k ? ` · ${k.kot_no} · Barker ${k.barker || 'A'}${k.barker_name ? ' ' + k.barker_name : ''}` : ' · not picked up yet'}
                         {k?.is_remake ? ' · REMAKE' : ''}
                       </div>
                       {k && (
                         <div className="r3">
-                          <span>Fired {t(k.fired_at)}</span>
+                          <span>Picked up {t(k.fired_at)}</span>
                           {done && <span>Delivered {t(done)} ({mmss(new Date(done) - new Date(k.fired_at))}){k.stage_by ? ` by ${k.stage_by}` : ''}</span>}
                           {!done && <span>{k.stage === 'new' ? 'Not on the kitchen screen yet' : 'In kitchen'} · {mmss(now - new Date(k.fired_at))}</span>}
-                          <button className="btn btn-ghost" disabled={busy} onClick={() => reprint(k)}>Reprint KOT</button>
-                          {i.state === 'fired' && !done && k.status === 'open' && <DeskCancel disabled={busy} onCancel={() => cancelDish(i, k)} />}
+                          {!readOnly && <button className="btn btn-ghost" disabled={busy} onClick={() => reprint(k)}>Reprint KOT</button>}
+                          {!readOnly && i.state === 'fired' && !done && k.status === 'open' && <DeskCancel disabled={busy} onCancel={() => cancelDish(i, k)} />}
                         </div>
                       )}
                     </div>
@@ -172,11 +173,11 @@ export default function TableView({ ev, table, caps = [], kitchens = [], onClose
   )
 }
 
-// Cancel needs a second tap: it takes the dish off the kitchen screen and prints a CANCEL slip
+// Void needs a second tap: it takes the dish off the kitchen screen and prints a VOID slip
 function DeskCancel({ disabled, onCancel }) {
   const [armed, setArmed] = useState(false)
   useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 4000); return () => clearTimeout(t) }, [armed])
   return armed
-    ? <button className="btn btn-red" disabled={disabled} onClick={() => { setArmed(false); onCancel() }}>Cancel dish?</button>
-    : <button className="btn btn-ghost" style={{ color: 'var(--red)' }} disabled={disabled} onClick={() => setArmed(true)}>Cancel</button>
+    ? <button className="btn btn-red" disabled={disabled} onClick={() => { setArmed(false); onCancel() }}>Void dish?</button>
+    : <button className="btn btn-ghost" style={{ color: 'var(--red)' }} disabled={disabled} onClick={() => setArmed(true)}>Void</button>
 }

@@ -20,29 +20,13 @@ import './maestro.css'
 import {
   coursesOf, courseRank, lateMinutes, dishStatus, deliveredAt, useLive, useNow, loadMenu, rpc, rpcRetry, errText, newRef,
   QUICK_NOTES, splitNote, joinNote, servedHideMinutes, ago, shortName, tc, coverRange, rangeText, tableRanges, capOrder,
+  isExtraCover, coverLabel, coversOf, tableCovers, spareOwner,
 } from './msData'
 
-const FOODS = ['#7DAA6A', '#7A3B2A', '#D5532F', '#A66A2C', '#C9A15B', '#B5582A', '#8E6BBF', '#3F8F8A', '#C98B2E']
 const ALL = '__all'
 const SHOW_DELIVERED_MS = 10000   // Show delivered: 10 seconds to read them, then they hide again
 
-function hash(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h }
-
-// Small square photo for the menu rows (the plate drawing when there is no photo)
-function DishThumb({ dish }) {
-  const [broken, setBroken] = useState(false)
-  if (dish.photo_url && !broken) {
-    return <div className="thumb"><img src={dish.photo_url} alt="" loading="lazy" onError={() => setBroken(true)} /></div>
-  }
-  const f = FOODS[hash(dish.name) % FOODS.length]
-  return (
-    <div className="thumb" style={{ background: 'linear-gradient(135deg,#F0E4CC,#fff)' }}>
-      <div className="food" style={{ width: 30, height: 30, margin: '-15px 0 0 -15px', background: `radial-gradient(circle at 35% 35%,${f}cc,${f})` }} />
-    </div>
-  )
-}
-
-// Cancel a dish already sent: a second tap, because it prints a CANCEL slip in the kitchen.
+// Void a dish already fired: a second tap, because it prints a VOID slip in the kitchen.
 function CancelFired({ disabled, onCancel }) {
   const [armed, setArmed] = useState(false)
   useEffect(() => {
@@ -51,11 +35,11 @@ function CancelFired({ disabled, onCancel }) {
     return () => clearTimeout(t)
   }, [armed])
   return armed
-    ? <button className="x arm" disabled={disabled} onClick={() => { setArmed(false); onCancel() }}>Cancel?</button>
-    : <button className="x" disabled={disabled} onClick={() => setArmed(true)} title="Cancel this dish (sent by mistake)">✕</button>
+    ? <button className="x arm" disabled={disabled} onClick={() => { setArmed(false); onCancel() }}>Void?</button>
+    : <button className="x void" disabled={disabled} onClick={() => setArmed(true)} title="Void this dish: the kitchen stops it">✕ Void</button>
 }
 
-// A second tap for actions that undo the guest's order (New guest, Remove VIP)
+// A second tap for actions that undo the guest's order (New guest)
 function Sure({ label, sure, disabled, onYes, cls = 'minib' }) {
   const [armed, setArmed] = useState(false)
   useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 4000); return () => clearTimeout(t) }, [armed])
@@ -140,14 +124,13 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const ev = eventData
   const courses = coursesOf(ev)
   const firstCourse = courses[0]
-  const coverCount = Math.max(1, Number(ev.chairs_per_table) || 10)
   const tableKey = `ms_table_${ev.id}_${captain.id}`
   const [table, setTable] = useState(() => {
     const saved = Number(localStorage.getItem(tableKey))
     return Number(captain.table_number) || saved || null
   })
   const [view, setView] = useState('take')
-  const [coverPick, setCover] = useState(() => coverRange(captain, coverCount)?.from || 1)
+  const [coverPick, setCover] = useState(() => coverRange(captain, coversOf(ev, captain.table_number))?.from || 1)
   // Two filter rows: Cuisine (All, Italian, Oriental ...) first, then Course (All, Soup ... Dessert)
   const [cuisineTab, setCuisineTab] = useState(ALL)
   const [courseTab, setCourseTab] = useState(ALL)
@@ -193,13 +176,16 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     const [m, vips, evr] = await Promise.all([
       loadMenu(ev.id),
       supabase.from('ms_vip_guests').select('*').eq('event_id', ev.id).eq('is_active', true).order('sort_order').order('name'),
-      supabase.from('events').select('id,late_minutes,served_hide_minutes').eq('id', ev.id).maybeSingle(),
+      // the event's settings read live: alert times, and covers per table changed at the desk
+      supabase.from('events').select('*').eq('id', ev.id).maybeSingle(),
     ])
     return { ...m, vips: vips.error ? [] : (vips.data || []), ev: evr.data || null }
   }, { eventId: ev.id, tables: ['ms_vip_guests'], intervalMs: 15000 })
   const menu = menuQ.data
   const vips = useMemo(() => menu?.vips || [], [menu])
   const evLive = { ...ev, ...(menu?.ev || {}) }
+  // this table's covers (a table can have its own number, set at the desk)
+  const coverCount = coversOf(evLive, table)
 
   const liveQ = useLive(async () => {
     if (!table) return { items: [], kots: [], covers: [], captains: [] }
@@ -231,11 +217,15 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   // This captain's covers, read live so a split changed at the desk reaches the tablet.
   const ranges = tableRanges(live.captains, table, coverCount)
   const myRange = (liveQ.data ? ranges.get(captain.id) : coverRange(captain, coverCount)) || null
-  const allCovers = Array.from({ length: coverCount }, (_, i) => i + 1)
-  const isMine = c => !myRange || (c >= myRange.from && c <= myRange.to)
+  // C1 … Cn, then the A chairs 1A, 2A … (10 chairs: C1–C8, 1A, 2A): 1A is Table Captain 1's, 2A Table Captain 2's
+  const allCovers = tableCovers(evLive, table, [...live.covers.map(x => x.cover_no), ...live.items.map(i => i.cover_no), ...outbox.map(o => o.cover)])
+  const spareOf = c => spareOwner(live.captains, c)
+  const isMine = c => !myRange || (isExtraCover(c) ? !spareOf(c) || spareOf(c).id === captain.id : c >= myRange.from && c <= myRange.to)
   const myCovers = allCovers.filter(isMine)
   const visibleCovers = showAll ? allCovers : myCovers
-  const ownerOf = c => live.captains.filter(x => { const r = ranges.get(x.id); return x.id !== captain.id && r && c >= r.from && c <= r.to }).map(x => x.name).join(', ')
+  const ownerOf = c => (isExtraCover(c)
+    ? (spareOf(c) && spareOf(c).id !== captain.id ? spareOf(c).name : '')
+    : live.captains.filter(x => { const r = ranges.get(x.id); return x.id !== captain.id && r && c >= r.from && c <= r.to }).map(x => x.name).join(', '))
   const cover = myRange && !showAll && !isMine(coverPick) ? myRange.from : coverPick
   const toggleOthers = () => { setCover(isMine(cover) ? cover : myRange.from); setSel(new Set()); setShowAll(v => !v) }
 
@@ -289,7 +279,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
           if (!seatedRef.current.has(o.cover)) {
             seatedRef.current = new Set([...seatedRef.current, o.cover])
             const s = await rpc('ms_seat', { p_event_id: ev.id, p_table_number: table, p_covers: [o.cover], p_captain_id: captain.id, p_seated: true, p_per_item: true }).catch(() => null)
-            if (s?.first_course?.kots?.length) setToast({ text: `C${o.cover} seated · ${firstCourse} fired` })
+            if (s?.first_course?.kots?.length) setToast({ text: `${coverLabel(o.cover)} seated · ${firstCourse} picked up` })
           }
           liveQ.reload()
         } catch (e) {
@@ -353,7 +343,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     try {
       const r = await rpc('ms_seat', { p_event_id: ev.id, p_table_number: table, p_covers: [c], p_captain_id: captain.id, p_seated: on, p_per_item: true })
       const fc = r?.first_course?.kots?.length
-      setToast({ text: on ? `C${c} seated${fc ? ` · ${firstCourse} fired` : ''}` : `C${c} marked not seated` })
+      setToast({ text: on ? `${coverLabel(c)} seated${fc ? ` · ${firstCourse} picked up` : ''}` : `${coverLabel(c)} marked not seated` })
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
     setBusy(false)
@@ -365,7 +355,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     setBusy(true)
     try {
       const r = await rpc('ms_seat', { p_event_id: ev.id, p_table_number: table, p_covers: todo, p_captain_id: captain.id, p_seated: true, p_per_item: true })
-      setToast({ text: `${todo.length} covers seated${r?.first_course?.kots?.length ? ` · ${firstCourse} fired` : ''}` })
+      setToast({ text: `${todo.length} covers seated${r?.first_course?.kots?.length ? ` · ${firstCourse} picked up` : ''}` })
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
     setBusy(false)
@@ -385,7 +375,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     try {
       const r = await rpcRetry('ms_fire', { p_event_id: ev.id, p_table_number: table, p_item_ids: ids, p_captain_id: captain.id, p_client_ref: newRef(), p_per_item: true })
       const k = r?.kots || []
-      setToast({ text: `${label || 'Fired'} · ${k.map(x => `${x.kot_no} (${x.kitchen})`).join(', ')}` })
+      setToast({ text: `${label || 'Picked up'} · ${k.map(x => `${x.kot_no} (${x.kitchen})`).join(', ')}` })
       setSel(new Set())
       await liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }); liveQ.reload() }
@@ -396,7 +386,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     setBusy(true)
     try {
       await rpc('ms_cancel', { p_item_ids: ids, p_by: captain.name })
-      setToast({ text: `${what} cancelled` })
+      setToast({ text: `${what} voided` })
       setSheet(null); liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
     setBusy(false)
@@ -410,12 +400,12 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
         .eq('id', i.id).eq('state', 'held').select('id')
       if (error) throw error
       if (!data?.length) { setToast({ text: `${i.name} was just sent to the kitchen - not removed` }); liveQ.reload(); return }
-      if (!quiet) setToast({ text: `${i.name} removed from C${i.cover_no}` })
+      if (!quiet) setToast({ text: `${i.name} removed from ${coverLabel(i.cover_no)}` })
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
   }
-  // A dish sent by mistake can be cancelled within a minute of firing (a CANCEL slip prints);
-  // after that the Control Desk cancels it
+  // A dish fired by mistake can be voided within a minute of firing (a VOID slip prints);
+  // after that the Control Desk voids it
   const canCancelFired = i => {
     const k = kotById[i.kot_id]
     if (i.state !== 'fired' || i.served_at || !k || k.status !== 'open') return false
@@ -474,7 +464,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     try {
       setOutbox(list => list.filter(o => o.cover !== c || o.ids))
       const r = await rpc('ms_cover_reset', { p_event_id: ev.id, p_table_number: table, p_cover_no: c })
-      setToast({ text: `C${c} ready for a new guest${r?.cancelled ? ` · ${r.cancelled} dish${r.cancelled === 1 ? '' : 'es'} not fired removed` : ''}` })
+      setToast({ text: `${coverLabel(c)} ready for a new guest${r?.cancelled ? ` · ${r.cancelled} dish${r.cancelled === 1 ? '' : 'es'} not picked up removed` : ''}` })
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
     setBusy(false)
@@ -485,16 +475,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     try {
       const r = await rpc('ms_vip_apply', { p_event_id: ev.id, p_table_number: table, p_cover_no: c, p_vip_id: v.id, p_captain_id: captain.id })
       setSheet(null); setCover(c)
-      setToast({ text: `★ ${v.name} on C${c}${auto ? ' (reserved seat)' : ''} · ${r?.held ? `${r.held} preferred dish${r.held === 1 ? '' : 'es'} added` : 'preferences loaded'}` })
-      liveQ.reload()
-    } catch (e) { setToast({ text: errText(e), err: true }) }
-    setBusy(false)
-  }
-  async function clearVip(c) {
-    setBusy(true)
-    try {
-      const r = await rpc('ms_vip_clear', { p_event_id: ev.id, p_table_number: table, p_cover_no: c })
-      setToast({ text: `VIP removed from C${c}${r?.cancelled ? ` · ${r.cancelled} dish${r.cancelled === 1 ? '' : 'es'} not fired removed` : ''}` })
+      setToast({ text: `★ ${v.name} on ${coverLabel(c)}${auto ? ' (reserved seat)' : ''} · ${r?.held ? `${r.held} preferred dish${r.held === 1 ? '' : 'es'} added` : 'preferences loaded'}` })
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
     setBusy(false)
@@ -565,20 +546,24 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const czTag = id => <span className={'cz z' + (cuisineRank(id) % 6)}>{catName(id)}</span>
   const vipDishes = vip ? (vip.dishes || []).map(x => dishById[x.menu_item_id]).filter(Boolean) : []
 
-  // One compact row per dish: photo, name, cuisine and one button: + adds it to the cover,
+  // One tile per dish (3 to a row on the captain tablet, no photo): cuisine on top, the name
+  // on up to three lines, one line of description and one button: + adds it to the cover,
   // then the same button is − and takes it off again (no quantity)
   const dishCard = (d, k = '') => {
     const n = unfiredCount(d.id)
     const sent = itemsOf(cover).some(i => i.menu_item_id === d.id && i.state === 'fired')
     const off = d.is_available === false
     return (
-      <div key={k + d.id} className={'dish drow' + (off ? ' off' : '') + (n ? ' picked' : '')}>
-        <DishThumb dish={d} />
-        <div className="dm">
-          <div className="dn"><Veg veg={d.is_veg} />{d.name}</div>
-          <div className="dd">{czTag(d.category_id)}{sent && !n && <b className="snt">✓ Sent</b>}{query || k ? <b className="dq">{d.course}</b> : null}{d.vip_only && <b className="vtag">VIP only</b>}{d.description || ''}</div>
+      <div key={k + d.id} className={'dish dtile' + (off ? ' off' : '') + (n ? ' picked' : '')} data-dish={d.name}>
+        <div className="dtop">
+          {czTag(d.category_id)}
+          {(query || k) && d.course ? <b className="dq">{d.course}</b> : null}
+          {d.vip_only && <b className="vtag">VIP only</b>}
+          {sent && !n && <b className="snt">✓ Sent</b>}
         </div>
-        <div className="da">
+        <div className="dn"><Veg veg={d.is_veg} /><span className="dnt">{d.name}</span></div>
+        {d.description && <div className="dd">{d.description}</div>}
+        <div className="dbot">
           {off ? <span className="so">Sold out</span> : n
             ? <button className="addm" onClick={() => minusDish(d)} aria-label={`Remove ${d.name}`}>−</button>
             : <button className="addp" onClick={() => addDish(d)} aria-label={`Add ${d.name}`}>+</button>}
@@ -606,7 +591,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const nKitchen = coverItems.filter(i => i.state === 'fired').length - delivered.length
   const nLate = coverItems.filter(i => i.state === 'fired' && statusOf(i).late).length
   const unsaved = outbox.filter(o => !o.ids && o.err).length
-  const summary = [nHeld && <span key="h" className="s-h">{nHeld} not fired</span>,
+  const summary = [nHeld && <span key="h" className="s-h">{nHeld} to pick up</span>,
     nKitchen > 0 && <span key="k" className="s-k">{nKitchen} in kitchen{nLate ? ` (${nLate} late)` : ''}</span>,
     delivered.length > 0 && <span key="s" className="s-s">{delivered.length} delivered</span>].filter(Boolean)
   const panelOpen = pinned || orderOpen
@@ -642,7 +627,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
         {i.state === 'held' ? (
           <>
             <button className={'nbtn' + (noteOpen === 'item:' + i.id ? ' act' : '')} onClick={() => toggleNote('item:' + i.id)}>{i.note || i.allergy ? 'Note' : '+ Note'}</button>
-            <button className="firei" disabled={firing.has(i.id)} onClick={() => fireIds([i.id], `${i.name} fired for C${i.cover_no}`)}>{firing.has(i.id) ? 'Firing…' : 'Fire'}</button>
+            <button className="firei" disabled={firing.has(i.id)} onClick={() => fireIds([i.id], `${i.name} picked up for ${coverLabel(i.cover_no)}`)}>{firing.has(i.id) ? 'Sending…' : 'Pick up'}</button>
             <button className="x" disabled={busy} onClick={() => removeHeld(i)} title="Remove this dish">✕</button>
           </>
         ) : (
@@ -689,7 +674,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
                 </div>
               </>
             )}
-            <div className="dlist">
+            <div className="dlist tiles">
               {!query && vipDishes.length > 0 && [
                 <div key="vh" className="ghead vh">★ Preferred by {vip.name}<span>· {vipDishes.length} {vipDishes.length === 1 ? 'dish' : 'dishes'}</span></div>,
                 ...vipDishes.map(d => dishCard(d, 'v')),
@@ -710,28 +695,19 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
                 <b>{tc(table, cover)} · order</b>
                 {seated.has(cover)
                   ? <span className="tagF">Seated</span>
-                  : <button className="minib" disabled={busy} onClick={() => seat(cover)}>Mark seated{autoFirst ? ` · fires ${firstCourse}` : ''}</button>}
+                  : <button className="minib" disabled={busy} onClick={() => seat(cover)}>Mark seated{autoFirst ? ` · picks up ${firstCourse}` : ''}</button>}
                 <span style={{ flex: 1 }} />
                 {(coverItems.length > 0 || cr?.guest_note || cr?.guest_allergy || vip) && <Sure label="New guest" sure="New guest?" disabled={busy} onYes={() => newGuest(cover)} />}
                 {!pinned && <button className="minib" onClick={() => setOrderOpen(false)}>Hide</button>}
                 <button className={'pin' + (pinned ? ' pd' : '')} onClick={togglePin} aria-label={pinned ? 'Pinned' : 'Pin'}
                   title={pinned ? 'Pinned: always shown. Tap to let it hide while you pick dishes' : 'Keep the order always shown'}>{pinned ? '📌' : '📌 Pin'}</button>
               </div>
-              {vip && (
-                <div className="vipb" data-testid="vip-banner">
-                  <div className="vt"><b>★ {vip.label ? `${vip.label} · ` : ''}{vip.name}</b><Sure label="Remove VIP" sure="Remove?" disabled={busy} onYes={() => clearVip(cover)} /></div>
-                  {vip.allergies && <div className="va">Allergy: {vip.allergies}</div>}
-                  {vip.likes && <div className="vl">Likes: {vip.likes}</div>}
-                  {vip.dislikes && <div className="vl">Dislikes: {vip.dislikes}</div>}
-                  {vip.notes && <div className="vl">Note: {vip.notes}</div>}
-                </div>
-              )}
               {reserved && <div className="vipr">★ Reserved for {reserved.name}<button className="minib" disabled={busy} onClick={() => applyVip(reserved, cover)}>Load preferences</button></div>}
               <div className="sum">
                 <button className={'gbtn' + (noteOpen === 'guest:' + cover ? ' act' : '')} onClick={() => toggleNote('guest:' + cover)}>
                   {cr?.guest_note || cr?.guest_allergy ? 'Guest note' : '+ Guest note (all dishes)'}</button>
                 <NoteTags note={cr?.guest_note} allergy={cr?.guest_allergy} />
-                {summary.length ? summary : <span>Nothing ordered for C{cover} yet · tap + on a dish</span>}
+                {summary.length ? summary : <span>Nothing ordered for {coverLabel(cover)} yet · tap + on a dish</span>}
                 {hiddenDelivered.length > 0 && (showingDelivered
                   ? <button className="shw" onClick={() => setShowDelivered(0)}>Hide delivered</button>
                   : <button className="shw" onClick={() => setShowDelivered(Date.now() + SHOW_DELIVERED_MS)}>Show delivered ({hiddenDelivered.length})</button>)}
@@ -741,12 +717,12 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
                 <NoteEditor key={'guest:' + cover} note={cr?.guest_note} allergy={cr?.guest_allergy}
                   onSave={(n, a) => saveNote({ kind: 'guest', cover }, n, a)} onClose={() => setNoteOpen(null)} />
               )}
-              {!isMine(cover) && <div className="helpout">Helping out: C{cover} is {ownerOf(cover) || 'another captain'}'s cover</div>}
+              {!isMine(cover) && <div className="helpout">Helping out: {coverLabel(cover)} is {ownerOf(cover) || 'another captain'}'s cover</div>}
             </div>
             <ScrollBox className="scroll olist">
               {orderedLines.map(orderLine)}
               {!lines.length && (
-                <div className="empty">{hiddenDelivered.length ? 'Everything ordered has been delivered.' : 'Tap + on a dish: it is saved at once. Each dish has its own Fire button.'}</div>
+                <div className="empty">{hiddenDelivered.length ? 'Everything ordered has been delivered.' : 'Tap + on a dish: it is saved at once. Each dish has its own Pick up button.'}</div>
               )}
             </ScrollBox>
           </>
@@ -811,16 +787,16 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     const held = its.some(i => i.state === 'held')
     const servedTimes = its.filter(i => i.served_at).sort((a, b) => new Date(b.served_at) - new Date(a.served_at))
     const lastFired = its.filter(i => i.fired_at && !i.served_at).sort((a, b) => new Date(b.fired_at) - new Date(a.fired_at))[0]
-    if (held && since && now - since > (Number(ev.pacing_minutes) || 25) * 60000) pace.push({ c, t: `nothing fired for ${Math.floor((now - since) / 60000)} min`, w: 2 })
+    if (held && since && now - since > (Number(ev.pacing_minutes) || 25) * 60000) pace.push({ c, t: `nothing picked up for ${Math.floor((now - since) / 60000)} min`, w: 2 })
     else if (servedTimes[0]) pace.push({ c, t: `${servedTimes[0].course?.toLowerCase() || 'course'} delivered ${ago(servedTimes[0].served_at, now)}`, w: 1 })
-    else if (lastFired && !late.length) pace.push({ c, t: `${lastFired.course?.toLowerCase() || 'course'} fired ${ago(lastFired.fired_at, now)}`, w: 0 })
+    else if (lastFired && !late.length) pace.push({ c, t: `${lastFired.course?.toLowerCase() || 'course'} picked up ${ago(lastFired.fired_at, now)}`, w: 0 })
   }
   pace.sort((a, b) => b.w - a.w)
 
   // Status key with counts for the covers shown
   const shownItems = live.items.filter(i => i.state !== 'cancelled' && boardCovers.includes(i.cover_no) && courses.includes(i.course))
   const tally = cls => shownItems.filter(i => statusOf(i).cls === cls).length
-  const KEY = [['hd', 'Not fired'], ['fi', 'In kitchen'], ['sv', 'Delivered'], ['lt', `Late (over ${lateMinutes(null, evLive)} min)`]]
+  const KEY = [['hd', 'To pick up'], ['fi', 'In kitchen'], ['sv', 'Delivered'], ['lt', `Late (over ${lateMinutes(null, evLive)} min)`]]
 
   const board = (
     <div className="body bd">
@@ -837,7 +813,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
             <tbody>
               {boardCovers.map(c => (
                 <tr key={c}>
-                  <td className={'cvc' + (isMine(c) ? '' : ' oth')} style={{ cursor: 'pointer' }} onClick={() => onCoverHead(c)}>C{c}{vipOf(c) ? ' ★' : ''}<small>{selCovers.includes(c) ? 'selected' : !isMine(c) ? ownerOf(c) || 'other' : seated.has(c) ? 'seated' : itemsOf(c).length ? 'ordered' : 'empty'}</small></td>
+                  <td className={'cvc' + (isMine(c) ? '' : ' oth')} style={{ cursor: 'pointer' }} onClick={() => onCoverHead(c)}>{coverLabel(c)}{vipOf(c) ? ' ★' : ''}<small>{selCovers.includes(c) ? 'selected' : !isMine(c) ? ownerOf(c) || 'other' : seated.has(c) ? 'seated' : itemsOf(c).length ? 'ordered' : 'empty'}</small></td>
                   {courses.map(course => {
                     const its = cellItems(c, course)
                     if (!its.length) return <td key={course} className="c na"><b>—</b></td>
@@ -850,7 +826,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
                     const name = its.length === 1 ? its[0].name : `${its.length} dishes · ${kitchens} kitchen${kitchens === 1 ? '' : 's'}`
                     return (
                       <td key={course} className={'c ' + (isSel ? 'sel' : st.cls)} onClick={() => onCell(c, course)} title={its.map(i => i.name).join(', ')}>
-                        <b>{name}</b><span>{isSel ? 'Fire' : st.label}</span>
+                        <b>{name}</b><span>{isSel ? 'Pick up' : st.label}</span>
                       </td>
                     )
                   })}
@@ -864,21 +840,21 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
             <div><b>{selItems.length} {selItems.length === 1 ? 'dish' : 'dishes'} selected · {selCovers.map(c => 'C' + c).join(', ')}</b><br />
               <small>{selCourses.join(' + ')} · {selKitchens.join(', ')} · one KOT per dish</small></div>
           ) : (
-            <div><b>Tap held dishes to fire</b><br /><small>Tap a course heading for every cover shown, or a cover for its next course</small></div>
+            <div><b>Tap held dishes to pick up</b><br /><small>Tap a course heading for every cover shown, or a cover for its next course</small></div>
           )}
           <div style={{ flex: 1 }} />
           <button className="btn btn-ghost" style={{ background: 'transparent', color: '#fff', borderColor: 'rgba(255,255,255,.35)' }} disabled={!sel.size} onClick={() => setSel(new Set())}>Clear</button>
           <button className="btn btn-amber" style={{ padding: '10px 18px', fontSize: 14 }} disabled={busy || !selItems.length}
-            onClick={() => fireIds(selItems.map(i => i.id), `${selCourses.join(' + ')} fired`)}>Fire {selItems.length || ''} {selItems.length === 1 ? 'dish' : 'dishes'}</button>
+            onClick={() => fireIds(selItems.map(i => i.id), `${selCourses.join(' + ')} picked up`)}>Pick up {selItems.length || ''} {selItems.length === 1 ? 'dish' : 'dishes'}</button>
         </div>
       </div>
       <div className="side">
         <h5>Pace</h5>
         <div className="pace">
-          {pace.length ? pace.slice(0, 8).map((p, i) => <div key={i}><b>C{p.c}</b> {p.t}</div>) : <span className="muted">Seat covers and fire the first dishes to see the pace here.</span>}
+          {pace.length ? pace.slice(0, 8).map((p, i) => <div key={i}><b>{coverLabel(p.c)}</b> {p.t}</div>) : <span className="muted">Seat covers and pick up the first dishes to see the pace here.</span>}
         </div>
-        <div className="pace" style={{ background: '#FFF8E6' }}><b>Flexible sequence:</b> fire one dish or several, for one cover or several. Each dish prints as its own KOT.</div>
-        <button className="btn btn-ghost" disabled={busy || visibleCovers.every(c => seated.has(c))} onClick={seatAll}>{myRange && !showAll ? `Seat my covers (${rangeText(myRange)})` : 'Seat all covers'}{autoFirst ? ` · fires ${firstCourse}` : ''}</button>
+        <div className="pace" style={{ background: '#FFF8E6' }}><b>Flexible sequence:</b> pick up one dish or several, for one cover or several. Each dish prints as its own KOT.</div>
+        <button className="btn btn-ghost" disabled={busy || visibleCovers.every(c => seated.has(c))} onClick={seatAll}>{myRange && !showAll ? `Seat my covers (${rangeText(myRange)})` : 'Seat all covers'}{autoFirst ? ` · picks up ${firstCourse}` : ''}</button>
       </div>
     </div>
   )
@@ -888,8 +864,8 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
       <AppBar
         title={view === 'take' ? `Table T${table} · ${captain.name}${myRange ? ` · ${rangeText(myRange)}` : ''}` : `Table T${table} · Course board`}
         sub={view === 'take'
-          ? `${capNo >= 0 ? `Table Captain ${capNo + 1} · ` : ''}${myRange ? `your covers ${rangeText(myRange)} · ${seatedMine} seated` : `${coverCount} covers · ${seated.size} seated`}`
-          : `${live.captains.map((c, i) => `${c.name} (TC${i + 1}${ranges.get(c.id) ? ' · ' + rangeText(ranges.get(c.id)) : ''})`).join(' · ') || captain.name} · ${seated.size} covers seated · tap dishes to fire`}
+          ? `${capNo >= 0 ? `Table Captain ${capNo + 1} · ` : ''}${myRange ? `your covers ${rangeText(myRange)} · ${seatedMine} seated` : `${allCovers.length} covers · ${seated.size} seated`}`
+          : `${live.captains.map((c, i) => `${c.name} (TC${i + 1}${ranges.get(c.id) ? ' · ' + rangeText(ranges.get(c.id)) : ''})`).join(' · ') || captain.name} · ${seated.size} covers seated · tap dishes to pick up`}
         right={<>
           <div className="tabsw">
             <button className={view === 'take' ? 'a' : ''} onClick={() => setView('take')}>Take order</button>
@@ -911,8 +887,8 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
             const star = vipOf(c) ? '★ ' : reservedFor(c) ? '☆ ' : ''
             return [
               head && <span key={'o' + c} className={'l' + (grp(c) ? ' oth' : '')}>{grp(c) || 'My covers'}</span>,
-              <button key={c} className={'cv' + (isMine(c) ? '' : ' oth') + (c === cover ? ' sel' : s === 'ordered' || s === 'delivered' ? ' done' : s === 'seated' ? ' seat' : '') + (vipOf(c) ? ' vip' : '')}
-                onClick={() => setCover(c)}><b>{star}C{c}</b><small>{c === cover ? 'taking now' : s}</small></button>,
+              <button key={c} className={'cv' + (isMine(c) ? '' : ' oth') + (isExtraCover(c) ? ' xc' : '') + (c === cover ? ' sel' : s === 'ordered' || s === 'delivered' ? ' done' : s === 'seated' ? ' seat' : '') + (vipOf(c) ? ' vip' : '')}
+                onClick={() => setCover(c)}><b>{star}{coverLabel(c)}</b><small>{c === cover ? 'taking now' : s}</small></button>,
             ]
           })}
           <span style={{ flex: 1 }} />
@@ -1072,7 +1048,7 @@ function VipSheet({ vips, table, cover, covers, busy, seatOf, onClose, onApply }
                 return (
                   <button key={v.id} className="vipi" onClick={() => { setPick(v); setC(v.table_number && Number(v.table_number) === Number(table) && v.cover_no ? Number(v.cover_no) : cover) }}>
                     <b>★ {v.name}</b>{v.label && <span className="vlab">{v.label}</span>}
-                    <small>{at ? `Seated at T${at.table_number} · C${at.cover_no}` : v.table_number && v.cover_no ? `Reserved T${v.table_number} · C${v.cover_no}` : 'Any table'}
+                    <small>{at ? `Seated at ${tc(at.table_number, at.cover_no)}` : v.table_number && v.cover_no ? `Reserved ${tc(v.table_number, v.cover_no)}` : 'Any table'}
                       {v.allergies ? ` · Allergy: ${v.allergies}` : ''}{(v.dishes || []).length ? ` · ${(v.dishes || []).length} preferred dishes` : ''}</small>
                   </button>
                 )
@@ -1085,12 +1061,12 @@ function VipSheet({ vips, table, cover, covers, busy, seatOf, onClose, onApply }
             <h3>★ {pick.name}</h3>
             <p>{[pick.label, pick.allergies && `Allergy: ${pick.allergies}`, pick.dislikes && `Dislikes: ${pick.dislikes}`, pick.notes].filter(Boolean).join(' · ')}</p>
             {seatOf(pick) && !(seatOf(pick).table_number === table && seatOf(pick).cover_no === c) && (
-              <p className="vmove">Now at T{seatOf(pick).table_number} · C{seatOf(pick).cover_no}: choosing a cover here moves the guest (their dishes not fired there are removed).</p>
+              <p className="vmove">Now at {tc(seatOf(pick).table_number, seatOf(pick).cover_no)}: choosing a cover here moves the guest (their dishes not picked up there are removed).</p>
             )}
             <div className="nsec">Cover at table T{table}</div>
-            <div className="vcov">{covers.map(x => <button key={x} className={x === c ? 'a' : ''} onClick={() => setC(x)}>C{x}</button>)}</div>
+            <div className="vcov">{covers.map(x => <button key={x} className={x === c ? 'a' : ''} onClick={() => setC(x)}>{coverLabel(x)}</button>)}</div>
             <div className="row" style={{ marginTop: 12 }}>
-              <button className="btn btn-amber" disabled={busy} onClick={() => onApply(pick, c)}>Seat at C{c} · load preferences</button>
+              <button className="btn btn-amber" disabled={busy} onClick={() => onApply(pick, c)}>Seat at {coverLabel(c)} · load preferences</button>
               <button className="btn btn-ghost" onClick={() => setPick(null)}>Back</button>
             </div>
           </>
@@ -1103,7 +1079,7 @@ function VipSheet({ vips, table, cover, covers, busy, seatOf, onClose, onApply }
 function CellSheet({ sheet, table, statusOf, kotById, kitchenById, busy, canCancel, onClose, onServe, onRemake, onCancel }) {
   const its = sheet.items
   const toServe = [...new Set(its.filter(i => i.state === 'fired' && !i.served_at && statusOf(i).cls !== 'sv').map(i => i.kot_id).filter(Boolean))]
-  // Remake and Cancel reach the kitchen at once, so each takes a second tap.
+  // Remake and Void reach the kitchen at once, so each takes a second tap.
   const [ask, setAsk] = useState(null)   // { id, kind: 'remake' | 'cancel' }
   const sure = (i, kind) => ask?.id === i.id && ask.kind === kind
   return (
@@ -1125,19 +1101,19 @@ function CellSheet({ sheet, table, statusOf, kotById, kitchenById, busy, canCanc
                     ? <button className="btn btn-amber" style={{ padding: '4px 9px', fontSize: 12 }} disabled={busy} onClick={() => onRemake([i.id])}>Send remake</button>
                     : <button className="btn btn-ghost" style={{ padding: '4px 9px', fontSize: 12 }} disabled={busy} onClick={() => setAsk({ id: i.id, kind: 'remake' })}>Remake</button>)}
                   {canCancel(i) && (sure(i, 'cancel')
-                    ? <button className="btn btn-red" style={{ padding: '4px 9px', fontSize: 12 }} disabled={busy} onClick={() => onCancel([i.id], i.name)}>Cancel dish</button>
-                    : <button className="btn btn-ghost" style={{ padding: '4px 9px', fontSize: 12, color: 'var(--red)' }} disabled={busy} onClick={() => setAsk({ id: i.id, kind: 'cancel' })}>Cancel</button>)}
+                    ? <button className="btn btn-red" style={{ padding: '4px 9px', fontSize: 12 }} disabled={busy} onClick={() => onCancel([i.id], i.name)}>Void dish</button>
+                    : <button className="btn btn-ghost" style={{ padding: '4px 9px', fontSize: 12, color: 'var(--red)' }} disabled={busy} onClick={() => setAsk({ id: i.id, kind: 'cancel' })}>Void</button>)}
                 </span>
               </div>
             )
           })}
         </div>
         {its.some(i => i.state === 'fired' && statusOf(i).cls !== 'sv' && !canCancel(i)) && !ask && (
-          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>A dish sent more than a minute ago can be cancelled by the Control Desk.</p>
+          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>A dish picked up more than a minute ago can be voided by the Control Desk.</p>
         )}
         {ask && its.some(i => i.id === ask.id && (ask.kind !== 'cancel' || canCancel(i))) && <p style={{ fontSize: 12.5, color: ask.kind === 'cancel' ? 'var(--red)' : 'var(--ink)', margin: '0 0 10px' }}>
           {ask.kind === 'cancel'
-            ? 'Tap Cancel dish to confirm. The kitchen screen updates at once, and a CANCEL slip prints if the KOT was already printed.'
+            ? 'Tap Void dish to confirm. The kitchen screen updates at once, and a VOID slip prints if the KOT was already printed.'
             : 'Tap Send remake to confirm. A new KOT marked REMAKE - PRIORITY goes to the kitchen.'}</p>}
         <div className="row">
           {toServe.length > 0 && <button className="btn btn-green" disabled={busy} onClick={() => onServe(toServe)}>Mark delivered</button>}

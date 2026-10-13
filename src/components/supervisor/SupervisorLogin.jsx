@@ -2,6 +2,10 @@ import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import janusLogo from '../../assets/janus_logo.jpg'
 
+// View-only big screens (Smart Serve Maestro) sign in here too and keep their own role
+const SCREEN_ROLES = ['screen_desk', 'screen_kitchens']
+const roleOf = sup => (SCREEN_ROLES.includes(sup?.role) ? sup.role : 'supervisor')
+
 export default function SupervisorLogin({ onLogin }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -54,7 +58,7 @@ export default function SupervisorLogin({ onLogin }) {
         if (opts.length === 1) {
           const only = opts[0]
           if (!only.event) { setError('Your event could not be found. Ask the admin to check your account.'); return }
-          onLogin({ ...only.sup, role:'supervisor', assignedEvent: only.event })
+          onLogin({ ...only.sup, role: roleOf(only.sup), assignedEvent: only.event })
           return
         }
         setChoices(opts)
@@ -83,7 +87,7 @@ export default function SupervisorLogin({ onLogin }) {
           const today = new Date(); today.setHours(0,0,0,0)
           const isToday = d && d.setHours(0,0,0,0) === today.getTime()
           return (
-            <button key={i} onClick={() => onLogin({ ...o.sup, role:'supervisor', assignedEvent:o.event })}
+            <button key={i} onClick={() => onLogin({ ...o.sup, role: roleOf(o.sup), assignedEvent:o.event })}
               disabled={!o.event}
               style={{ width:'100%', textAlign:'left', background:'rgba(255,255,255,0.08)',
                 border:'1px solid rgba(255,255,255,0.2)', borderRadius:14, padding:'14px 16px',
