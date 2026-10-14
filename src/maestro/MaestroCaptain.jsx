@@ -967,7 +967,7 @@ const SPEECH_ERR = {
   'not-allowed': 'The microphone is not allowed for this page. Allow it (tap the lock or ⓘ next to the address › Permissions › Microphone › Allow) and tap 🎤 again.',
   'service-not-allowed': 'Voice typing is switched off on this tablet. ' + KEYBOARD_MIC,
   'network': 'Voice typing needs internet. ' + KEYBOARD_MIC,
-  'no-speech': 'Did not hear anything. Tap 🎤 and speak.',
+  'no-speech': '',
   'audio-capture': 'No microphone answered (another app may be using it). ' + KEYBOARD_MIC,
   'language-not-supported': 'Voice typing in English is not installed on this tablet. ' + KEYBOARD_MIC,
 }
@@ -1002,11 +1002,10 @@ function useSpeech(onText) {
   function listen(lang) {
     const r = new SR()
     r.lang = lang; r.interimResults = false; r.maxAlternatives = 1; r.continuous = false
-    let started = false, heard = false, failed = false
+    let started = false
     // a recogniser that never starts (some tablets, app wrappers): give up after a few seconds
     const watchdog = setTimeout(() => {
       if (started || stopRef.current) return
-      failed = true
       try { r.abort() } catch { /* stopped */ }
       setOn(false); setErr('This tablet did not start listening. ' + KEYBOARD_MIC)
     }, 6000)
@@ -1015,21 +1014,21 @@ function useSpeech(onText) {
     r.onaudiostart = begin
     r.onresult = e => {
       const t = Array.from(e.results).map(x => x[0]?.transcript || '').join(' ').trim()
-      if (t) { heard = true; cb.current(t) }
+      if (t) cb.current(t)
     }
     r.onerror = e => {
       clearTimeout(watchdog)
-      if (e?.error === 'language-not-supported' && lang !== 'en-US') { failed = true; listen('en-US'); return }
+      if (e?.error === 'language-not-supported' && lang !== 'en-US') { listen('en-US'); return }
       if (e?.error === 'aborted') return
-      failed = true
       setOn(false)
-      setErr(SPEECH_ERR[e?.error] || 'Voice typing stopped (' + (e?.error || 'error') + '). ' + KEYBOARD_MIC)
+      const m = SPEECH_ERR[e?.error]
+      setErr(m === '' ? '' : m || 'Voice typing stopped (' + (e?.error || 'error') + '). ' + KEYBOARD_MIC)
     }
     r.onend = () => {
       clearTimeout(watchdog)
       if (rec.current !== r) return
       setOn(false)
-      if (!heard && !failed && started && !stopRef.current) setErr('Did not catch that. Tap 🎤 and speak a little louder, or type.')
+      // nothing heard: the button simply goes back to 🎤, no message
     }
     rec.current = r
     r.start()
@@ -1099,13 +1098,16 @@ function NoteEditor({ title, note, allergy, onSave, onClose, onField }) {
         <div className="nin">
           <input ref={inputRef} autoFocus value={val} onChange={e => setVal(e.target.value)} onBlur={() => save()}
             onKeyDown={e => { if (e.key === 'Enter') closeField() }}
-            placeholder={field === 'allergy' ? 'Allergy: type or speak, e.g. peanuts' : 'Type or speak, e.g. no tomato in the pizza'} />
-          <button className={'mic' + (speech.on ? ' act' : '')} onMouseDown={e => e.preventDefault()} onClick={speech.toggle} title="Speak" data-testid="note-mic">
-            {speech.on === 'asking' ? '🎤 …' : speech.on ? '● Stop' : '🎤'}</button>
+            placeholder={speech.usable
+              ? (field === 'allergy' ? 'Allergy: type or speak, e.g. peanuts' : 'Type or speak, e.g. no tomato in the pizza')
+              : (field === 'allergy' ? 'Allergy, e.g. peanuts (or 🎤 on the keyboard)' : 'Type, or tap 🎤 on the keyboard and speak')} />
+          {/* our own 🎤 only where the page can listen (Chrome, Samsung Internet, Safari, Edge); inside the
+              tablet app the keyboard's own 🎤 does the voice typing, so no button that cannot work */}
+          {speech.usable && <button className={'mic' + (speech.on ? ' act' : '')} onMouseDown={e => e.preventDefault()} onClick={speech.toggle} title="Speak" data-testid="note-mic">
+            {speech.on === 'asking' ? '🎤 …' : speech.on ? '● Stop' : '🎤'}</button>}
           <button className="ok" onMouseDown={e => e.preventDefault()} onClick={closeField}>OK</button>
         </div>
       )}
-      {field && speech.on === 'listening' && <div className="miclive">● Listening… speak now</div>}
       {field && speech.err && <div className="micerr" data-testid="note-mic-msg">{speech.err}</div>}
     </div>
   )
