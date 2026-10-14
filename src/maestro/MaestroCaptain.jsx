@@ -989,107 +989,11 @@ export function Sheet({ title, text, children, onClose }) {
   )
 }
 
-/* Note and allergy for one dish, or for everything a guest orders: tap the usual ones, type or
-   speak anything else under Other. */
-
-// Voice typing for a note, with the browser's speech recognition (Chrome, Safari, Edge; needs a
-// secure page and, on most tablets, internet). It first asks for the microphone, so the browser
-// shows its permission question; then it listens and writes what it heard. Where the page cannot
-// listen by itself (inside the Smart Serve app on a tablet, which is a WebView, or a browser
-// without it) the 🎤 says to use the keyboard's own mic, which works in every app.
-const KEYBOARD_MIC = 'Use the keyboard’s own mic: tap the small 🎤 at the bottom left, under the keyboard (or ⋯ on the keyboard’s top bar › Voice input), and speak.'
-const inWebView = () => {
-  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
-  return /; wv\)/.test(ua) || (/Android/.test(ua) && /Version\/[\d.]+ /.test(ua) && /Chrome\//.test(ua))
-}
-const SPEECH_ERR = {
-  'not-allowed': 'The microphone is not allowed for this page. Allow it (tap the lock or ⓘ next to the address › Permissions › Microphone › Allow) and tap 🎤 again.',
-  'service-not-allowed': 'Voice typing is switched off on this tablet. ' + KEYBOARD_MIC,
-  'network': 'Voice typing needs internet. ' + KEYBOARD_MIC,
-  'no-speech': '',
-  'audio-capture': 'No microphone answered (another app may be using it). ' + KEYBOARD_MIC,
-  'language-not-supported': 'Voice typing in English is not installed on this tablet. ' + KEYBOARD_MIC,
-}
-function useSpeech(onText) {
-  const SR = typeof window !== 'undefined' && window.isSecureContext ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
-  const usable = !!SR && !inWebView()
-  const [on, setOn] = useState(false)        // false | 'asking' | 'listening'
-  const [err, setErr] = useState('')
-  const rec = useRef(null)
-  const cb = useRef(onText); cb.current = onText
-  const stopRef = useRef(false)
-  useEffect(() => () => { stopRef.current = true; try { rec.current?.abort() } catch { /* already stopped */ } }, [])
-
-  async function askMic() {
-    // the permission question: the browser asks once, then remembers the answer for this site
-    if (!navigator.mediaDevices?.getUserMedia) return true
-    try { if ((await navigator.permissions?.query({ name: 'microphone' }))?.state === 'granted') return true } catch { /* not supported */ }
-    try {
-      const st = await navigator.mediaDevices.getUserMedia({ audio: true })
-      st.getTracks().forEach(t => t.stop())
-      await new Promise(r => setTimeout(r, 300))   // the microphone is free again for listening
-      return true
-    } catch (e) {
-      const n = e?.name || ''
-      setErr(n === 'NotAllowedError' || n === 'SecurityError' ? SPEECH_ERR['not-allowed']
-        : n === 'NotFoundError' || n === 'NotReadableError' ? SPEECH_ERR['audio-capture']
-        : 'The microphone could not be opened (' + (n || e?.message || 'error') + '). ' + KEYBOARD_MIC)
-      return false
-    }
-  }
-
-  function listen(lang) {
-    const r = new SR()
-    r.lang = lang; r.interimResults = false; r.maxAlternatives = 1; r.continuous = false
-    let started = false
-    // a recogniser that never starts (some tablets, app wrappers): give up after a few seconds
-    const watchdog = setTimeout(() => {
-      if (started || stopRef.current) return
-      try { r.abort() } catch { /* stopped */ }
-      setOn(false); setErr('This tablet did not start listening. ' + KEYBOARD_MIC)
-    }, 6000)
-    const begin = () => { if (!started) { started = true; clearTimeout(watchdog); setOn('listening') } }
-    r.onstart = begin
-    r.onaudiostart = begin
-    r.onresult = e => {
-      const t = Array.from(e.results).map(x => x[0]?.transcript || '').join(' ').trim()
-      if (t) cb.current(t)
-    }
-    r.onerror = e => {
-      clearTimeout(watchdog)
-      if (e?.error === 'language-not-supported' && lang !== 'en-US') { listen('en-US'); return }
-      if (e?.error === 'aborted') return
-      setOn(false)
-      const m = SPEECH_ERR[e?.error]
-      setErr(m === '' ? '' : m || 'Voice typing stopped (' + (e?.error || 'error') + '). ' + KEYBOARD_MIC)
-    }
-    r.onend = () => {
-      clearTimeout(watchdog)
-      if (rec.current !== r) return
-      setOn(false)
-      // nothing heard: the button simply goes back to 🎤, no message
-    }
-    rec.current = r
-    r.start()
-  }
-
-  const turn = useRef(0)   // a tap on Stop while the permission question is open cancels that turn
-  async function toggle() {
-    if (on) { turn.current++; try { rec.current?.stop() } catch { /* stopped */ } setOn(false); return }
-    setErr('')
-    if (!usable) { setErr(KEYBOARD_MIC); return }
-    const mine = ++turn.current
-    setOn('asking')
-    const allowed = await askMic()
-    if (stopRef.current || mine !== turn.current) return
-    if (!allowed) { setOn(false); return }
-    try { listen('en-IN') } catch { setOn(false); setErr('Voice typing is not available here. ' + KEYBOARD_MIC) }
-  }
-  return { ok: true, usable, on, err, toggle, clear: () => setErr('') }
-}
+/* Note and allergy for one dish, or for everything a guest orders: tap the usual ones, type
+   anything else under Other (voice typing: the 🎤 on the tablet's own keyboard). */
 
 // Notes in place, right under the dish (or the guest): six one-tap notes, then Other or Allergy
-// to type or speak. Every tap is saved at once - nothing to confirm, no screen to leave.
+// to type. Every tap is saved at once - nothing to confirm, no screen to leave.
 function NoteEditor({ note, allergy, onSave, onClose, onField }) {
   const parts = splitNote(note)
   const [picked, setPicked] = useState(() => new Set(parts.filter(x => QUICK_NOTES.includes(x))))
@@ -1112,17 +1016,12 @@ function NoteEditor({ note, allergy, onSave, onClose, onField }) {
   // typed but not saved when the note closes (cover changed, dish fired): saved anyway
   useEffect(() => () => save(), [])
   const flip = x => { const n = new Set(picked); n.has(x) ? n.delete(x) : n.add(x); setPicked(n); save(n) }
-  const speech = useSpeech(t => {
-    const { field: f, other: o, alg: a } = cur.current
-    if (f === 'allergy') { const v = a ? `${a}, ${t}` : t; setAlg(v); save(undefined, undefined, v) }
-    else { const v = o ? `${o}, ${t}` : t; setOther(v); setField('other'); save(undefined, v) }
-  })
   const val = field === 'allergy' ? alg : other
   const setVal = v => (field === 'allergy' ? setAlg(v) : setOther(v))
   const inputRef = useRef(null)
   // closing the field: the keyboard goes down and the screen is back as it was
-  const closeField = () => { save(); try { inputRef.current?.blur() } catch { /* gone */ } setField(null); speech.clear(); onField?.() }
-  const openField = f => { save(); speech.clear(); setField(cur => (cur === f ? null : f)); onField?.() }
+  const closeField = () => { save(); try { inputRef.current?.blur() } catch { /* gone */ } setField(null); onField?.() }
+  const openField = f => { save(); setField(cur => (cur === f ? null : f)); onField?.() }
   return (
     <div className="ned">
       <div className="qn">
@@ -1135,17 +1034,10 @@ function NoteEditor({ note, allergy, onSave, onClose, onField }) {
         <div className="nin">
           <input ref={inputRef} autoFocus value={val} onChange={e => setVal(e.target.value)} onBlur={() => save()}
             onKeyDown={e => { if (e.key === 'Enter') closeField() }}
-            placeholder={speech.usable
-              ? (field === 'allergy' ? 'Allergy: type or speak, e.g. peanuts' : 'Type or speak, e.g. no tomato in the pizza')
-              : (field === 'allergy' ? 'Allergy, e.g. peanuts (or 🎤 on the keyboard)' : 'Type, or tap 🎤 on the keyboard and speak')} />
-          {/* our own 🎤 only where the page can listen (Chrome, Samsung Internet, Safari, Edge); inside the
-              tablet app the keyboard's own 🎤 does the voice typing, so no button that cannot work */}
-          {speech.usable && <button className={'mic' + (speech.on ? ' act' : '')} onMouseDown={e => e.preventDefault()} onClick={speech.toggle} title="Speak" data-testid="note-mic">
-            {speech.on === 'asking' ? '🎤 …' : speech.on ? '● Stop' : '🎤'}</button>}
+            placeholder={field === 'allergy' ? 'Allergy, e.g. peanuts' : 'Type, e.g. no tomato in the pizza'} />
           <button className="ok" onMouseDown={e => e.preventDefault()} onClick={closeField}>OK</button>
         </div>
       )}
-      {field && speech.err && <div className="micerr" data-testid="note-mic-msg">{speech.err}</div>}
     </div>
   )
 }
