@@ -335,9 +335,9 @@
   .ms .body:not(.bd){flex-direction:column}
   .ms .body:not(.bd) .menu{flex:1 1 0;min-height:0}
   .ms .body:not(.bd) .cart{width:auto;flex:none;max-height:42%;min-height:0;border-left:0;border-top:2px solid var(--line);box-shadow:0 -6px 18px rgba(23,41,91,.08)}
-  /* typing a note: the order gets the screen; searching dishes: the menu does */
-  .ms.cap-app.typing-order .covers,.ms.cap-app.typing-order .body:not(.bd) .menu{display:none}
-  .ms.cap-app.typing-order .body:not(.bd) .cart{max-height:none;flex:1 1 auto}
+  /* typing a note: same screen (top bar, covers and menu stay), the order panel only grows a
+     little so the note stays above the keyboard; searching dishes: the order steps aside */
+  .ms.cap-app.typing-order .body:not(.bd) .cart{max-height:62%}
   .ms.cap-app.typing-search .body:not(.bd) .cart{display:none}
   .ms .body:not(.bd) .acts{flex-direction:row;padding:8px 12px 10px}
   .ms .body:not(.bd) .acts > *{flex:1}
@@ -569,7 +569,8 @@
 .ms .ned .nin input{flex:1;min-width:0;border:1.5px solid var(--line);border-radius:9px;padding:8px 10px;font-size:14px;min-height:40px}
 .ms .ned .nin .mic,.ms .ned .nin .ok{flex:none;border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:0 12px;font-size:15px;font-weight:800;color:var(--navy);min-height:40px}
 .ms .ned .nin .mic.act{background:#FFF1CC;border-color:#EBCB85;color:#7A4B00;font-size:13px}
-.ms .ned .micerr{margin:6px 0 0;font-size:12px;font-weight:700;color:#7A4B00}
+.ms .ned .micerr{margin:6px 0 0;font-size:12.5px;font-weight:700;color:#7A4B00;background:#FFF6DC;border:1px solid #EBCB85;border-radius:8px;padding:6px 9px;line-height:1.35}
+.ms .ned .miclive{margin:6px 0 0;font-size:12.5px;font-weight:800;color:#0F7B3F}
 /* VIP sheet */
 .ms .viplist{display:flex;flex-direction:column;gap:7px;max-height:55vh;overflow-y:auto}
 .ms .vipi{text-align:left;border:1.5px solid var(--line);background:#fff;border-radius:11px;padding:9px 11px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
@@ -611,11 +612,6 @@
 .ms .sbar{position:absolute;top:4px;bottom:4px;right:3px;width:7px;border-radius:4px;background:#E3E8F0;pointer-events:none}
 .ms .sbar i{position:absolute;left:0;right:0;border-radius:4px;background:#7D89A3}
 .ms .smore{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);border:0;background:var(--navy);color:#fff;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:800;box-shadow:0 4px 12px rgba(23,41,91,.28);white-space:nowrap}
-/* a short screen (a small tablet, or any tablet with the keyboard up) while typing in the order:
-   the top bars step aside so the note stays in view */
-@media screen and (max-height:620px){
-  .ms.cap-app.typing-order .appbar,.ms.cap-app.typing-order .covers{display:none}
-}
 /* small upright tablets: the cover bar keeps My covers | All covers in view */
 @media screen and (max-width:640px){
   .ms .covers > .l:first-child{display:none}

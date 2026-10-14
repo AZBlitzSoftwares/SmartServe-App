@@ -140,17 +140,20 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const [toast, setToast] = useState(null)
   const [sheet, setSheet] = useState(null)
   const [noteOpen, setNoteOpen] = useState(null)   // the note being edited in place: 'item:<id>', 'out:<ref>' or 'guest:<cover>'
-  // Typing in the order (a note) or the dish search: on a small upright tablet the rest of the
-  // screen makes room, so the field stays above the keyboard
+  // Typing in the order (a note) or the dish search, on an upright tablet: the order panel grows a
+  // little for a note (the screen stays the same: top bar, covers and menu in place), the order
+  // steps aside for the dish search. Worked out from the field that really has the focus, so a
+  // note field closed by OK, Enter or Done never leaves the screen in typing mode.
   const [typing, setTyping] = useState('')
   const typingOff = useRef(null)
-  const onFocusIn = e => {
-    const t = e.target
-    if (!t || !/^(INPUT|TEXTAREA)$/.test(t.tagName)) return
-    clearTimeout(typingOff.current)
-    setTyping(t.closest('.cart') ? 'order' : t.closest('.msearch') ? 'search' : '')
+  const typingNow = () => {
+    const t = document.activeElement
+    if (!t || !/^(INPUT|TEXTAREA)$/.test(t.tagName)) return ''
+    return t.closest('.cart') ? 'order' : t.closest('.msearch') ? 'search' : ''
   }
-  const onFocusOut = () => { clearTimeout(typingOff.current); typingOff.current = setTimeout(() => setTyping(''), 150) }
+  const onFocusIn = () => { clearTimeout(typingOff.current); setTyping(typingNow()) }
+  const onFocusOut = () => { clearTimeout(typingOff.current); typingOff.current = setTimeout(() => setTyping(typingNow()), 150) }
+  const recheckTyping = () => { clearTimeout(typingOff.current); typingOff.current = setTimeout(() => setTyping(typingNow()), 60) }
   const [pickTable, setPickTable] = useState(false)
   const [showAll, setShowAll] = useState(false)     // All covers: the other captain's covers as well
   const [showDelivered, setShowDelivered] = useState(0)  // until (ms)
@@ -457,7 +460,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }); liveQ.reload() }
   }
-  const toggleNote = key => setNoteOpen(k => (k === key ? null : key))
+  const toggleNote = key => { setNoteOpen(k => (k === key ? null : key)); recheckTyping() }
 
   async function newGuest(c) {
     setBusy(true)
@@ -611,7 +614,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
           <button className={'nbtn' + (noteOpen === 'out:' + o.ref ? ' act' : '')} onClick={() => toggleNote('out:' + o.ref)}>{o.note || o.allergy ? 'Note' : '+ Note'}</button>
           <button className="x" onClick={() => minusDish(l.dish)} title="Take this dish off">✕</button>
         </div>
-        {noteOpen === nk && <NoteEditor key={nk} note={o.note} allergy={o.allergy} onSave={(n, a) => saveNote({ kind: 'out', ref: o.ref }, n, a)} onClose={() => setNoteOpen(null)} />}
+        {noteOpen === nk && <NoteEditor key={nk} note={o.note} allergy={o.allergy} onSave={(n, a) => saveNote({ kind: 'out', ref: o.ref }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />}
         </div>
       )
     }
@@ -634,7 +637,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
           canCancelFired(i) && <CancelFired disabled={busy} onCancel={() => cancelItems([i.id], i.name)} />
         )}
       </div>
-      {noteOpen === nk && i.state === 'held' && <NoteEditor key={nk} note={i.note} allergy={i.allergy} onSave={(n, a) => saveNote({ kind: 'item', id: i.id }, n, a)} onClose={() => setNoteOpen(null)} />}
+      {noteOpen === nk && i.state === 'held' && <NoteEditor key={nk} note={i.note} allergy={i.allergy} onSave={(n, a) => saveNote({ kind: 'item', id: i.id }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />}
       </div>
     )
   }
@@ -715,7 +718,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
               </div>
               {noteOpen === 'guest:' + cover && (
                 <NoteEditor key={'guest:' + cover} note={cr?.guest_note} allergy={cr?.guest_allergy}
-                  onSave={(n, a) => saveNote({ kind: 'guest', cover }, n, a)} onClose={() => setNoteOpen(null)} />
+                  onSave={(n, a) => saveNote({ kind: 'guest', cover }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />
               )}
               {!isMine(cover) && <div className="helpout">Helping out: {coverLabel(cover)} is {ownerOf(cover) || 'another captain'}'s cover</div>}
             </div>
@@ -944,42 +947,107 @@ export function Sheet({ title, text, children, onClose }) {
 
 /* Note and allergy for one dish, or for everything a guest orders: tap the usual ones, type or
    speak anything else under Other. */
-// Voice typing for a note: Chrome / Safari's speech recognition (needs a secure page and,
-// on most tablets, internet; otherwise a short message points to the keyboard's own mic)
+
+// Voice typing for a note, with the browser's speech recognition (Chrome, Safari, Edge; needs a
+// secure page and, on most tablets, internet). It first asks for the microphone, so the browser
+// shows its permission question; then it listens and writes what it heard. Where the page cannot
+// listen by itself (inside the Smart Serve app on a tablet, which is a WebView, or a browser
+// without it) the 🎤 says to use the keyboard's own mic, which works in every app.
+const KEYBOARD_MIC = 'Use the keyboard’s mic: on the Samsung keyboard tap ⋯ on its top bar, then 🎤 Voice input, and speak.'
+const inWebView = () => {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
+  return /; wv\)/.test(ua) || (/Android/.test(ua) && /Version\/[\d.]+ /.test(ua) && /Chrome\//.test(ua))
+}
+const SPEECH_ERR = {
+  'not-allowed': 'The microphone is not allowed for this page. Allow it (tap the lock or ⓘ next to the address › Permissions › Microphone › Allow) and tap 🎤 again.',
+  'service-not-allowed': 'Voice typing is switched off on this tablet. ' + KEYBOARD_MIC,
+  'network': 'Voice typing needs internet. ' + KEYBOARD_MIC,
+  'no-speech': 'Did not hear anything. Tap 🎤 and speak.',
+  'audio-capture': 'No microphone answered (another app may be using it). ' + KEYBOARD_MIC,
+  'language-not-supported': 'Voice typing in English is not installed on this tablet. ' + KEYBOARD_MIC,
+}
 function useSpeech(onText) {
   const SR = typeof window !== 'undefined' && window.isSecureContext ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
-  const [on, setOn] = useState(false)
+  const usable = !!SR && !inWebView()
+  const [on, setOn] = useState(false)        // false | 'asking' | 'listening'
   const [err, setErr] = useState('')
   const rec = useRef(null)
   const cb = useRef(onText); cb.current = onText
-  useEffect(() => () => { try { rec.current?.abort() } catch { /* already stopped */ } }, [])
-  function toggle() {
-    if (on) { try { rec.current?.stop() } catch { /* stopped */ } return }
+  const stopRef = useRef(false)
+  useEffect(() => () => { stopRef.current = true; try { rec.current?.abort() } catch { /* already stopped */ } }, [])
+
+  async function askMic() {
+    // the permission question: the browser asks once, then remembers the answer for this site
+    if (!navigator.mediaDevices?.getUserMedia) return true
+    try { if ((await navigator.permissions?.query({ name: 'microphone' }))?.state === 'granted') return true } catch { /* not supported */ }
     try {
-      const r = new SR()
-      r.lang = 'en-IN'; r.interimResults = false; r.maxAlternatives = 1; r.continuous = false
-      r.onresult = e => {
-        const t = Array.from(e.results).map(x => x[0]?.transcript || '').join(' ').trim()
-        if (t) cb.current(t)
-      }
-      r.onend = () => setOn(false)
-      r.onerror = e => {
-        setOn(false)
-        setErr(e?.error === 'not-allowed' || e?.error === 'service-not-allowed' ? 'Allow the microphone for this page, or use the keyboard\'s mic.'
-          : e?.error === 'network' ? 'Voice typing needs internet - use the keyboard\'s mic, or type.'
-          : e?.error === 'no-speech' ? 'Did not hear anything - tap 🎤 and talk.' : '')
-      }
-      rec.current = r
-      setErr('')
-      r.start(); setOn(true)
-    } catch { setOn(false); setErr('Voice typing is not available here - use the keyboard\'s mic, or type.') }
+      const st = await navigator.mediaDevices.getUserMedia({ audio: true })
+      st.getTracks().forEach(t => t.stop())
+      await new Promise(r => setTimeout(r, 300))   // the microphone is free again for listening
+      return true
+    } catch (e) {
+      const n = e?.name || ''
+      setErr(n === 'NotAllowedError' || n === 'SecurityError' ? SPEECH_ERR['not-allowed']
+        : n === 'NotFoundError' || n === 'NotReadableError' ? SPEECH_ERR['audio-capture']
+        : 'The microphone could not be opened (' + (n || e?.message || 'error') + '). ' + KEYBOARD_MIC)
+      return false
+    }
   }
-  return { ok: !!SR, on, err, toggle }
+
+  function listen(lang) {
+    const r = new SR()
+    r.lang = lang; r.interimResults = false; r.maxAlternatives = 1; r.continuous = false
+    let started = false, heard = false, failed = false
+    // a recogniser that never starts (some tablets, app wrappers): give up after a few seconds
+    const watchdog = setTimeout(() => {
+      if (started || stopRef.current) return
+      failed = true
+      try { r.abort() } catch { /* stopped */ }
+      setOn(false); setErr('This tablet did not start listening. ' + KEYBOARD_MIC)
+    }, 6000)
+    const begin = () => { if (!started) { started = true; clearTimeout(watchdog); setOn('listening') } }
+    r.onstart = begin
+    r.onaudiostart = begin
+    r.onresult = e => {
+      const t = Array.from(e.results).map(x => x[0]?.transcript || '').join(' ').trim()
+      if (t) { heard = true; cb.current(t) }
+    }
+    r.onerror = e => {
+      clearTimeout(watchdog)
+      if (e?.error === 'language-not-supported' && lang !== 'en-US') { failed = true; listen('en-US'); return }
+      if (e?.error === 'aborted') return
+      failed = true
+      setOn(false)
+      setErr(SPEECH_ERR[e?.error] || 'Voice typing stopped (' + (e?.error || 'error') + '). ' + KEYBOARD_MIC)
+    }
+    r.onend = () => {
+      clearTimeout(watchdog)
+      if (rec.current !== r) return
+      setOn(false)
+      if (!heard && !failed && started && !stopRef.current) setErr('Did not catch that. Tap 🎤 and speak a little louder, or type.')
+    }
+    rec.current = r
+    r.start()
+  }
+
+  const turn = useRef(0)   // a tap on Stop while the permission question is open cancels that turn
+  async function toggle() {
+    if (on) { turn.current++; try { rec.current?.stop() } catch { /* stopped */ } setOn(false); return }
+    setErr('')
+    if (!usable) { setErr(KEYBOARD_MIC); return }
+    const mine = ++turn.current
+    setOn('asking')
+    const allowed = await askMic()
+    if (stopRef.current || mine !== turn.current) return
+    if (!allowed) { setOn(false); return }
+    try { listen('en-IN') } catch { setOn(false); setErr('Voice typing is not available here. ' + KEYBOARD_MIC) }
+  }
+  return { ok: true, usable, on, err, toggle, clear: () => setErr('') }
 }
 
 // Notes in place, right under the dish (or the guest): six one-tap notes, then Other or Allergy
 // to type or speak. Every tap is saved at once - nothing to confirm, no screen to leave.
-function NoteEditor({ note, allergy, onSave, onClose }) {
+function NoteEditor({ note, allergy, onSave, onClose, onField }) {
   const parts = splitNote(note)
   const [picked, setPicked] = useState(() => new Set(parts.filter(x => QUICK_NOTES.includes(x))))
   const [other, setOther] = useState(() => parts.filter(x => !QUICK_NOTES.includes(x)).join(', '))
@@ -1008,24 +1076,30 @@ function NoteEditor({ note, allergy, onSave, onClose }) {
   })
   const val = field === 'allergy' ? alg : other
   const setVal = v => (field === 'allergy' ? setAlg(v) : setOther(v))
+  const inputRef = useRef(null)
+  // closing the field: the keyboard goes down and the screen is back as it was
+  const closeField = () => { save(); try { inputRef.current?.blur() } catch { /* gone */ } setField(null); speech.clear(); onField?.() }
+  const openField = f => { save(); speech.clear(); setField(cur => (cur === f ? null : f)); onField?.() }
   return (
     <div className="ned">
       <div className="qn">
         {QUICK_NOTES.map(x => <button key={x} className={picked.has(x) ? 'a' : ''} onClick={() => flip(x)}>{x}</button>)}
-        <button className={'qo' + (field === 'other' ? ' act' : '') + (other.trim() ? ' a' : '')} onClick={() => { save(); setField(f => (f === 'other' ? null : 'other')) }}>✎ Other</button>
-        <button className={'qal' + (field === 'allergy' ? ' act' : '') + (alg.trim() ? ' a' : '')} onClick={() => { save(); setField(f => (f === 'allergy' ? null : 'allergy')) }}>⚠ Allergy</button>
-        <button className="qd" onClick={() => { save(); onClose() }}>Done</button>
+        <button className={'qo' + (field === 'other' ? ' act' : '') + (other.trim() ? ' a' : '')} onClick={() => openField('other')}>✎ Other</button>
+        <button className={'qal' + (field === 'allergy' ? ' act' : '') + (alg.trim() ? ' a' : '')} onClick={() => openField('allergy')}>⚠ Allergy</button>
+        <button className="qd" onClick={() => { save(); try { inputRef.current?.blur() } catch { /* gone */ } onClose() }}>Done</button>
       </div>
       {field && (
         <div className="nin">
-          <input autoFocus value={val} onChange={e => setVal(e.target.value)} onBlur={() => save()}
-            onKeyDown={e => { if (e.key === 'Enter') { save(); setField(null) } }}
+          <input ref={inputRef} autoFocus value={val} onChange={e => setVal(e.target.value)} onBlur={() => save()}
+            onKeyDown={e => { if (e.key === 'Enter') closeField() }}
             placeholder={field === 'allergy' ? 'Allergy: type or speak, e.g. peanuts' : 'Type or speak, e.g. no tomato in the pizza'} />
-          {speech.ok && <button className={'mic' + (speech.on ? ' act' : '')} onMouseDown={e => e.preventDefault()} onClick={speech.toggle} title="Speak">{speech.on ? '● Stop' : '🎤'}</button>}
-          <button className="ok" onMouseDown={e => e.preventDefault()} onClick={() => { save(); setField(null) }}>OK</button>
+          <button className={'mic' + (speech.on ? ' act' : '')} onMouseDown={e => e.preventDefault()} onClick={speech.toggle} title="Speak" data-testid="note-mic">
+            {speech.on === 'asking' ? '🎤 …' : speech.on ? '● Stop' : '🎤'}</button>
+          <button className="ok" onMouseDown={e => e.preventDefault()} onClick={closeField}>OK</button>
         </div>
       )}
-      {speech.err && <div className="micerr">{speech.err}</div>}
+      {field && speech.on === 'listening' && <div className="miclive">● Listening… speak now</div>}
+      {field && speech.err && <div className="micerr" data-testid="note-mic-msg">{speech.err}</div>}
     </div>
   )
 }
