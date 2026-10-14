@@ -567,19 +567,7 @@
 .ms .ned .nin input{flex:1;min-width:0;border:1.5px solid var(--line);border-radius:9px;padding:8px 10px;font-size:14px;min-height:40px}
 .ms .ned .nin .mic,.ms .ned .nin .ok{flex:none;border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:0 12px;font-size:15px;font-weight:800;color:var(--navy);min-height:40px}
 .ms .ned .nin .mic.act{background:#FFF1CC;border-color:#EBCB85;color:#7A4B00;font-size:13px}
-/* Typing a note on a touch screen: the keyboard can cover the bottom half of the tablet, and
-   inside the app it is laid over the page without telling it. So while Other or Allergy is open
-   the note box sits at the top of the screen (the screen behind stays as it was), and goes back
-   into the order with OK, Enter or Done. */
-.ms .ned .ntitle{display:none}
-@media (pointer:coarse){
-  .ms.cap-app .ned.float{position:fixed;left:8px;right:8px;top:6px;z-index:60;margin:0;padding:10px;background:#fff;
-    border:2px solid var(--navy);border-radius:14px;box-shadow:0 12px 34px rgba(23,41,91,.32);max-height:calc(100% - 12px);overflow:auto}
-  .ms.cap-app .ned.float .ntitle{display:block;font-size:14px;font-weight:800;color:var(--navy);margin:0 0 8px;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-}
 .ms .ned .micerr{margin:6px 0 0;font-size:12.5px;font-weight:700;color:#7A4B00;background:#FFF6DC;border:1px solid #EBCB85;border-radius:8px;padding:6px 9px;line-height:1.35}
-.ms .ned .miclive{margin:6px 0 0;font-size:12.5px;font-weight:800;color:#0F7B3F}
 /* VIP sheet */
 .ms .viplist{display:flex;flex-direction:column;gap:7px;max-height:55vh;overflow-y:auto}
 .ms .vipi{text-align:left;border:1.5px solid var(--line);background:#fff;border-radius:11px;padding:9px 11px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
