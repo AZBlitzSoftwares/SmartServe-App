@@ -151,7 +151,12 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     if (!t || !/^(INPUT|TEXTAREA)$/.test(t.tagName)) return ''
     return t.closest('.cart') ? 'order' : t.closest('.msearch') ? 'search' : ''
   }
-  const onFocusIn = () => { clearTimeout(typingOff.current); setTyping(typingNow()) }
+  // only a field changes it at once: a button taking the focus (the tap on a dish +, a note chip)
+  // must not move the screen under the finger before the tap ends; the blur timer handles it
+  const onFocusIn = e => {
+    if (!e.target || !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return
+    clearTimeout(typingOff.current); setTyping(typingNow())
+  }
   const onFocusOut = () => { clearTimeout(typingOff.current); typingOff.current = setTimeout(() => setTyping(typingNow()), 150) }
   const recheckTyping = () => { clearTimeout(typingOff.current); typingOff.current = setTimeout(() => setTyping(typingNow()), 60) }
   const [pickTable, setPickTable] = useState(false)
@@ -614,7 +619,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
           <button className={'nbtn' + (noteOpen === 'out:' + o.ref ? ' act' : '')} onClick={() => toggleNote('out:' + o.ref)}>{o.note || o.allergy ? 'Note' : '+ Note'}</button>
           <button className="x" onClick={() => minusDish(l.dish)} title="Take this dish off">✕</button>
         </div>
-        {noteOpen === nk && <NoteEditor key={nk} note={o.note} allergy={o.allergy} onSave={(n, a) => saveNote({ kind: 'out', ref: o.ref }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />}
+        {noteOpen === nk && <NoteEditor key={nk} title={`${l.dish.name} · ${tc(table, cover)}`} note={o.note} allergy={o.allergy} onSave={(n, a) => saveNote({ kind: 'out', ref: o.ref }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />}
         </div>
       )
     }
@@ -637,7 +642,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
           canCancelFired(i) && <CancelFired disabled={busy} onCancel={() => cancelItems([i.id], i.name)} />
         )}
       </div>
-      {noteOpen === nk && i.state === 'held' && <NoteEditor key={nk} note={i.note} allergy={i.allergy} onSave={(n, a) => saveNote({ kind: 'item', id: i.id }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />}
+      {noteOpen === nk && i.state === 'held' && <NoteEditor key={nk} title={`${i.name} · ${tc(table, cover)}`} note={i.note} allergy={i.allergy} onSave={(n, a) => saveNote({ kind: 'item', id: i.id }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />}
       </div>
     )
   }
@@ -717,7 +722,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
                 {unsaved > 0 && <span className="s-u">{unsaved} not saved · retrying</span>}
               </div>
               {noteOpen === 'guest:' + cover && (
-                <NoteEditor key={'guest:' + cover} note={cr?.guest_note} allergy={cr?.guest_allergy}
+                <NoteEditor key={'guest:' + cover} title={`Guest note, all dishes · ${tc(table, cover)}`} note={cr?.guest_note} allergy={cr?.guest_allergy}
                   onSave={(n, a) => saveNote({ kind: 'guest', cover }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />
               )}
               {!isMine(cover) && <div className="helpout">Helping out: {coverLabel(cover)} is {ownerOf(cover) || 'another captain'}'s cover</div>}
@@ -953,7 +958,7 @@ export function Sheet({ title, text, children, onClose }) {
 // shows its permission question; then it listens and writes what it heard. Where the page cannot
 // listen by itself (inside the Smart Serve app on a tablet, which is a WebView, or a browser
 // without it) the 🎤 says to use the keyboard's own mic, which works in every app.
-const KEYBOARD_MIC = 'Use the keyboard’s mic: on the Samsung keyboard tap ⋯ on its top bar, then 🎤 Voice input, and speak.'
+const KEYBOARD_MIC = 'Use the keyboard’s own mic: tap the small 🎤 at the bottom left, under the keyboard (or ⋯ on the keyboard’s top bar › Voice input), and speak.'
 const inWebView = () => {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
   return /; wv\)/.test(ua) || (/Android/.test(ua) && /Version\/[\d.]+ /.test(ua) && /Chrome\//.test(ua))
@@ -1047,7 +1052,7 @@ function useSpeech(onText) {
 
 // Notes in place, right under the dish (or the guest): six one-tap notes, then Other or Allergy
 // to type or speak. Every tap is saved at once - nothing to confirm, no screen to leave.
-function NoteEditor({ note, allergy, onSave, onClose, onField }) {
+function NoteEditor({ title, note, allergy, onSave, onClose, onField }) {
   const parts = splitNote(note)
   const [picked, setPicked] = useState(() => new Set(parts.filter(x => QUICK_NOTES.includes(x))))
   const [other, setOther] = useState(() => parts.filter(x => !QUICK_NOTES.includes(x)).join(', '))
@@ -1081,7 +1086,9 @@ function NoteEditor({ note, allergy, onSave, onClose, onField }) {
   const closeField = () => { save(); try { inputRef.current?.blur() } catch { /* gone */ } setField(null); speech.clear(); onField?.() }
   const openField = f => { save(); speech.clear(); setField(cur => (cur === f ? null : f)); onField?.() }
   return (
-    <div className="ned">
+    <div className={'ned' + (field ? ' float' : '')}>
+      {/* shown only on a touch screen while Other / Allergy is open, when the note box sits at the top */}
+      <div className="ntitle">✎ {title}</div>
       <div className="qn">
         {QUICK_NOTES.map(x => <button key={x} className={picked.has(x) ? 'a' : ''} onClick={() => flip(x)}>{x}</button>)}
         <button className={'qo' + (field === 'other' ? ' act' : '') + (other.trim() ? ' a' : '')} onClick={() => openField('other')}>✎ Other</button>
