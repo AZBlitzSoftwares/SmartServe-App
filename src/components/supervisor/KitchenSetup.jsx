@@ -32,6 +32,20 @@ const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]
 const VIRTUAL = /^VIRTUAL-[1-9]$/i
 const VIRTUAL_COUNT = 5
 const isPrinter = ip => IPV4.test(String(ip || '').trim()) || VIRTUAL.test(String(ip || '').trim())
+const isVirtual = ip => VIRTUAL.test(String(ip || '').trim())
+/* One real printer per kitchen: the switched-on kitchen (other than exceptId) whose main printer
+   is ip:port, if any. Virtual printers are on-screen columns and may be shared (demos, training). */
+// the printer itself is its address: the same IP with another port is still the same printer
+const hostOf = ip => String(ip || '').trim().replace(/:\d+$/, '')
+function printerOwner(kitchens, ip, port, exceptId) {
+  const host = hostOf(ip)
+  if (!host || isVirtual(ip)) return null
+  return kitchens.find(k => k.id !== exceptId && k.is_active !== false && k.printer_ip && !isVirtual(k.printer_ip)
+    && hostOf(k.printer_ip) === host) || null
+}
+const samePrinter = (a, b) => !!a.printer_ip && !!b.printer_ip && (isVirtual(a.printer_ip) || isVirtual(b.printer_ip)
+  ? keyOf(a.printer_ip, a.printer_port) === keyOf(b.printer_ip, b.printer_port)
+  : hostOf(a.printer_ip) === hostOf(b.printer_ip))
 const STATUS_POLL_MS = 10000   // printer health is written by the Print Hub; re-read it this often
 const TEST_POLL_MS   = 1500
 const TEST_STUCK_MS  = 15000   // a running Print Hub claims a job within a few seconds
@@ -760,6 +774,10 @@ function validateKitchen(f, kitchens) {
   }
   const ip = f.printer_ip.trim()
   if (ip && !isPrinter(ip)) e.printer_ip = 'Not an IP address — e.g. 192.168.1.104, or a virtual printer'
+  else if (ip && f.is_active !== false) {
+    const owner = printerOwner(kitchens, ip, f.printer_port, f.id)
+    if (owner) e.printer_ip = owner.name + ' already prints on ' + hostOf(ip) + '. One printer per kitchen: choose another printer, or first change ' + owner.name + '.'
+  }
   const port = Number(f.printer_port)
   if (!/^\d+$/.test(String(f.printer_port).trim()) || port < 1 || port > 65535) e.printer_port = '1–65535, usually 9100'
   const b = f.backup_printer_ip.trim()
@@ -1039,7 +1057,7 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
         ) : (
           <KitchenRow key={k.id} k={k} maestro={maestro} first={idx === 0} last={idx === kitchens.length - 1}
             isDefault={defaultKitchen?.id === k.id} now={now} test={tests[k.id]}
-            sharedWith={k.printer_ip ? kitchens.filter(o => o.id !== k.id && keyOf(o.printer_ip, o.printer_port) === keyOf(k.printer_ip, k.printer_port)) : []}
+            sharedWith={k.printer_ip ? kitchens.filter(o => o.id !== k.id && o.is_active !== false && samePrinter(o, k)) : []}
             confirm={confirm?.id === k.id ? confirm : null} counts={ownCounts(k.id)}
             onMove={d => move(k, d)} onEdit={() => openEdit(k)} onTest={() => testPrint(k)}
             onMakeDefault={async () => { if (await makeDefault(k.id)) setMsg({ tone:'ok', text: k.name + ' is now the default kitchen' }) }}
@@ -1357,6 +1375,10 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
     const k = kitchens.find(x => x.id === id)
     if (!k) return
     const { host, port } = splitIp(f.ip)
+    if (slot === 'main') {
+      const owner = printerOwner(kitchens, f.ip, port, k.id)
+      if (owner) { setNote({ tone:'err', text: f.ip + ' is already the printer of ' + owner.name + '. One printer per kitchen.' }); return }
+    }
     const patch = slot === 'main'
       ? { printer_ip: host, printer_port: port, printer_mac: f.mac || null }
       : { backup_printer_ip: f.ip, backup_printer_mac: f.mac || null }
@@ -1437,16 +1459,32 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
                   {used.length ? 'Used by ' + used.join(', ') : 'Not used by any kitchen'}</span>
                 <button onClick={() => slip(f)} disabled={!!busy[f.ip]} style={{ ...btn, height:32, padding:'0 10px', fontSize:12, background:'#fff', color:'var(--ink)', border:'1.5px solid var(--line)' }}>
                   {busy[f.ip] === 'slip' ? 'Sending…' : 'Print a slip'}</button>
-                <select value="" onChange={e => assign(f, e.target.value)} disabled={!!busy[f.ip]}
-                  style={{ ...input, width:190, height:32, fontSize:12.5 }}>
-                  <option value="">Use for a kitchen…</option>
-                  <optgroup label="Main printer for">
-                    {kitchens.filter(k => k.is_active !== false).map(k => <option key={'m' + k.id} value={'main:' + k.id}>{k.name}</option>)}
-                  </optgroup>
-                  <optgroup label="Backup printer for">
-                    {kitchens.filter(k => k.is_active !== false).map(k => <option key={'b' + k.id} value={'backup:' + k.id}>{k.name}</option>)}
-                  </optgroup>
-                </select>
+                {(() => {
+                  // One printer per kitchen: a printer already used by a kitchen is not offered again,
+                  // and only kitchens without a real printer are listed (to change one: Edit)
+                  const owner = printerOwner(kitchens, f.ip, splitIp(f.ip).port, null)
+                  const on = kitchens.filter(k => k.is_active !== false)
+                  const free = owner ? [] : on.filter(k => !k.printer_ip || isVirtual(k.printer_ip))
+                  const backups = on.filter(k => !k.backup_printer_ip && k.id !== owner?.id
+                    && keyOf(k.printer_ip, k.printer_port) !== keyOf(f.ip))
+                  return (
+                    <select value="" onChange={e => assign(f, e.target.value)} disabled={!!busy[f.ip]} data-testid="assign-printer"
+                      style={{ ...input, width:210, height:32, fontSize:12.5 }}>
+                      <option value="">{owner ? 'Printer of ' + owner.name : 'Use for a kitchen…'}</option>
+                      {owner ? <option value="" disabled>Already {owner.name}’s printer: one printer per kitchen</option>
+                        : free.length ? (
+                          <optgroup label="Main printer for">
+                            {free.map(k => <option key={'m' + k.id} value={'main:' + k.id}>{k.name}{isVirtual(k.printer_ip) ? ' (now on virtual printer ' + String(k.printer_ip).trim().slice(8) + ')' : ''}</option>)}
+                          </optgroup>
+                        ) : <option value="" disabled>Every kitchen has a printer (to change one: Edit)</option>}
+                      {backups.length > 0 && (
+                        <optgroup label="Backup printer for">
+                          {backups.map(k => <option key={'b' + k.id} value={'backup:' + k.id}>{k.name}</option>)}
+                        </optgroup>
+                      )}
+                    </select>
+                  )
+                })()}
               </div>
             )
           })}
@@ -1503,7 +1541,11 @@ function KitchenForm({ form, setField, setForm, kitchens, tried, saving, error, 
         {field('printer_ip', 'Printer IP',
           <>
             <input value={form.printer_ip} onKeyDown={enter} placeholder="192.168.1.104" style={inp(show('printer_ip', form.printer_ip))}
-              onChange={e => { const v = e.target.value; setField('printer_ip', /^v/i.test(v) ? v.toUpperCase().replace(/[^A-Z0-9-]/g, '') : v.replace(/[^\d.]/g, '')) }} />
+              onChange={e => {
+                const v = e.target.value
+                if (!/^v/i.test(v) && isVirtual(form.printer_ip) && /^910[1-9]$/.test(String(form.printer_port).trim())) setField('printer_port', '9100')
+                setField('printer_ip', /^v/i.test(v) ? v.toUpperCase().replace(/[^A-Z0-9-]/g, '') : v.replace(/[^\d.]/g, ''))
+              }} />
             <span style={{ display:'flex', gap:4, flexWrap:'wrap', marginTop:5 }} title="Virtual printers: always on, the slips show on the Virtual printers screen">
               {Array.from({ length: VIRTUAL_COUNT }, (_, i) => 'VIRTUAL-' + (i + 1)).map((v, i) => (
                 <button key={v} type="button" onClick={e => { e.preventDefault(); setField('printer_ip', v) }}
@@ -1646,8 +1688,12 @@ function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith,
                 {!virtual && <span style={{ color:'var(--ink2)', fontWeight:600 }}>:{k.printer_port ?? 9100}</span>}
                 <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:1 }}>
                   {virtual ? 'On screen: Virtual printers' : k.backup_printer_ip ? 'Backup ' + k.backup_printer_ip : 'No backup printer'}
-                  {sharedWith.length > 0 && ' · shared with ' + listNames(sharedWith)}
+                  {sharedWith.length > 0 && virtual && ' · shared with ' + listNames(sharedWith)}
                 </div>
+                {sharedWith.length > 0 && !virtual && k.is_active && (
+                  <div style={{ fontSize:11.5, color:RED, fontWeight:800, marginTop:2 }} data-testid="printer-twice">
+                    ⚠ Also set for {listNames(sharedWith)}: one printer per kitchen, change one under Edit</div>
+                )}
               </>
             ) : (
               <button onClick={onEdit} style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#B91C1C',
