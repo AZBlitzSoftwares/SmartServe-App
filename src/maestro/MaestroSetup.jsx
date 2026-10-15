@@ -61,9 +61,11 @@ export function MaestroPreService({ eventData, nonce }) {
   const noIp = active.filter(k => !IPV4.test(String(k.printer_ip || '').trim()) && !virtual(k) && !String(k.cloud_print_id || '').trim())
   // one real printer per kitchen (virtual printers may be shared)
   const byPrinter = {}
-  active.filter(k => IPV4.test(String(k.printer_ip || '').trim())).forEach(k => {
-    const key = String(k.printer_ip).trim() + ':' + (Number(k.printer_port) || 9100)
-    ;(byPrinter[key] = byPrinter[key] || []).push(k.name)
+  active.forEach(k => {
+    for (const [ip, who] of [[k.printer_ip, k.name], [k.printer_ip_b, k.name + ' B']]) {
+      const key = String(ip || '').trim().replace(/:\d+$/, '')
+      if (IPV4.test(key)) (byPrinter[key] = byPrinter[key] || []).push(who)
+    }
   })
   const twice = Object.entries(byPrinter).filter(([, ks]) => ks.length > 1)
   // a virtual printer is always there
@@ -76,7 +78,7 @@ export function MaestroPreService({ eventData, nonce }) {
   const checks = [
     { ok: active.length > 0, t: active.length ? `${active.length} kitchens ready to take KOTs` : 'No kitchens yet: add them below' },
     { ok: active.length > 0 && !noIp.length, t: noIp.length ? `No printer IP or Printer ID: ${noIp.map(k => k.name).join(', ')}` : 'Every kitchen has a printer' },
-    { ok: !twice.length, t: twice.length ? `One printer set for two kitchens: ${twice.map(([p, ks]) => p.replace(/:9100$/, '') + ' (' + ks.join(', ') + ')').join('; ')}` : 'One printer per kitchen' },
+    { ok: !twice.length, t: twice.length ? `One printer set for two kitchens: ${twice.map(([p, ks]) => p + ' (' + ks.join(', ') + ')').join('; ')}` : 'One printer per kitchen' },
     { ok: active.length > 0 && tested.length === active.length, t: tested.length === active.length ? 'Every printer answered in the last 15 minutes' : `Printer not confirmed: ${active.filter(k => !tested.includes(k)).map(k => k.name).join(', ')} (cloud printing: check the printer's Server Direct Print; otherwise switch on Print from this laptop or start the Print Hub; then Test print)` },
     { ok: dishes.length > 0 && !noKitchen.length, t: !dishes.length ? 'No dishes yet: add the menu under Menu' : noKitchen.length ? `${noKitchen.length} dishes have no kitchen` : `All ${dishes.length} dishes routed to a kitchen and a barker` },
     { ok: dishes.length > 0 && !noCourse.length, t: noCourse.length ? `${noCourse.length} dishes have no course: ${noCourse.slice(0, 3).map(x => x.name).join(', ')}${noCourse.length > 3 ? '…' : ''}` : 'Every dish has a course' },

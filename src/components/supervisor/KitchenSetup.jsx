@@ -37,11 +37,19 @@ const isVirtual = ip => VIRTUAL.test(String(ip || '').trim())
    is ip:port, if any. Virtual printers are on-screen columns and may be shared (demos, training). */
 // the printer itself is its address: the same IP with another port is still the same printer
 const hostOf = ip => String(ip || '').trim().replace(/:\d+$/, '')
-function printerOwner(kitchens, ip, port, exceptId) {
+function printerOwner(kitchens, ip, port, exceptId, exceptSide = null) {
   const host = hostOf(ip)
   if (!host || isVirtual(ip)) return null
-  return kitchens.find(k => k.id !== exceptId && k.is_active !== false && k.printer_ip && !isVirtual(k.printer_ip)
-    && hostOf(k.printer_ip) === host) || null
+  // exceptId: the kitchen being changed; exceptSide 'A' | 'B': only that printer of it is left out
+  // (its other one still counts), null: both of its printers are left out
+  for (const k of kitchens) {
+    if (k.is_active === false) continue
+    const skipA = k.id === exceptId && exceptSide !== 'B'
+    const skipB = k.id === exceptId && exceptSide !== 'A'
+    if (!skipA && k.printer_ip && !isVirtual(k.printer_ip) && hostOf(k.printer_ip) === host) return { ...k, side:'A', label:k.name }
+    if (!skipB && k.printer_ip_b && !isVirtual(k.printer_ip_b) && hostOf(k.printer_ip_b) === host) return { ...k, side:'B', label:k.name + ' (Barker B)' }
+  }
+  return null
 }
 const samePrinter = (a, b) => !!a.printer_ip && !!b.printer_ip && (isVirtual(a.printer_ip) || isVirtual(b.printer_ip)
   ? keyOf(a.printer_ip, a.printer_port) === keyOf(b.printer_ip, b.printer_port)
@@ -249,6 +257,9 @@ export default function KitchenSetup({ eventData, onEventChange }) {
   const [now, setNow]           = useState(() => Date.now())
   const loadSeq = useRef(0)
   const [maestroNonce, setMaestroNonce] = useState(0)
+  // the database has the Barker B printer columns (v7): seen on the loaded kitchens
+  const hasBRef = useRef(false)
+  useEffect(() => { hasBRef.current = kitchens.some(k => 'printer_b_status' in k) }, [kitchens])
 
   useEffect(() => { load() }, [eventId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -260,13 +271,15 @@ export default function KitchenSetup({ eventData, onEventChange }) {
     if (!eventId) return
     const t = setInterval(async () => {
       setNow(Date.now())
+      const withB = hasBRef.current
       const { data, error } = await supabase.from('kitchens')
-        .select('id, printer_status, printer_checked_at, courses').eq('event_id', eventId)
+        .select('id, printer_status, printer_checked_at, courses' + (withB ? ', printer_b_status, printer_b_checked_at' : '')).eq('event_id', eventId)
       if (error || !data) return
       const m = new Map(data.map(r => [r.id, r]))
       // the course rules too: they are changed under Kitchen rules, and each kitchen lists them
       setKitchens(prev => prev.map(k => m.has(k.id)
-        ? { ...k, printer_status: m.get(k.id).printer_status, printer_checked_at: m.get(k.id).printer_checked_at, courses: m.get(k.id).courses }
+        ? { ...k, printer_status: m.get(k.id).printer_status, printer_checked_at: m.get(k.id).printer_checked_at, courses: m.get(k.id).courses,
+            ...(withB ? { printer_b_status: m.get(k.id).printer_b_status, printer_b_checked_at: m.get(k.id).printer_b_checked_at } : {}) }
         : k))
     }, STATUS_POLL_MS)
     return () => clearInterval(t)
@@ -444,7 +457,8 @@ const CSS = `
     grid-template-columns:minmax(0,1.5fr) minmax(0,0.6fr) minmax(0,1.3fr) minmax(0,0.5fr) minmax(0,1.3fr);
     grid-template-areas:"name prefix ip port backup"; }
   .ks-f-name { grid-area:name } .ks-f-prefix { grid-area:prefix } .ks-f-ip { grid-area:ip }
-  .ks-f-port { grid-area:port } .ks-f-backup { grid-area:backup }
+  .ks-f-port { grid-area:port } .ks-f-backup { grid-area:backup } .ks-f-ipb { grid-area:ipb }
+  .ks-kform.wb { grid-template-areas:"name prefix ip port backup" ". . ipb ipb ipb"; }
   .ks-cats   { display:grid; grid-template-columns:repeat(auto-fill, minmax(400px, 1fr)); gap:8px; }
   .ks-caps   { display:grid; grid-template-columns:repeat(auto-fill, minmax(350px, 1fr)); gap:8px; }
   .ks-wtrs   { display:grid; grid-template-columns:repeat(auto-fill, minmax(400px, 1fr)); gap:8px; }
@@ -456,12 +470,14 @@ const CSS = `
   @media (max-width: 1100px) {
     .ks-kform { grid-template-columns:repeat(4, minmax(0,1fr));
       grid-template-areas:"name name prefix port" "ip ip backup backup"; }
+    .ks-kform.wb { grid-template-areas:"name name prefix port" "ip ip backup backup" "ipb ipb ipb ipb"; }
   }
   @media (max-width: 760px) {
     .ks-kgrid { grid-template-columns:1fr; grid-template-areas:"name" "printer" "status" "test" "actions"; }
     .ks-c-actions { justify-content:flex-start }
     .ks-kform { grid-template-columns:1fr 1fr;
       grid-template-areas:"name name" "prefix port" "ip ip" "backup backup"; }
+    .ks-kform.wb { grid-template-areas:"name name" "prefix port" "ip ip" "ipb ipb" "backup backup"; }
     .ks-cats, .ks-wtrs { grid-template-columns:1fr; }
   }
 `
@@ -757,7 +773,7 @@ const PRINTER = {
 }
 
 const emptyForm = () => ({ mode:'add', id:null, name:'', prefix:'', prefixTouched:false,
-  printer_ip:'', printer_port:'9100', backup_printer_ip:'', is_default:false, is_active:true })
+  printer_ip:'', printer_port:'9100', backup_printer_ip:'', printer_ip_b:'', is_default:false, is_active:true })
 
 function validateKitchen(f, kitchens) {
   const e = {}
@@ -776,7 +792,14 @@ function validateKitchen(f, kitchens) {
   if (ip && !isPrinter(ip)) e.printer_ip = 'Not an IP address — e.g. 192.168.1.104, or a virtual printer'
   else if (ip && f.is_active !== false) {
     const owner = printerOwner(kitchens, ip, f.printer_port, f.id)
-    if (owner) e.printer_ip = owner.name + ' already prints on ' + hostOf(ip) + '. One printer per kitchen: choose another printer, or first change ' + owner.name + '.'
+    if (owner) e.printer_ip = owner.label + ' already prints on ' + hostOf(ip) + '. One printer per kitchen: choose another printer, or first change ' + owner.name + '.'
+  }
+  const ipb = String(f.printer_ip_b || '').trim()
+  if (ipb && !isPrinter(ipb)) e.printer_ip_b = 'Not an IP address — e.g. 192.168.1.105, or a virtual printer'
+  else if (ipb && !isVirtual(ipb) && hostOf(ipb) === hostOf(ip)) e.printer_ip_b = 'Same as the kitchen printer: leave empty to print both barkers there'
+  else if (ipb && f.is_active !== false) {
+    const owner = printerOwner(kitchens, ipb, 9100, f.id)
+    if (owner) e.printer_ip_b = owner.label + ' already prints on ' + hostOf(ipb) + '. One printer per barker: choose another printer.'
   }
   const port = Number(f.printer_port)
   if (!/^\d+$/.test(String(f.printer_port).trim()) || port < 1 || port > 65535) e.printer_port = '1–65535, usually 9100'
@@ -811,7 +834,7 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
   function openEdit(k) {
     setForm({ mode:'edit', id:k.id, name:k.name || '', prefix:k.prefix || '', prefixTouched:true,
       printer_ip:k.printer_ip || '', printer_port:String(k.printer_port ?? 9100),
-      backup_printer_ip:k.backup_printer_ip || '', is_active:k.is_active !== false,
+      backup_printer_ip:k.backup_printer_ip || '', printer_ip_b:k.printer_ip_b || '', is_active:k.is_active !== false,
       // The kitchen that really gets unrouted dishes, even if no row is flagged yet;
       // saving it writes the flag down
       is_default: defaultKitchen?.id === k.id, wasDefault: defaultKitchen?.id === k.id })
@@ -857,6 +880,9 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
       printer_ip: form.printer_ip.trim() || null, printer_port: Number(form.printer_port) || 9100,
       backup_printer_ip: form.backup_printer_ip.trim() || null,
       is_active: form.is_active,
+      // Barker B printer: only sent where the database has it (v7) or one is typed in
+      ...(kitchens.some(k => 'printer_ip_b' in k) || String(form.printer_ip_b || '').trim()
+        ? { printer_ip_b: String(form.printer_ip_b || '').trim() || null } : {}),
       // Switching off the default hands the role on (below) rather than leaving an inactive default
       is_default: form.is_default && form.is_active,
     }
@@ -959,18 +985,19 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
     return () => clearInterval(t)
   }, [anyTestRunning])
 
-  async function testPrint(k) {
+  async function testPrint(k, side = 'A') {
     const started = Date.now()
-    setTests(p => ({ ...p, [k.id]: { phase:'sending', kotId:null, started } }))
+    const key = side === 'B' ? k.id + ':B' : k.id
+    setTests(p => ({ ...p, [key]: { phase:'sending', kotId:null, started } }))
     const { data, error } = await supabase.from('kots').insert({
-      event_id: eventId, kitchen_id: k.id, kind:'test', kitchen_name: k.name,
-      kot_no:'TEST', items:[], status:'open',
+      event_id: eventId, kitchen_id: k.id, kind:'test', kitchen_name: side === 'B' ? k.name + ' · Barker B' : k.name,
+      kot_no:'TEST', items:[], status:'open', ...(side === 'B' ? { barker:'B' } : {}),
     }).select('id').single()
     setTests(p => {
-      if (p[k.id]?.started !== started) return p   // a newer test replaced this one
-      return { ...p, [k.id]: error || !data
+      if (p[key]?.started !== started) return p   // a newer test replaced this one
+      return { ...p, [key]: error || !data
         ? { phase:'failed', started, error: errText(error, 'sent') }
-        : { ...p[k.id], kotId: data.id } }
+        : { ...p[key], kotId: data.id } }
     })
   }
 
@@ -1037,7 +1064,7 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
       )}
 
       {form?.mode === 'add' && (
-        <KitchenForm form={form} setField={setField} setForm={setForm} kitchens={kitchens} tried={tried}
+        <KitchenForm maestro={maestro} form={form} setField={setField} setForm={setForm} kitchens={kitchens} tried={tried}
           saving={saving} error={formErr} onSave={saveForm} onCancel={() => setForm(null)}
           defaultKitchen={defaultKitchen} />
       )}
@@ -1051,12 +1078,12 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
 
       <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
         {kitchens.map((k, idx) => form?.mode === 'edit' && form.id === k.id ? (
-          <KitchenForm key={k.id} form={form} setField={setField} setForm={setForm} kitchens={kitchens}
+          <KitchenForm key={k.id} maestro={maestro} form={form} setField={setField} setForm={setForm} kitchens={kitchens}
             tried={tried} saving={saving} error={formErr} onSave={saveForm} onCancel={() => setForm(null)}
             defaultKitchen={defaultKitchen} />
         ) : (
           <KitchenRow key={k.id} k={k} maestro={maestro} first={idx === 0} last={idx === kitchens.length - 1}
-            isDefault={defaultKitchen?.id === k.id} now={now} test={tests[k.id]}
+            isDefault={defaultKitchen?.id === k.id} now={now} test={tests[k.id]} testB={tests[k.id + ':B']} onTestB={() => testPrint(k, 'B')} allKitchens={kitchens}
             sharedWith={k.printer_ip ? kitchens.filter(o => o.id !== k.id && o.is_active !== false && samePrinter(o, k)) : []}
             confirm={confirm?.id === k.id ? confirm : null} counts={ownCounts(k.id)}
             onMove={d => move(k, d)} onEdit={() => openEdit(k)} onTest={() => testPrint(k)}
@@ -1066,7 +1093,7 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
         ))}
       </div>
 
-      {kitchens.length > 0 && !form && <FindPrinters eventId={eventId} kitchens={kitchens} setKitchens={setKitchens} />}
+      {kitchens.length > 0 && !form && <FindPrinters eventId={eventId} maestro={maestro} kitchens={kitchens} setKitchens={setKitchens} />}
       {maestro && kitchens.length > 0 && !form && <CloudPrinting kitchens={kitchens} setKitchens={setKitchens} now={now} />}
     </div>
   )
@@ -1268,7 +1295,7 @@ function BrowserTestPrint({ kitchens }) {
 
 const clock = () => Date.now()
 
-function FindPrinters({ eventId, kitchens, setKitchens }) {
+function FindPrinters({ eventId, maestro, kitchens, setKitchens }) {
   const [rows, setRows] = useState(null)        // null = not loaded / not available
   const [missing, setMissing] = useState(false) // database update not applied yet
   const [search, setSearch] = useState(null)    // { at, base, phase:'asking'|'waiting'|'done'|'nohub', n }
@@ -1375,19 +1402,19 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
     const k = kitchens.find(x => x.id === id)
     if (!k) return
     const { host, port } = splitIp(f.ip)
-    if (slot === 'main') {
-      const owner = printerOwner(kitchens, f.ip, port, k.id)
-      if (owner) { setNote({ tone:'err', text: f.ip + ' is already the printer of ' + owner.name + '. One printer per kitchen.' }); return }
+    if (slot === 'main' || slot === 'b') {
+      const owner = printerOwner(kitchens, f.ip, port, k.id, slot === 'b' ? 'B' : 'A')
+      if (owner) { setNote({ tone:'err', text: f.ip + ' is already the printer of ' + owner.label + '. One printer per kitchen and barker.' }); return }
     }
-    const patch = slot === 'main'
-      ? { printer_ip: host, printer_port: port, printer_mac: f.mac || null }
+    const patch = slot === 'main' ? { printer_ip: host, printer_port: port, printer_mac: f.mac || null }
+      : slot === 'b' ? { printer_ip_b: host, printer_port_b: port }
       : { backup_printer_ip: f.ip, backup_printer_mac: f.mac || null }
     setBusy(b => ({ ...b, [f.ip]:'assign' }))
     const { data, error } = await supabase.from('kitchens').update(patch).eq('id', k.id).select().single()
     setBusy(b => ({ ...b, [f.ip]:null }))
     if (error) { setNote({ tone:'err', text: k.name + ' — ' + errText(error) }); return }
     setKitchens(prev => prev.map(x => x.id === k.id ? data : x))
-    setNote({ tone:'ok', text: (slot === 'main' ? k.name + ' prints on ' : k.name + ' falls back to ') + f.ip + '. Use Test print on the kitchen to check.' })
+    setNote({ tone:'ok', text: (slot === 'main' ? k.name + ' prints on ' : slot === 'b' ? k.name + ' Barker B prints on ' : k.name + ' falls back to ') + f.ip + '. Use Test print on the kitchen to check.' })
   }
 
   if (missing) return (
@@ -1396,6 +1423,7 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
 
   const users = f => kitchens.flatMap(k => [
     keyOf(k.printer_ip, k.printer_port) === f.ip ? k.name : null,
+    k.printer_ip_b && hostOf(k.printer_ip_b) === hostOf(f.ip) ? k.name + ' (Barker B)' : null,
     keyOf(k.backup_printer_ip) === f.ip ? k.name + ' (backup)' : null]).filter(Boolean)
   const moved = kitchens.filter(k => k.printer_moved_at && now - new Date(k.printer_moved_at) < 12 * 3600e3)
   // Only the printers that answered the latest search: older finds (another router, a printer
@@ -1465,18 +1493,25 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
                   const owner = printerOwner(kitchens, f.ip, splitIp(f.ip).port, null)
                   const on = kitchens.filter(k => k.is_active !== false)
                   const free = owner ? [] : on.filter(k => !k.printer_ip || isVirtual(k.printer_ip))
+                  // Barker B printer: kitchens with two barkers and no real B printer yet
+                  const freeB = owner || !maestro ? [] : on.filter(k => (Number(k.barkers) || 2) >= 2 && (!k.printer_ip_b || isVirtual(k.printer_ip_b)))
                   const backups = on.filter(k => !k.backup_printer_ip && k.id !== owner?.id
                     && keyOf(k.printer_ip, k.printer_port) !== keyOf(f.ip))
                   return (
                     <select value="" onChange={e => assign(f, e.target.value)} disabled={!!busy[f.ip]} data-testid="assign-printer"
                       style={{ ...input, width:210, height:32, fontSize:12.5 }}>
-                      <option value="">{owner ? 'Printer of ' + owner.name : 'Use for a kitchen…'}</option>
-                      {owner ? <option value="" disabled>Already {owner.name}’s printer: one printer per kitchen</option>
+                      <option value="">{owner ? 'Printer of ' + owner.label : 'Use for a kitchen…'}</option>
+                      {owner ? <option value="" disabled>Already {owner.label}’s printer: one printer per kitchen</option>
                         : free.length ? (
                           <optgroup label="Main printer for">
                             {free.map(k => <option key={'m' + k.id} value={'main:' + k.id}>{k.name}{isVirtual(k.printer_ip) ? ' (now on virtual printer ' + String(k.printer_ip).trim().slice(8) + ')' : ''}</option>)}
                           </optgroup>
                         ) : <option value="" disabled>Every kitchen has a printer (to change one: Edit)</option>}
+                      {freeB.length > 0 && (
+                        <optgroup label="Barker B printer for">
+                          {freeB.map(k => <option key={'x' + k.id} value={'b:' + k.id}>{k.name} · Barker B</option>)}
+                        </optgroup>
+                      )}
                       {backups.length > 0 && (
                         <optgroup label="Backup printer for">
                           {backups.map(k => <option key={'b' + k.id} value={'backup:' + k.id}>{k.name}</option>)}
@@ -1494,7 +1529,7 @@ function FindPrinters({ eventId, kitchens, setKitchens }) {
   )
 }
 
-function KitchenForm({ form, setField, setForm, kitchens, tried, saving, error, onSave, onCancel, defaultKitchen }) {
+function KitchenForm({ form, setField, setForm, kitchens, tried, saving, error, onSave, onCancel, defaultKitchen, maestro }) {
   const errs = validateKitchen(form, kitchens)
   // Mistakes show as soon as something is typed; "required" waits for Save
   const show = (key, val) => errs[key] && (tried || String(val ?? '').trim() !== '') ? errs[key] : null
@@ -1528,7 +1563,7 @@ function KitchenForm({ form, setField, setForm, kitchens, tried, saving, error, 
       <div style={{ fontSize:14, fontWeight:900, marginBottom:10 }}>
         {form.mode === 'add' ? 'New kitchen' : 'Edit ' + (kitchens.find(k => k.id === form.id)?.name || 'kitchen')}
       </div>
-      <div className="ks-kform">
+      <div className={'ks-kform' + (maestro ? ' wb' : '')}>
         {field('name', 'Name',
           <input autoFocus={form.mode === 'add' && !form.name} value={form.name} onChange={e => setField('name', e.target.value)}
             onKeyDown={enter} placeholder="e.g. Italian" style={inp(show('name', form.name))} />,
@@ -1561,6 +1596,11 @@ function KitchenForm({ form, setField, setForm, kitchens, tried, saving, error, 
           <input value={form.printer_port} onChange={e => setField('printer_port', e.target.value)} onKeyDown={enter}
             inputMode="numeric" style={inp(show('printer_port', 'x'))} />,
           show('printer_port', 'x'), null, 'ks-f-port')}
+        {maestro && field('printer_ip_b', 'Barker B printer IP (optional)',
+          <input value={form.printer_ip_b || ''} onKeyDown={enter} placeholder="None: both barkers on the kitchen printer"
+            style={inp(show('printer_ip_b', form.printer_ip_b || ''))} data-testid="printer-b"
+            onChange={e => { const v = e.target.value; setField('printer_ip_b', /^v/i.test(v) ? v.toUpperCase().replace(/[^A-Z0-9-]/g, '') : v.replace(/[^\d.]/g, '')) }} />,
+          show('printer_ip_b', form.printer_ip_b || ''), 'Barker B’s KOTs print here, Barker A’s on the kitchen printer. If one is down, the other prints.', 'ks-f-ipb')}
         {field('backup_printer_ip', 'Backup printer IP (optional)',
           <input value={form.backup_printer_ip} onChange={e => setField('backup_printer_ip', e.target.value.replace(/[^\d.]/g, ''))}
             onKeyDown={enter} placeholder="None" inputMode="decimal" style={inp(show('backup_printer_ip', form.backup_printer_ip))} />,
@@ -1636,12 +1676,16 @@ function KitchenGets({ k, maestro, isDefault, counts }) {
   )
 }
 
-function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith, confirm, counts,
+function KitchenRow({ k, maestro, first, last, isDefault, now, test, testB, onTestB, sharedWith, confirm, counts, allKitchens,
   onMove, onEdit, onTest, onMakeDefault, onAskDelete, onCancelDelete, onDelete, onActive }) {
   const hasIp = isPrinter(k.printer_ip)
   const virtual = VIRTUAL.test(String(k.printer_ip || '').trim())
   // a virtual printer is always there (a Print Hub that cannot reach "VIRTUAL-2" may still call it offline)
   const st = virtual ? PRINTER.online : k.printer_status ? (PRINTER[k.printer_status] || PRINTER.unknown) : null
+  // the Barker B printer (Maestro, two barkers): its own address and status
+  const hasB = maestro && isPrinter(k.printer_ip_b)
+  const stB = !hasB ? null : isVirtual(k.printer_ip_b) ? PRINTER.online : k.printer_b_status ? (PRINTER[k.printer_b_status] || PRINTER.unknown) : null
+  const ownerB = hasB && k.is_active ? printerOwner(allKitchens || [], k.printer_ip_b, 9100, k.id, 'B') : null
   const ago = agoText(k.printer_checked_at, now)
   const staleMs = k.printer_checked_at ? now - new Date(k.printer_checked_at).getTime() : null
   // The bar is the printer's health at a glance; DEFAULT has its own badge
@@ -1684,6 +1728,7 @@ function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith,
           <div className="ks-c-printer" style={{ minWidth:0, fontSize:13 }}>
             {hasIp ? (
               <>
+                {hasB && <span style={{ fontSize:10.5, fontWeight:900, color:'var(--ink2)', marginRight:5 }}>BARKER A</span>}
                 <span style={{ fontWeight:800, fontVariantNumeric:'tabular-nums' }}>🖨 {virtual ? 'Virtual printer ' + String(k.printer_ip).trim().slice(8) : k.printer_ip}</span>
                 {!virtual && <span style={{ color:'var(--ink2)', fontWeight:600 }}>:{k.printer_port ?? 9100}</span>}
                 <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:1 }}>
@@ -1693,6 +1738,14 @@ function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith,
                 {sharedWith.length > 0 && !virtual && k.is_active && (
                   <div style={{ fontSize:11.5, color:RED, fontWeight:800, marginTop:2 }} data-testid="printer-twice">
                     ⚠ Also set for {listNames(sharedWith)}: one printer per kitchen, change one under Edit</div>
+                )}
+                {hasB && (
+                  <div style={{ marginTop:5, paddingTop:4, borderTop:'1px dashed var(--line)' }} data-testid="printer-b-row">
+                    <span style={{ fontSize:10.5, fontWeight:900, color:'var(--ink2)', marginRight:5 }}>BARKER B</span>
+                    <span style={{ fontWeight:800, fontVariantNumeric:'tabular-nums' }}>🖨 {isVirtual(k.printer_ip_b) ? 'Virtual printer ' + String(k.printer_ip_b).trim().slice(8) : k.printer_ip_b}</span>
+                    {stB && <span style={{ marginLeft:6, background:stB.bg, color:stB.color, borderRadius:999, padding:'1px 8px', fontSize:10.5, fontWeight:900, whiteSpace:'nowrap' }}>● {stB.label}</span>}
+                    {ownerB && <div style={{ fontSize:11.5, color:RED, fontWeight:800, marginTop:2 }}>⚠ Also the printer of {ownerB.label}</div>}
+                  </div>
                 )}
               </>
             ) : (
@@ -1723,8 +1776,14 @@ function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith,
                 : test && ACTIVE_TEST.has(test.phase) ? 'Waiting for the Print Hub' : 'Print a test slip on this printer'}
               style={{ ...ghost, ...small, flexShrink:0, borderColor: hasIp && k.is_active ? 'var(--ink)' : 'var(--line)',
                 color: hasIp && k.is_active ? 'var(--ink)' : '#9CA3AF',
-                cursor: hasIp && k.is_active ? 'pointer' : 'not-allowed' }}>🖨 Test print</button>
+                cursor: hasIp && k.is_active ? 'pointer' : 'not-allowed' }}>🖨 Test print{hasB ? ' A' : ''}</button>
             <TestResult test={test} />
+            {hasB && <>
+              <button onClick={onTestB} disabled={!k.is_active || (testB && ACTIVE_TEST.has(testB.phase))} data-testid="test-b"
+                title="Print a test slip on the Barker B printer"
+                style={{ ...ghost, ...small, flexShrink:0, borderColor:'var(--ink)', color:'var(--ink)', cursor:'pointer' }}>🖨 Test B</button>
+              <TestResult test={testB} />
+            </>}
           </div>
 
           <div className="ks-c-actions" style={{ display:'flex', alignItems:'center', gap:2, flexWrap:'wrap' }}>
