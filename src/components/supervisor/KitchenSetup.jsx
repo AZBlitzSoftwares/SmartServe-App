@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { Fragment, useState, useEffect, useRef, useMemo } from 'react'
 import { MaestroPreService, MaestroPart, useMaestroSetup } from '../../maestro/MaestroSetup'
 import Fold from './Fold'
 import { FOLD_CSS } from '../../lib/fold'
@@ -1082,14 +1082,20 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
             tried={tried} saving={saving} error={formErr} onSave={saveForm} onCancel={() => setForm(null)}
             defaultKitchen={defaultKitchen} />
         ) : (
-          <KitchenRow key={k.id} k={k} maestro={maestro} first={idx === 0} last={idx === kitchens.length - 1}
-            isDefault={defaultKitchen?.id === k.id} now={now} test={tests[k.id]} testB={tests[k.id + ':B']} onTestB={() => testPrint(k, 'B')} allKitchens={kitchens}
+          <Fragment key={k.id}>
+          <KitchenRow k={k} maestro={maestro} first={idx === 0} last={idx === kitchens.length - 1}
+            isDefault={defaultKitchen?.id === k.id} now={now} test={tests[k.id]}
             sharedWith={k.printer_ip ? kitchens.filter(o => o.id !== k.id && o.is_active !== false && samePrinter(o, k)) : []}
             confirm={confirm?.id === k.id ? confirm : null} counts={ownCounts(k.id)}
             onMove={d => move(k, d)} onEdit={() => openEdit(k)} onTest={() => testPrint(k)}
             onMakeDefault={async () => { if (await makeDefault(k.id)) setMsg({ tone:'ok', text: k.name + ' is now the default kitchen' }) }}
             onAskDelete={() => askDelete(k)} onCancelDelete={() => setConfirm(null)}
             onDelete={() => doDelete(k)} onActive={on => setActive(k, on)} />
+          {maestro && k.is_active && (Number(k.barkers) || 2) >= 2 && (
+            <BarkerBRow k={k} now={now} test={tests[k.id + ':B']} allKitchens={kitchens}
+              onTest={() => testPrint(k, 'B')} onEdit={() => openEdit(k)} />
+          )}
+          </Fragment>
         ))}
       </div>
 
@@ -1676,16 +1682,86 @@ function KitchenGets({ k, maestro, isDefault, counts }) {
   )
 }
 
-function KitchenRow({ k, maestro, first, last, isDefault, now, test, testB, onTestB, sharedWith, confirm, counts, allKitchens,
+/* Barker B of a two-barker kitchen, as a row of its own under the kitchen: its KOT number,
+   its printer (Barker B's KOTs print there; until one is set they print on the kitchen
+   printer), the printer's status and a test print. */
+function BarkerBRow({ k, now, test, allKitchens, onTest, onEdit }) {
+  const ip = String(k.printer_ip_b || '').trim()
+  const has = isPrinter(ip)
+  const virtual = isVirtual(ip)
+  const st = !has ? null : virtual ? PRINTER.online : k.printer_b_status ? (PRINTER[k.printer_b_status] || PRINTER.unknown) : null
+  const ago = has && !virtual ? agoText(k.printer_b_checked_at, now) : null
+  const owner = has ? printerOwner(allKitchens || [], ip, 9100, k.id, 'B') : null
+  const bar = !has ? AMBER_LINE : virtual ? GREEN
+    : k.printer_b_status === 'offline' || k.printer_b_status === 'paper_out' ? RED
+    : k.printer_b_status === 'paper_low' ? MARI : GREEN
+  const link = { background:'none', border:'none', padding:'0 4px', fontSize:12.5, fontWeight:800,
+    cursor:'pointer', fontFamily:'Manrope', color:'var(--ink)', height:30 }
+  return (
+    <div className="ks-row" data-testid="barker-b-row" style={{ display:'flex', gap:10, border:'1.5px solid var(--line)', borderLeft:'4px solid ' + bar,
+      borderRadius:10, padding:'8px 12px', background:'#FBFAFD', marginTop:-4, marginLeft:28 }}>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div className="ks-kgrid">
+          <div className="ks-c-name" style={{ minWidth:0 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:7, flexWrap:'wrap' }}>
+              <span style={{ fontSize:14.5, fontWeight:900, color:'var(--ink)' }}>↳ {k.name} · Barker B</span>
+              <span title="KOT prefix and the next KOT number of Barker B" style={{ fontSize:11, fontWeight:900, letterSpacing:'1px', borderRadius:6,
+                padding:'2px 7px', background:'#F3EEF8', color:'var(--ink2)' }}>{`${k.prefix}-B ${String((k.kot_seq_b || 0) + 1).padStart(3, '0')}`}</span>
+            </div>
+            <div style={{ fontSize:11.5, color:'var(--ink2)', fontWeight:600, marginTop:2 }}>Barker B’s dishes (set under Dishes)</div>
+          </div>
+          <div className="ks-c-printer" style={{ minWidth:0, fontSize:13 }}>
+            {has ? (
+              <>
+                <span style={{ fontWeight:800, fontVariantNumeric:'tabular-nums' }}>🖨 {virtual ? 'Virtual printer ' + ip.slice(8) : ip}</span>
+                {!virtual && <span style={{ color:'var(--ink2)', fontWeight:600 }}>:{k.printer_port_b ?? 9100}</span>}
+                <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:1 }}>If it is down: {k.backup_printer_ip ? 'backup ' + k.backup_printer_ip : 'Barker A’s printer'}</div>
+                {owner && <div style={{ fontSize:11.5, color:RED, fontWeight:800, marginTop:2 }}>⚠ Also the printer of {owner.label}</div>}
+              </>
+            ) : (
+              <>
+                <button onClick={onEdit} data-testid="add-printer-b" style={{ background:AMBER_BG, border:'1px solid ' + AMBER_LINE, color:AMBER_INK,
+                  borderRadius:8, padding:'5px 10px', fontSize:12, fontWeight:800, cursor:'pointer', fontFamily:'Manrope' }}>
+                  No printer for Barker B — add one</button>
+                <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:3 }}>Until then Barker B’s KOTs print on {!k.printer_ip ? 'the kitchen printer' : isVirtual(k.printer_ip) ? 'Virtual printer ' + String(k.printer_ip).trim().slice(8) : keyOf(k.printer_ip, k.printer_port)}</div>
+              </>
+            )}
+          </div>
+          <div className="ks-c-status" style={{ minWidth:0 }}>
+            {st ? (
+              <span style={{ background:st.bg, color:st.color, borderRadius:999, padding:'3px 10px',
+                fontSize:11.5, fontWeight:900, whiteSpace:'nowrap' }}>● {st.label}</span>
+            ) : has ? (
+              <span style={{ background:'#F3F4F6', color:'#6B7280', borderRadius:999, padding:'3px 10px',
+                fontSize:11.5, fontWeight:800, whiteSpace:'nowrap' }}>Not checked yet</span>
+            ) : <span style={{ fontSize:12, color:'var(--ink2)' }}>—</span>}
+            <div style={{ fontSize:11.5, fontWeight:600, marginTop:3, color:'var(--ink2)' }}>
+              {virtual ? 'always on, nothing to start' : ago ? 'checked ' + ago : '\u00a0'}
+            </div>
+          </div>
+          <div className="ks-c-test" style={{ display:'flex', alignItems:'center', gap:9, minWidth:0 }}>
+            <button onClick={onTest} disabled={test && ACTIVE_TEST.has(test.phase)} data-testid="test-b"
+              title={has ? 'Print a test slip on Barker B’s printer' : 'Prints on the kitchen printer until Barker B has one'}
+              style={{ ...ghost, ...small, flexShrink:0, borderColor:'var(--ink)', color:'var(--ink)', cursor:'pointer' }}>🖨 Test print</button>
+            <TestResult test={test} />
+          </div>
+          <div className="ks-c-actions" style={{ display:'flex', alignItems:'center', gap:2, flexWrap:'wrap' }}>
+            <button onClick={onEdit} style={link}>Edit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith, confirm, counts,
   onMove, onEdit, onTest, onMakeDefault, onAskDelete, onCancelDelete, onDelete, onActive }) {
   const hasIp = isPrinter(k.printer_ip)
   const virtual = VIRTUAL.test(String(k.printer_ip || '').trim())
   // a virtual printer is always there (a Print Hub that cannot reach "VIRTUAL-2" may still call it offline)
   const st = virtual ? PRINTER.online : k.printer_status ? (PRINTER[k.printer_status] || PRINTER.unknown) : null
-  // the Barker B printer (Maestro, two barkers): its own address and status
-  const hasB = maestro && isPrinter(k.printer_ip_b)
-  const stB = !hasB ? null : isVirtual(k.printer_ip_b) ? PRINTER.online : k.printer_b_status ? (PRINTER[k.printer_b_status] || PRINTER.unknown) : null
-  const ownerB = hasB && k.is_active ? printerOwner(allKitchens || [], k.printer_ip_b, 9100, k.id, 'B') : null
+  // two barkers: this row is Barker A's printer, the next row Barker B's
+  const hasB = maestro && k.is_active && (Number(k.barkers) || 2) >= 2
   const ago = agoText(k.printer_checked_at, now)
   const staleMs = k.printer_checked_at ? now - new Date(k.printer_checked_at).getTime() : null
   // The bar is the printer's health at a glance; DEFAULT has its own badge
@@ -1739,14 +1815,7 @@ function KitchenRow({ k, maestro, first, last, isDefault, now, test, testB, onTe
                   <div style={{ fontSize:11.5, color:RED, fontWeight:800, marginTop:2 }} data-testid="printer-twice">
                     ⚠ Also set for {listNames(sharedWith)}: one printer per kitchen, change one under Edit</div>
                 )}
-                {hasB && (
-                  <div style={{ marginTop:5, paddingTop:4, borderTop:'1px dashed var(--line)' }} data-testid="printer-b-row">
-                    <span style={{ fontSize:10.5, fontWeight:900, color:'var(--ink2)', marginRight:5 }}>BARKER B</span>
-                    <span style={{ fontWeight:800, fontVariantNumeric:'tabular-nums' }}>🖨 {isVirtual(k.printer_ip_b) ? 'Virtual printer ' + String(k.printer_ip_b).trim().slice(8) : k.printer_ip_b}</span>
-                    {stB && <span style={{ marginLeft:6, background:stB.bg, color:stB.color, borderRadius:999, padding:'1px 8px', fontSize:10.5, fontWeight:900, whiteSpace:'nowrap' }}>● {stB.label}</span>}
-                    {ownerB && <div style={{ fontSize:11.5, color:RED, fontWeight:800, marginTop:2 }}>⚠ Also the printer of {ownerB.label}</div>}
-                  </div>
-                )}
+
               </>
             ) : (
               <button onClick={onEdit} style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#B91C1C',
@@ -1776,14 +1845,8 @@ function KitchenRow({ k, maestro, first, last, isDefault, now, test, testB, onTe
                 : test && ACTIVE_TEST.has(test.phase) ? 'Waiting for the Print Hub' : 'Print a test slip on this printer'}
               style={{ ...ghost, ...small, flexShrink:0, borderColor: hasIp && k.is_active ? 'var(--ink)' : 'var(--line)',
                 color: hasIp && k.is_active ? 'var(--ink)' : '#9CA3AF',
-                cursor: hasIp && k.is_active ? 'pointer' : 'not-allowed' }}>🖨 Test print{hasB ? ' A' : ''}</button>
+                cursor: hasIp && k.is_active ? 'pointer' : 'not-allowed' }}>🖨 Test print</button>
             <TestResult test={test} />
-            {hasB && <>
-              <button onClick={onTestB} disabled={!k.is_active || (testB && ACTIVE_TEST.has(testB.phase))} data-testid="test-b"
-                title="Print a test slip on the Barker B printer"
-                style={{ ...ghost, ...small, flexShrink:0, borderColor:'var(--ink)', color:'var(--ink)', cursor:'pointer' }}>🖨 Test B</button>
-              <TestResult test={testB} />
-            </>}
           </div>
 
           <div className="ks-c-actions" style={{ display:'flex', alignItems:'center', gap:2, flexWrap:'wrap' }}>
