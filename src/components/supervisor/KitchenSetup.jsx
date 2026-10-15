@@ -247,11 +247,12 @@ export default function KitchenSetup({ eventData, onEventChange }) {
     const t = setInterval(async () => {
       setNow(Date.now())
       const { data, error } = await supabase.from('kitchens')
-        .select('id, printer_status, printer_checked_at').eq('event_id', eventId)
+        .select('id, printer_status, printer_checked_at, courses').eq('event_id', eventId)
       if (error || !data) return
       const m = new Map(data.map(r => [r.id, r]))
+      // the course rules too: they are changed under Kitchen rules, and each kitchen lists them
       setKitchens(prev => prev.map(k => m.has(k.id)
-        ? { ...k, printer_status: m.get(k.id).printer_status, printer_checked_at: m.get(k.id).printer_checked_at }
+        ? { ...k, printer_status: m.get(k.id).printer_status, printer_checked_at: m.get(k.id).printer_checked_at, courses: m.get(k.id).courses }
         : k))
     }, STATUS_POLL_MS)
     return () => clearInterval(t)
@@ -984,6 +985,7 @@ function KitchensSection({ step = 2, eventId, maestro, kitchens, setKitchens, se
 
   const ownCounts = id => ({
     cats: cats.filter(c => c.kitchen_id === id).length,
+    catNames: cats.filter(c => c.kitchen_id === id).map(c => c.name),
     waiters: waiters.filter(w => w.kitchen_id === id).length,
   })
   const usedNames = new Set(kitchens.map(k => String(k.name || '').trim().toLowerCase()))
@@ -1567,15 +1569,42 @@ function KitchenForm({ form, setField, setForm, kitchens, tried, saving, error, 
   )
 }
 
+/* What a kitchen gets, by name: its cuisines (menu categories routed here under Menu routing)
+   and, at a Maestro event, its course rule (Kitchen rules: these courses come here whatever the
+   cuisine). The default kitchen also gets every dish whose category has no kitchen. */
+function KitchenGets({ k, maestro, isDefault, counts }) {
+  const names = counts.catNames || []
+  const courses = maestro && Array.isArray(k.courses) ? k.courses : []
+  const line = (label, list) => (
+    <div style={{ marginTop:2, lineHeight:1.35 }}>
+      <span style={{ color:'#9CA3AF', fontWeight:700 }}>{label} </span>
+      <span style={{ color:'var(--ink)', fontWeight:800 }}>{list.join(', ')}</span>
+    </div>
+  )
+  return (
+    <div style={{ fontSize:11.5, color:'var(--ink2)', fontWeight:600 }} data-testid="kitchen-gets">
+      {names.length > 0 && line(maestro ? (names.length === 1 ? 'Cuisine:' : 'Cuisines:') : (names.length === 1 ? 'Category:' : 'Categories:'), names)}
+      {courses.length > 0 && line(courses.length === 1 ? 'Course:' : 'Courses:', courses)}
+      {isDefault && <div style={{ marginTop:2 }}>+ every dish whose category has no kitchen</div>}
+      {!names.length && !courses.length && !isDefault && (
+        <div style={{ marginTop:2, color:AMBER_INK }}>Nothing comes here yet: set {maestro ? 'Menu routing or Kitchen rules' : 'Menu routing'}</div>
+      )}
+      {!maestro && <div style={{ marginTop:2 }}>{plural(counts.waiters, 'waiter')}</div>}
+    </div>
+  )
+}
+
 function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith, confirm, counts,
   onMove, onEdit, onTest, onMakeDefault, onAskDelete, onCancelDelete, onDelete, onActive }) {
   const hasIp = isPrinter(k.printer_ip)
   const virtual = VIRTUAL.test(String(k.printer_ip || '').trim())
-  const st = k.printer_status ? (PRINTER[k.printer_status] || PRINTER.unknown) : null
+  // a virtual printer is always there (a Print Hub that cannot reach "VIRTUAL-2" may still call it offline)
+  const st = virtual ? PRINTER.online : k.printer_status ? (PRINTER[k.printer_status] || PRINTER.unknown) : null
   const ago = agoText(k.printer_checked_at, now)
   const staleMs = k.printer_checked_at ? now - new Date(k.printer_checked_at).getTime() : null
   // The bar is the printer's health at a glance; DEFAULT has its own badge
   const bar = !k.is_active ? '#9CA3AF'
+    : virtual ? GREEN
     : !hasIp || k.printer_status === 'offline' || k.printer_status === 'paper_out' ? RED
     : k.printer_status === 'paper_low' ? MARI : GREEN
   const arrow = dis => ({ width:30, height:26, borderRadius:7, border:'1.5px solid var(--line)', background:'#fff',
@@ -1607,9 +1636,7 @@ function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith,
               {!k.is_active && <span style={{ fontSize:10, fontWeight:900, letterSpacing:'0.4px', borderRadius:999,
                 padding:'2px 8px', background:'#F3F4F6', color:'#6B7280', border:'1px solid #E5E7EB' }}>OFF</span>}
             </div>
-            <div style={{ fontSize:11.5, color:'var(--ink2)', fontWeight:600, marginTop:2 }}>
-              {plural(counts.cats, 'category', 'categories')}{maestro ? '' : ' · ' + plural(counts.waiters, 'waiter')}
-            </div>
+            <KitchenGets k={k} maestro={maestro} isDefault={isDefault} counts={counts} />
           </div>
 
           <div className="ks-c-printer" style={{ minWidth:0, fontSize:13 }}>
@@ -1639,7 +1666,7 @@ function KitchenRow({ k, maestro, first, last, isDefault, now, test, sharedWith,
                 fontSize:11.5, fontWeight:800, whiteSpace:'nowrap' }}>Not checked yet</span>
             )}
             <div style={{ fontSize:11.5, fontWeight:600, marginTop:3,
-              color: staleMs != null && staleMs > 180000 ? AMBER_INK : 'var(--ink2)' }}>
+              color: !virtual && staleMs != null && staleMs > 180000 ? AMBER_INK : 'var(--ink2)' }}>
               {virtual ? 'always on, nothing to start' : ago ? 'checked ' + ago : hasIp ? 'waiting for the Print Hub' : '\u00a0'}
             </div>
           </div>
