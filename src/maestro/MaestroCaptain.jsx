@@ -526,7 +526,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     try {
       setOutbox(list => list.filter(o => o.cover !== c || o.ids))
       const r = await rpc('ms_cover_reset', { p_event_id: ev.id, p_table_number: table, p_cover_no: c })
-      setToast({ text: `${coverLabel(c)} ready for a new guest${r?.cancelled ? ` · ${r.cancelled} dish${r.cancelled === 1 ? '' : 'es'} not picked up removed` : ''}` })
+      setToast({ text: `${coverLabel(c)} ready for a new guest${r?.cancelled ? ` · ${r.cancelled} dish${r.cancelled === 1 ? '' : 'es'} not picked up removed` : ''}${r?.voided ? ` · ${r.voided} dish${r.voided === 1 ? '' : 'es'} in the kitchen voided` : ''}` })
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
     setBusy(false)
@@ -798,7 +798,8 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
                   ? <span className="tagF">Seated</span>
                   : <button className="minib" disabled={busy} onClick={() => seat(cover)}>Mark seated{autoFirst ? ` · picks up ${firstCourse}` : ''}</button>}
                 <span style={{ flex: 1 }} />
-                {(coverItems.length > 0 || cr?.guest_note || cr?.guest_allergy || vip) && <Sure label="New guest" sure="New guest?" disabled={busy} onYes={() => newGuest(cover)} />}
+                {(coverItems.length > 0 || cr?.guest_note || cr?.guest_allergy || vip) && <Sure label="New guest" disabled={busy} onYes={() => newGuest(cover)}
+                  sure={(n => (n ? `New guest? Voids ${n} in kitchen` : 'New guest?'))(coverItems.filter(i => i.state === 'fired' && !i.served_at).length)} />}
                 {!pinned && <button className="minib" onClick={() => setOrderOpen(false)}>Hide</button>}
                 <button className={'pin' + (pinned ? ' pd' : '')} onClick={togglePin} aria-label={pinned ? 'Pinned' : 'Pin'}
                   title={pinned ? 'Pinned: always shown. Tap to let it hide while you pick dishes' : 'Keep the order always shown'}>{pinned ? '📌' : '📌 Pin'}</button>
