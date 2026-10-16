@@ -85,7 +85,7 @@ export default function SOSRequests({ eventData, onSosCountChange }) {
             <span style={{ fontSize:28 }}>{TYPE_EMOJI[req.request_type]}</span>
             <div>
               <div style={{ fontWeight:800, fontSize:15, color:TYPE_COLOR[req.request_type] }}>{TYPE_LABELS[req.request_type]}</div>
-              <div style={{ fontSize:13, color:'var(--ink2)', marginTop:2 }}>Table {req.tables?.table_number} · {new Date(req.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
+              <div style={{ fontSize:13, color:'var(--ink2)', marginTop:2 }}>Table {req.tables?.table_number ?? req.table_number ?? '?'} · {new Date(req.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
             </div>
           </div>
           <div style={{ fontSize:12, fontWeight:700, padding:'3px 10px', borderRadius:999, background:req.status==='open'?'#FEF2F2':req.status==='acknowledged'?'#FEF3C7':'#F0FDF4', color:req.status==='open'?'#DC2626':req.status==='acknowledged'?'#D97706':'#16A34A' }}>

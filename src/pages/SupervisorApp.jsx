@@ -334,7 +334,7 @@ export default function SupervisorApp() {
                 🚨 New Request: {TYPE_LABELS[newAlert.request_type]||newAlert.request_type}
               </div>
               <div style={{ color:'rgba(255,255,255,0.85)', fontSize:13, marginTop:2 }}>
-                Table {newAlert.tables?.table_number} · {new Date(newAlert.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+                Table {newAlert.tables?.table_number ?? newAlert.table_number ?? '?'} · {new Date(newAlert.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
               </div>
             </div>
             <button onClick={() => { clearAlert(); setActiveTab('kot') }} style={{ background:'#fff', color:'#DC2626', border:'none', borderRadius:10, padding:'10px 18px', fontSize:13, fontWeight:800, cursor:'pointer' }}>
