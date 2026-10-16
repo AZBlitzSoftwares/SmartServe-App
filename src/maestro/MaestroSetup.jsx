@@ -256,7 +256,8 @@ function DishSplit({ ev, d, setD, onChanged, step }) {
   const catsById = useMemo(() => Object.fromEntries(d.cats.map(c => [c.id, c])), [d.cats])
   const routed = useMemo(() => d.dishes.map(x => ({ ...x, r: routeDish(x, catsById, active) })), [d.dishes, catsById, active])
   const k = active.find(x => x.id === kid) || active[0]
-  const mine = routed.filter(x => x.r.kitchen?.id === k?.id)
+  // dishes of hidden cuisines (old samples, the separate Gujarati Thali items …) are not on the menu: not listed
+  const mine = routed.filter(x => x.r.kitchen?.id === k?.id && catsById[x.category_id]?.is_visible !== false)
   const two = (Number(k?.barkers) || 2) >= 2
 
   async function patchDish(x, fields) {
