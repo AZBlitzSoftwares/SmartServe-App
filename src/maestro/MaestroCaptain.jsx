@@ -135,7 +135,17 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     return Number(captain.table_number) || saved || null
   })
   const [view, setView] = useState('take')
-  const [coverPick, setCover] = useState(() => coverRange(captain, coversOf(ev, captain.table_number))?.from || 1)
+  // The cover being served is remembered on the tablet: a reload (a new version of the app, the
+  // tablet app refreshing) comes back to the same cover, so a VIP's menu stays on the screen.
+  const coverKey = `ms_cover_${ev.id}_${captain.id}_${table || 0}`
+  const [coverPick, setCover] = useState(() => {
+    let saved = 0
+    try { saved = Number(localStorage.getItem(coverKey)) || 0 } catch { /* private mode */ }
+    return saved || coverRange(captain, coversOf(ev, captain.table_number))?.from || 1
+  })
+  useEffect(() => { if (table) try { localStorage.setItem(coverKey, String(coverPick)) } catch { /* private mode */ } },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [coverPick])
   // Two filter rows: Cuisine (All, Italian, Oriental ...) first, then Course (All, Soup ... Dessert)
   const [cuisineTab, setCuisineTab] = useState(ALL)
   const [courseTab, setCourseTab] = useState(ALL)

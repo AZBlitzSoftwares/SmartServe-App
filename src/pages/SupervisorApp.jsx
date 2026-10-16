@@ -45,8 +45,8 @@ function statusBg(s)    { return { planned:'#EFF6FF', active:'#DCFCE7', complete
 function statusEmoji(s) { return { planned:'🔵', active:'🟢', completed:'⚫' }[s]||'⚪' }
 // ──────────────────────────────────────────────────────────────────────────
 
-const TYPE_LABELS = { sos:'Call Waiter', call_waiter:'Call Waiter', clean_table:'Clean Table', extra_cutlery:'Extra Cutlery', water_refill:'Water Refill' }
-const TYPE_EMOJI  = { sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', water_refill:'💧' }
+const TYPE_LABELS = { help:'Help Request', sos:'Call Waiter', call_waiter:'Call Waiter', clean_table:'Clean Table', extra_cutlery:'Extra Cutlery', water_refill:'Water Refill' }
+const TYPE_EMOJI  = { help:'\u{1F514}', sos:'🆘', clean_table:'🧹', extra_cutlery:'🍴', water_refill:'💧' }
 
 export default function SupervisorApp() {
   const [authed, setAuthed] = useState(() => !!savedScreen())
