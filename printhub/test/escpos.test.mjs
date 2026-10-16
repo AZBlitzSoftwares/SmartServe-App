@@ -262,19 +262,28 @@ test('maestro KOT: dish note and allergy big, bold and white on black', () => {
 
 test('maestro KOT: VIP guest, whole-order allergy and guest note', () => {
   const plain = textLines(buildKot(maestroJob)).join('\n');
-  assert.doesNotMatch(plain, /VIP GUEST|ALLERGY|GUEST NOTE/);
+  assert.doesNotMatch(plain, /VIP|ALLERGY|GUEST NOTE/);
   const d = decodeEscPos(buildKot({ ...maestroJob, vip_name: 'VVIP - Mr. Vikram Sethi', guest_allergy: 'Shellfish', guest_note: 'Less spicy | Dislikes: Mushroom' }));
   const all = d.lines.map((l) => l.text.trim()).join('\n');
-  assert.match(all, /VIP GUEST\nVVIP - MR. VIKRAM SETHI/);
+  // the VIP first of all, above the kitchen and the KOT number, with the star (asterisks)
+  assert.match(all, /^\*\*\* VIP \*\*\*\nVVIP - MR\. VIKRAM SETHI\n\*{48}\n/);
+  assert.ok(all.indexOf('VIP') < all.indexOf('KOT No.'), 'VIP above the KOT number');
+  const top = d.lines.find((l) => l.text.trim() === '*** VIP ***');
+  assert.ok(top && top.reverse && top.w === 2 && top.bold, 'VIP band white on black, double size');
+  const nm = d.lines.find((l) => l.text.includes('VVIP - MR. VIKRAM SETHI'));
+  assert.ok(nm && nm.w === 2 && nm.bold && !nm.reverse, 'the name big and bold');
   assert.match(all, /ALLERGY \(ALL DISHES\): SHELLFISH/);
   assert.match(all, /GUEST NOTE: LESS SPICY \| DISLIKES: MUSHROOM/);
   for (const t of ['ALLERGY (ALL DISHES): SHELLFISH', 'GUEST NOTE: LESS SPICY']) {
     const l = d.lines.find((x) => x.text.includes(t));
     assert.ok(l && l.reverse && l.bold && l.h === 2 && l.text.length <= 48, `${t} on a black band`);
   }
-  assert.ok(all.indexOf('VIP GUEST') < all.indexOf('1 x Crystal Veg Dim Sum'), 'guest details before the dishes');
-  const banner = d.lines.find((l) => l.text.trim() === 'VIP GUEST');
-  assert.ok(banner.reverse && banner.w === 2, 'VIP banner stands out');
+  assert.ok(all.indexOf('ALLERGY (ALL DISHES)') < all.indexOf('1 x Crystal Veg Dim Sum'), 'guest details before the dishes');
+  assert.equal((all.match(/VIKRAM/g) || []).length, 1, 'the VIP printed once, at the top');
+  // a VOID slip of a VIP's dish says whose it is too
+  const v = textLines(buildKot({ ...maestroJob, kind: 'cancel', vip_name: 'NMA - Mrs Nita Ambani' })).join('\n');
+  assert.match(v, /^\s*\*\*\* VIP \*\*\*/);
+  assert.match(v, /NMA - MRS NITA AMBANI/);
 });
 
 test('maestro KOT: remake and reprint banners', () => {

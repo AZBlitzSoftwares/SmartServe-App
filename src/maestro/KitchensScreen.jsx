@@ -80,7 +80,8 @@ export default function KitchensScreen({ eventData }) {
   const card = (k, kt) => {
     const over = age(k) >= lateOf(kt) * 60000
     return (
-      <div key={k.id} className={'kc' + (over ? ' fl' : '')} data-kot={k.kot_no}>
+      <div key={k.id} className={'kc' + (over ? ' fl' : '') + (k.vip_name ? ' vipk' : '')} data-kot={k.kot_no}>
+        {k.vip_name && <div className="vip vtop">★ VIP · {k.vip_name}</div>}
         <div className="kh">
           <span className={'sn' + ((k.barker || 'A') === 'A' ? '' : ' sb')}>{k.kot_no}</span>
           <span className="tm">{mmss(age(k))}</span>
@@ -91,7 +92,6 @@ export default function KitchensScreen({ eventData }) {
           {k.is_remake && <span className="bdg">REMAKE</span>}
           {k.print_status === 'failed' && <span className="bdg">SLIP NOT PRINTED</span>}
         </div>
-        {k.vip_name && <div className="vip">★ {k.vip_name}</div>}
         {k.guest_allergy && <div className="alg">Allergy · all dishes: {k.guest_allergy}</div>}
         {k.guest_note && <div className="gn">Guest note: {k.guest_note}</div>}
         <div className="its">

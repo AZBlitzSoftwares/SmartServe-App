@@ -470,10 +470,13 @@ function BigScreens({ ev, step }) {
 // ------------------------------------------------------------- VIP guests
 /* VIP guests of the event. The captain picks one with the VIP Guests button (or a guest with a
    fixed table and cover is loaded by itself when that cover is opened): the allergies, dislikes
-   and notes print on every KOT of that cover, and the preferred dishes are added to its order.
+   and notes print on every KOT of that cover, with the guest's name at the top. Their menu
+   (ms_vip_guests.dishes: [{menu_item_id, note, allergy, desc}]) is what the captain's tablet
+   shows on that cover: these dishes in their courses, and every course the list leaves out as
+   for any guest. Nothing is added to the order by itself. A dish's note and allergy are filled
+   in when the captain adds it; desc is how the dish reads on this guest's menu.
    Special dishes made only for VIP guests are menu dishes marked VIP guests only (Menu › Add
-   Dish): captains see them on a VIP guest's cover only. Allergies are for every dish of the
-   guest, or for one preferred dish (that dish's KOT prints it). */
+   Dish): captains see them on a VIP guest's cover only. */
 
 function VipGuests({ ev, d, onChanged, step }) {
   const [vips, setVips] = useState(null)
@@ -529,7 +532,7 @@ function VipGuests({ ev, d, onChanged, step }) {
   return (
     <div className="card" id="ms-vip">
       <h3><Title step={step}>VIP guests</Title> <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Saved at={saved} /><button className="btn btn-amber" onClick={add} disabled={!!err}>+ Add VIP guest</button></span></h3>
-      <p className="sub">Guests whose preferences are known in advance. On the captain's tablet, <b>VIP Guests</b> lists them: the captain picks the guest and the cover, and their allergies, dislikes and notes print on every KOT of that cover, and their preferred dishes are added to the order to fire one by one. A guest given a table and cover here is loaded by itself when the captain opens that cover.</p>
+      <p className="sub">Guests whose preferences are known in advance. On the captain's tablet, <b>VIP Guests</b> lists them: the captain picks the guest and the cover, their allergies, dislikes and notes print on every KOT of that cover with <b>the guest's name at the top</b>, and the menu becomes <b>their menu</b> (below): only their dishes in the courses their menu has, every other course (Amuse Bouche, drinks …) as for any guest, and <b>Full menu</b> for everything. Nothing is added to the order by itself. A guest given a table and cover here is loaded by itself when the captain opens that cover.</p>
       {err && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{err}. Run db/2026-10-13_maestro_v2.sql on this database first.</p>}
       {msg && <p style={{ color: 'var(--red)', fontWeight: 700 }}>{msg}</p>}
       {vips === null ? <div className="muted">Loading…</div> : !vips.length && !err ? <div className="muted">No VIP guests yet.</div> : null}
@@ -563,13 +566,16 @@ function VipGuests({ ev, d, onChanged, step }) {
             {PREF_CHIPS.map(x => <button key={x} className={prefOn(v, x) ? 'a' : ''} onClick={() => flipPref(v, x)}>{x}</button>)}
           </div>
           <div className="vr3">
-            <b>Preferred dishes</b>
+            <b>Their menu{(v.dishes || []).length ? ` · ${(v.dishes || []).length} dishes` : ''}</b>
+            <span className="muted" style={{ fontSize: 12 }}>{(v.dishes || []).length ? 'Shown instead of the full menu on this guest\'s cover.' : 'Empty: the captain sees the full menu for this guest.'}</span>
             {(v.dishes || []).map((x, i) => {
               const dd = dishById[x.menu_item_id]
               return (
                 <div key={x.menu_item_id + i} className="vdish">
                   <span className="vdn">{dd ? dd.name : 'Dish no longer on the menu'}</span>
                   <span className="muted">{dd ? `${catName(dd.category_id)} · ${dd.course || 'no course'}${dd.vip_only ? ' · VIP only' : ''}` : ''}</span>
+                  <input className="fld" defaultValue={x.desc || ''} key={'dd' + v.id + i} placeholder={dd?.description || 'Description on their menu (optional)'} title="How the dish reads on this guest's menu (empty: as on the menu)" style={{ flex: '2 1 200px' }}
+                    onBlur={e => { const t = e.target.value.trim(); if (t !== (x.desc || '')) setDish(v, i, { desc: t || null }) }} />
                   <input className="fld" defaultValue={x.note || ''} key={'dn' + v.id + i} placeholder="Note for this dish" style={{ flex: '1 1 140px' }}
                     onBlur={e => { const note = e.target.value.trim(); if (note !== (x.note || '')) setDish(v, i, { note: note || null }) }} />
                   <input className="fld vda" defaultValue={x.allergy || ''} key={'da' + v.id + i + (x.allergy || '')} placeholder="Allergy for this dish" list="ms-allergy-list" style={{ flex: '1 1 130px' }}
@@ -579,14 +585,14 @@ function VipGuests({ ev, d, onChanged, step }) {
               )
             })}
             <select className="fld" value="" onChange={e => { const id = e.target.value; if (id) patch(v, { dishes: [...(v.dishes || []), { menu_item_id: id, note: null }] }) }}>
-              <option value="">+ Add a preferred dish…</option>
+              <option value="">+ Add a dish to their menu…</option>
               {dishOpts.map(x => <option key={x.id} value={x.id}>{catName(x.category_id)} · {x.course || '—'} · {x.name}{x.vip_only ? ' (VIP only)' : ''}</option>)}
             </select>
           </div>
         </div>
       ))}
       <datalist id="ms-allergy-list">{ALLERGY_CHIPS.map(x => <option key={x} value={x} />)}</datalist>
-      <p className="sub" style={{ margin: '10px 0 0' }}><b>Special dishes for VIP guests only:</b> add them under <b>Menu › + Add Dish</b> with <b>VIP guests only</b> switched on (or Edit an existing dish). They are offered on a VIP guest's cover only, and can be picked above as a preferred dish.</p>
+      <p className="sub" style={{ margin: '10px 0 0' }}><b>Special dishes for VIP guests only:</b> add them under <b>Menu › + Add Dish</b> with <b>VIP guests only</b> switched on (or Edit an existing dish). They are offered on a VIP guest's cover only, and can be added above to a guest's menu.</p>
     </div>
   )
 }

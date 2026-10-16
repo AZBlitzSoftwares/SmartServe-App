@@ -12,7 +12,7 @@
 
 export const WIDTH = 48; // characters per line, Font A on 80 mm paper
 // Shown when the Print Hub starts, so anyone can see which KOT layout this copy prints
-export const KOT_LAYOUT = 'Pick up, VOID, covers 1A/2A, notes in big letters on black';
+export const KOT_LAYOUT = 'Pick up, VOID, covers 1A/2A, notes in big letters on black, VIP name at the top';
 
 // Node has Buffer; a browser (printing straight from the Control Desk, src/lib/printStation.js)
 // gets the few Buffer calls used here on plain byte arrays.
@@ -376,10 +376,23 @@ function band(r, lines) {
   for (const l of lines) r.reverse(true).text(' ' + l.padEnd(WIDTH - 3) + ' ').reverse(false).line();
 }
 
-// KITCHEN / KOT No. IT-A 014 (as big as fits) / Barker A - Rohit, then T7 - C3 big, course, firing,
-// then the VIP guest and the guest's allergy and note (for every dish of this cover).
+// A VIP guest's KOT starts with the VIP: "*** VIP ***" white on black and the guest's name, big,
+// above everything else, so the kitchen sees at once whose plate it is (the printer has no star
+// symbol: the star is printed as asterisks).
+function vipTop(r, job) {
+  const vip = String(job.vip_name || '').trim();
+  if (!vip) return;
+  r.align('center').bold(true).size(2).reverse(true).line(' *** VIP *** ').reverse(false);
+  for (const l of wrap(vip.toUpperCase(), WIDTH / 2)) r.line(l);
+  r.size(1).line('*'.repeat(WIDTH)).bold(false);
+}
+
+// *** VIP *** name (a VIP guest's KOT only), then KITCHEN / KOT No. IT-A 014 (as big as fits) /
+// Barker A - Rohit, then T7 - C3 big, course, firing, then the guest's allergy and note (for
+// every dish of this cover).
 function maestroHead(r, job, backup, now) {
   r.init();
+  vipTop(r, job);
   r.align('center').bold(true).size(2);
   const kname = String(job.kitchen_name || 'KITCHEN').toUpperCase();
   for (const l of wrap(kname, WIDTH / 2)) r.line(l);
@@ -408,18 +421,13 @@ function maestroHead(r, job, backup, now) {
   guestBlock(r, job);
 }
 
-// VIP guest, then the allergy and note that hold for everything this guest orders:
+// The allergy and note that hold for everything this guest orders (the VIP is at the top):
 // bold and tall, white on a black band, so the kitchen sees them at once.
 function guestBlock(r, job) {
-  const vip = String(job.vip_name || '').trim();
   const allergy = String(job.guest_allergy || '').trim();
   const note = String(job.guest_note || '').trim();
-  if (!vip && !allergy && !note) return;
-  if (vip) {
-    r.align('center').bold(true).size(2).reverse(true).line(' VIP GUEST ').reverse(false);
-    for (const l of wrap(vip.toUpperCase(), WIDTH / 2)) r.line(l);
-    r.size(1).bold(false).align('left');
-  }
+  if (!allergy && !note) return;
+  r.align('left');
   if (allergy) {
     r.bold(true).size(1, 2);
     band(r, wrap(`ALLERGY (ALL DISHES): ${allergy.toUpperCase()}`, WIDTH - 4, 2));

@@ -9,9 +9,12 @@
                    setting); Show delivered brings them back for a moment.
      Course board  every cover x every course at a glance; tap held dishes, Fire.
    VIP guests: the VIP button lists the event's VIP guests. Choose one and the cover: their
-   allergies, dislikes and notes go on every KOT of that cover, and their preferred dishes are
-   added to the cover's order. A VIP with a fixed table and cover is loaded by itself when the
-   captain opens that cover.
+   allergies, dislikes and notes go on every KOT of that cover (the KOT prints the VIP's name
+   at the top), and the menu becomes the guest's own menu (Event set-up › VIP guests › Their
+   menu): their dishes, course by course, and every course their menu leaves out (Amuse
+   Bouche, drinks …) as for any guest. Nothing is added to the order by itself: the captain
+   adds the dishes and picks them up. Full menu shows everything again. A VIP with a fixed
+   table and cover is loaded by itself when the captain opens that cover.
    Two captains can share a table and split its covers (Event set-up > Captains). */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
@@ -25,6 +28,8 @@ import {
 
 const ALL = '__all'
 const SHOW_DELIVERED_MS = 10000   // Show delivered: 10 seconds to read them, then they hide again
+// "NMA - Mrs Nita Ambani": the VIP guest as the KOT prints it (label, then name)
+const vipName = v => [v?.label, v?.name].map(x => String(x || '').trim()).filter(Boolean).join(' - ')
 
 // Void a dish already fired: a second tap, because it prints a VOID slip in the kitchen.
 function CancelFired({ disabled, onCancel }) {
@@ -135,6 +140,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const [cuisineTab, setCuisineTab] = useState(ALL)
   const [courseTab, setCourseTab] = useState(ALL)
   const [q, setQ] = useState('')
+  const [fullFor, setFullFor] = useState('')         // 'table:cover' of a VIP cover showing the full menu
   const [sel, setSel] = useState(() => new Set())    // ms_items ids picked on the board
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
@@ -364,7 +370,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     if (!tapOk(d.id)) return
     const vip = vipOf(cover)
     const pref = vip && (vip.dishes || []).find(x => x.menu_item_id === d.id)
-    setOutbox(list => [...list, { ref: newRef(), cover, menu_item_id: d.id, note: pref?.note || '', allergy: '', vip_guest_id: vip && pref ? vip.id : null, at: Date.now() }])
+    setOutbox(list => [...list, { ref: newRef(), cover, menu_item_id: d.id, note: pref?.note || '', allergy: pref?.allergy || '', vip_guest_id: vip && pref ? vip.id : null, at: Date.now() }])
   }
   // − on a dish: the last one of it not fired yet comes off
   async function minusDish(d) {
@@ -520,8 +526,9 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     setBusy(true)
     try {
       const r = await rpc('ms_vip_apply', { p_event_id: ev.id, p_table_number: table, p_cover_no: c, p_vip_id: v.id, p_captain_id: captain.id })
-      setSheet(null); setCover(c)
-      setToast({ text: `★ ${v.name} on ${coverLabel(c)}${auto ? ' (reserved seat)' : ''} · ${r?.held ? `${r.held} preferred dish${r.held === 1 ? '' : 'es'} added` : 'preferences loaded'}` })
+      setSheet(null); setCover(c); setFullFor('')
+      const own = (v.dishes || []).length > 0
+      setToast({ text: `★ ${vipName(v)} on ${coverLabel(c)}${auto ? ' (reserved seat)' : ''} · ${r?.held ? `${r.held} dish${r.held === 1 ? '' : 'es'} added · ` : ''}${own ? 'their menu is showing' : 'preferences loaded'}` })
       liveQ.reload()
     } catch (e) { setToast({ text: errText(e), err: true }) }
     setBusy(false)
@@ -564,9 +571,18 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
   const visibleCat = new Set(cats.map(c => c.id))
   const vip = vipOf(cover)
   const reserved = !vip ? reservedFor(cover) : null
-  // VIP-only dishes (special preparations) are offered only on a VIP guest's cover
-  const dishesShown = (menu?.dishes || []).filter(d => visibleCat.has(d.category_id) && !(autoFirst && d.course === firstCourse) && (!d.vip_only || vip))
   const courseOf = d => courses.includes(d.course) ? d.course : 'Other'
+  // A VIP guest with their own menu: only their dishes in the courses their menu has; a course
+  // their menu leaves out (Amuse Bouche, Gujarati Thali, drinks …) shows as for every guest.
+  // Full menu shows everything (until the cover changes).
+  const vipList = vip ? (vip.dishes || []).filter(x => dishById[x.menu_item_id]) : []
+  const vipMode = vipList.length > 0 && fullFor !== `${table}:${cover}`
+  const vipEntry = vipMode ? Object.fromEntries(vipList.map(x => [x.menu_item_id, x])) : {}
+  const vipCourses = new Set(vipMode ? vipList.map(x => courseOf(dishById[x.menu_item_id])) : [])
+  // VIP-only dishes (special preparations) are offered only on a VIP guest's cover
+  const dishesShown = (menu?.dishes || []).filter(d => visibleCat.has(d.category_id) && !(autoFirst && d.course === firstCourse) && (!d.vip_only || vip)
+    && (!vipMode || vipEntry[d.id] || (!d.vip_only && !vipCourses.has(courseOf(d)))))
+  const nVipShown = vipMode ? dishesShown.filter(d => vipEntry[d.id]).length : 0
   const catName = id => menu?.catsById?.[id]?.name || ''
   const cuisineAll = cats.filter(c => dishesShown.some(d => d.category_id === c.id))
   const cuisineRank = id => { const i = cuisineAll.findIndex(c => c.id === id); return i < 0 ? 99 : i }
@@ -590,7 +606,6 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     }
   }
   const czTag = id => <span className={'cz z' + (cuisineRank(id) % 6)}>{catName(id)}</span>
-  const vipDishes = vip ? (vip.dishes || []).map(x => dishById[x.menu_item_id]).filter(Boolean) : []
 
   // One tile per dish (3 to a row on the captain tablet, no photo): cuisine on top, the name
   // on up to three lines, one line of description and one button: + adds it to the cover,
@@ -599,16 +614,18 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     const n = unfiredCount(d.id)
     const sent = itemsOf(cover).some(i => i.menu_item_id === d.id && i.state === 'fired')
     const off = d.is_available === false
+    // on a VIP's own menu the dish reads as in their menu booklet
+    const desc = vipEntry[d.id]?.desc || d.description
     return (
       <div key={k + d.id} className={'dish dtile' + (off ? ' off' : '') + (n ? ' picked' : '')} data-dish={d.name}>
         <div className="dtop">
           {czTag(d.category_id)}
           {(query || k) && d.course ? <b className="dq">{d.course}</b> : null}
-          {d.vip_only && <b className="vtag">VIP only</b>}
+          {d.vip_only && !vipEntry[d.id] && <b className="vtag">VIP only</b>}
           {sent && !n && <b className="snt">✓ Sent</b>}
         </div>
         <div className="dn"><Veg veg={d.is_veg} /><span className="dnt">{d.name}</span></div>
-        {d.description && <div className="dd">{d.description}</div>}
+        {desc && <div className="dd">{desc}</div>}
         <div className="dbot">
           {off ? <span className="so">Sold out</span> : n
             ? <button className="addm" onClick={() => minusDish(d)} aria-label={`Remove ${d.name}`}>−</button>
@@ -692,6 +709,14 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
       <div className="menu" onClickCapture={() => { if (!pinned && orderOpen) setOrderOpen(false) }}>
         {!menu ? <div className="empty">Loading the menu…</div> : (
           <>
+            {vip && vipList.length > 0 && (
+              <div className={'vipmenu' + (vipMode ? '' : ' full')} data-vipmenu={vipMode ? 'own' : 'full'}>
+                <span className="vmt">★ VIP</span>
+                <b className="vmn">{vipName(vip)}</b>
+                <span className="vms">{vipMode ? `Their menu · ${nVipShown} ${nVipShown === 1 ? 'dish' : 'dishes'}` : 'Full menu'}</span>
+                <button className="vmb" onClick={() => { setFullFor(vipMode ? `${table}:${cover}` : ''); setCuisineTab(ALL); setCourseTab(ALL) }}>{vipMode ? 'Full menu' : 'Their menu'}</button>
+              </div>
+            )}
             <div className="msearch">
               <div className="sbox">
                 <input value={q} onChange={e => setQ(e.target.value)} placeholder={`Search ${dishesShown.length} dishes…`} aria-label="Search dishes" />
@@ -721,10 +746,6 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
               </>
             )}
             <div className="dlist tiles">
-              {!query && vipDishes.length > 0 && [
-                <div key="vh" className="ghead vh">★ Preferred by {vip.name}<span>· {vipDishes.length} {vipDishes.length === 1 ? 'dish' : 'dishes'}</span></div>,
-                ...vipDishes.map(d => dishCard(d, 'v')),
-              ]}
               {query
                 ? shown.map(d => dishCard(d))
                 : groupsShown.flatMap(g => [<div key={'h' + g.key} className="ghead">{g.title}<span>· {g.sub}</span></div>, ...g.list.map(d => dishCard(d))])}
@@ -748,7 +769,8 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
                 <button className={'pin' + (pinned ? ' pd' : '')} onClick={togglePin} aria-label={pinned ? 'Pinned' : 'Pin'}
                   title={pinned ? 'Pinned: always shown. Tap to let it hide while you pick dishes' : 'Keep the order always shown'}>{pinned ? '📌' : '📌 Pin'}</button>
               </div>
-              {reserved && <div className="vipr">★ Reserved for {reserved.name}<button className="minib" disabled={busy} onClick={() => applyVip(reserved, cover)}>Load preferences</button></div>}
+              {reserved && <div className="vipr">★ Reserved for {vipName(reserved)}<button className="minib" disabled={busy} onClick={() => applyVip(reserved, cover)}>Load their menu</button></div>}
+              {vip && <div className="vipr vipon" data-vip-on={vip.name}><span>★ VIP · {vipName(vip)}</span></div>}
               <div className="sum">
                 <button className={'gbtn' + (noteOpen === 'guest:' + cover ? ' act' : '')} onClick={() => toggleNote('guest:' + cover)}>
                   {cr?.guest_note || cr?.guest_allergy ? 'Guest note' : '+ Guest note (all dishes)'}</button>
@@ -1052,7 +1074,7 @@ function VipSheet({ vips, table, cover, covers, busy, seatOf, onClose, onApply }
         {!pick ? (
           <>
             <h3>★ VIP Guests</h3>
-            <p>Choose the guest, then their cover. Their allergies and preferences go on every KOT of that cover, and their preferred dishes are added to the order.</p>
+            <p>Choose the guest, then their cover. The menu becomes the guest's own menu, and their allergies and preferences go on every KOT of that cover with their name. Nothing is added to the order: add the dishes and pick them up as usual.</p>
             {!vips.length && <div className="empty">No VIP guests are set up for this event (Event set-up › VIP guests).</div>}
             <div className="viplist">
               {vips.map(v => {
@@ -1061,7 +1083,7 @@ function VipSheet({ vips, table, cover, covers, busy, seatOf, onClose, onApply }
                   <button key={v.id} className="vipi" onClick={() => { setPick(v); setC(v.table_number && Number(v.table_number) === Number(table) && v.cover_no ? Number(v.cover_no) : cover) }}>
                     <b>★ {v.name}</b>{v.label && <span className="vlab">{v.label}</span>}
                     <small>{at ? `Seated at ${tc(at.table_number, at.cover_no)}` : v.table_number && v.cover_no ? `Reserved ${tc(v.table_number, v.cover_no)}` : 'Any table'}
-                      {v.allergies ? ` · Allergy: ${v.allergies}` : ''}{(v.dishes || []).length ? ` · ${(v.dishes || []).length} preferred dishes` : ''}</small>
+                      {v.allergies ? ` · Allergy: ${v.allergies}` : ''}{(v.dishes || []).length ? ` · own menu, ${(v.dishes || []).length} dishes` : ''}</small>
                   </button>
                 )
               })}
@@ -1078,7 +1100,7 @@ function VipSheet({ vips, table, cover, covers, busy, seatOf, onClose, onApply }
             <div className="nsec">Cover at table T{table}</div>
             <div className="vcov">{covers.map(x => <button key={x} className={x === c ? 'a' : ''} onClick={() => setC(x)}>{coverLabel(x)}</button>)}</div>
             <div className="row" style={{ marginTop: 12 }}>
-              <button className="btn btn-amber" disabled={busy} onClick={() => onApply(pick, c)}>Seat at {coverLabel(c)} · load preferences</button>
+              <button className="btn btn-amber" disabled={busy} onClick={() => onApply(pick, c)}>Seat at {coverLabel(c)}{(pick.dishes || []).length ? ' · show their menu' : ' · load preferences'}</button>
               <button className="btn btn-ghost" onClick={() => setPick(null)}>Back</button>
             </div>
           </>

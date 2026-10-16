@@ -538,6 +538,15 @@
 .ms .vipb .va{font-weight:900;margin-top:2px}
 .ms .vipb .vl{margin-top:1px;font-weight:600}
 .ms .vipr{margin-top:7px;display:flex;align-items:center;gap:8px;justify-content:space-between;background:#FFFBF0;border:1.5px dashed #EBCB85;border-radius:9px;padding:5px 9px;font-size:12.5px;font-weight:800;color:#7A4B00}
+.ms .vipr.vipon{border-style:solid;background:#FFF1CC;color:#5A3A00;font-size:13.5px;font-weight:900}
+/* A VIP guest's own menu: who it is for, and the way back to the full menu */
+.ms .vipmenu{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;background:#FFF1CC;border:1.5px solid #E2B95C;border-radius:10px;padding:6px 8px 6px 10px;color:#5A3A00}
+.ms .vipmenu.full{background:#FFFBF0;border-style:dashed}
+.ms .vipmenu .vmt{flex:none;background:#7A4B00;color:#FFF1CC;font-size:11px;font-weight:900;border-radius:5px;padding:2px 7px;letter-spacing:.04em}
+.ms .vipmenu .vmn{font-size:14.5px;font-weight:900;min-width:0}
+.ms .vipmenu .vms{font-size:12px;font-weight:700;color:#7A4B00;flex:1;min-width:110px}
+.ms .vipmenu .vmb{flex:none;border:1.5px solid #B88A2E;background:#fff;color:#5A3A00;border-radius:999px;padding:5px 12px;font-size:12.5px;font-weight:900;min-height:32px}
+.ms .vipmenu.full .vmb{background:#7A4B00;border-color:#7A4B00;color:#fff}
 .ms .gnr{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:7px}
 .ms .gnr .ntags{width:auto}
 .ms .gbtn{border:1.5px dashed #B9C3D9;background:#fff;color:var(--navy);border-radius:8px;padding:3px 9px;font-size:11.5px;font-weight:800}
@@ -686,3 +695,6 @@
 .ms .vipcard .vpref.va > span{color:#7A4B00}
 .ms .vipcard .vpref.va button.a{background:#7A1F1F;border-color:#7A1F1F;color:#fff}
 .ms .vdish .vda{border-color:#EBCB85}
+/* A VIP guest's KOT: the VIP first on the card, the card edged in gold */
+.ms.kd .kc.vipk{border-color:#D9A43B;border-width:2px}
+.ms.kd .vip.vtop{text-align:center;letter-spacing:.02em}

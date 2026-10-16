@@ -292,7 +292,8 @@ function KitchenScreen({ session, onSignOut }) {
     const over = isOver(k)
     const items = k.items || []
     return (
-      <div key={k.id} className={'kc' + (over ? ' fl' : '')} data-kot={k.kot_no}>
+      <div key={k.id} className={'kc' + (over ? ' fl' : '') + (k.vip_name ? ' vipk' : '')} data-kot={k.kot_no}>
+        {k.vip_name && <div className="vip vtop">★ VIP · {k.vip_name}</div>}
         <div className="kh">
           <span className={'sn' + (view === 'whole' ? ((k.barker || 'A') === 'A' ? ' sa' : ' sb') : '')}>{k.kot_no}</span>
           <span className="tm">{mmss(age(k))}</span>
@@ -303,7 +304,6 @@ function KitchenScreen({ session, onSignOut }) {
           {k.is_remake && <span className="bdg">REMAKE</span>}
           {k.print_status === 'failed' && <span className="bdg" title="The printer did not answer (off, out of paper or not reachable). It prints by itself when the printer is back, or tap Reprint.">SLIP NOT PRINTED</span>}
         </div>
-        {k.vip_name && <div className="vip">★ {k.vip_name}</div>}
         {k.guest_allergy && <div className="alg">Allergy · all dishes: {k.guest_allergy}</div>}
         {k.guest_note && <div className="gn">Guest note: {k.guest_note}</div>}
         <div className="its">
