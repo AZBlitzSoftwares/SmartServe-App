@@ -661,7 +661,7 @@
 .ms.kd.ks .fk .n3k{margin:0;min-width:320px}
 .ms.kd.ks .fkn .pr{font-size:13px;padding:4px 10px}
 /* the screen's own sign-out: small, out of the way, asks for the screen's PIN */
-.ss-exit{position:fixed;right:10px;bottom:10px;z-index:80;width:34px;height:34px;border-radius:50%;border:1px solid rgba(0,0,0,.12);background:rgba(255,255,255,.75);color:#8A8F99;font-size:15px;cursor:pointer}
+.ss-exit{position:fixed;right:10px;bottom:10px;z-index:80;height:34px;padding:0 14px;border-radius:17px;border:1px solid rgba(0,0,0,.18);background:rgba(255,255,255,.92);color:#4B5563;font-size:13.5px;font-weight:700;cursor:pointer}
 .ms.kd.ks .foot{padding-right:46px}
 /* Control Desk screen: the desk fills the TV */
 .ss-screen{min-height:100vh;background:#F6F4EF}
