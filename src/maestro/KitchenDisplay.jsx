@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { unlockChime, playChatChime, chimeReady } from '../lib/chime'
-import { todayISO, sessionStillCurrent } from '../components/guest/deviceEntry'
+import { serviceDates, sessionStillCurrent } from '../components/guest/deviceEntry'
 import { setSignOutReason, takeSignOutReason, setUnsavedCheck } from '../lib/appUpdate'
 import logo from '../assets/janus_logo.jpg'
 import LaptopServerSwitch from '../components/LaptopServerSwitch'
@@ -27,7 +27,7 @@ function readSession() {
 export default function KitchenDisplay() {
   const [session, setSession] = useState(() => {
     const s = readSession()
-    // receptions run past midnight: yesterday's session holds until 5 am
+    // receptions run past midnight: yesterday's session holds until 6 am
     return s && sessionStillCurrent(s.event?.date) ? s : null
   })
   useEffect(() => { document.title = 'Kitchen Display · Smart Serve Maestro' }, [])
@@ -47,7 +47,7 @@ function BarkerLogin({ onLogin }) {
 
   useEffect(() => {
     (async () => {
-      const { data, error } = await supabase.from('events').select('*').eq('date', todayISO()).eq('maestro', true).order('name')
+      const { data, error } = await supabase.from('events').select('*').in('date', serviceDates()).eq('maestro', true).order('name')
       if (error) { setErr(errText(error)); setEvents([]); return }
       setEvents(data || [])
       if (data?.length === 1) setEvId(data[0].id)

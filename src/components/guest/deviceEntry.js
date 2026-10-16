@@ -62,12 +62,24 @@ export function todayISO(d = new Date()) {
     '-' + String(d.getDate()).padStart(2, '0')
 }
 
-/* A SAVED session is still current when its event is today. Until 5 am an
+/* A SAVED session is still current when its event is today. Until 6 am an
    event dated yesterday also counts: receptions run past midnight, and a
    tablet that restarts at 00:30 must carry on with the event that is still
-   being served rather than throw its captain or table away. This applies
-   only to resuming a saved session; new set-ups and sign-ins use today. */
-export const LATE_NIGHT_UNTIL_HOUR = 5
+   being served rather than throw its captain or table away. Sign-ins after
+   midnight find yesterday's event too (serviceDates), the same hours as the
+   Print Hub. */
+export const LATE_NIGHT_UNTIL_HOUR = 6
+
+/** The event dates that are "on" now: today, and until 6 am yesterday as well. */
+export function serviceDates(now = new Date()) {
+  const out = [todayISO(now)]
+  if (now.getHours() < LATE_NIGHT_UNTIL_HOUR) {
+    const y = new Date(now)
+    y.setDate(y.getDate() - 1)
+    out.push(todayISO(y))
+  }
+  return out
+}
 export function sessionStillCurrent(dateStr, now = new Date()) {
   if (!dateStr) return false
   if (dateStr === todayISO(now)) return true
@@ -82,7 +94,7 @@ export function sessionStillCurrent(dateStr, now = new Date()) {
 /** Today's events split by kind. ok:false when the server could not be read. */
 export async function loadTodaysEvents() {
   try {
-    const { data, error } = await supabase.from('events').select('*').eq('date', todayISO())
+    const { data, error } = await supabase.from('events').select('*').in('date', serviceDates())
     if (error) return { ok: false, captainEvents: [], selfEvents: [] }
     const list = data || []
     return {

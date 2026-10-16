@@ -14,6 +14,11 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
+# Keep this Mac awake while the Print Hub runs (lid open, on power): a sleeping Mac prints nothing
+if command -v caffeinate >/dev/null 2>&1; then
+  caffeinate -dims -w $$ &
+fi
+
 while true; do
   node printhub.mjs "$@"
   code=$?

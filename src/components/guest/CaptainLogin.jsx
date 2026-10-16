@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import janusLogo from '../../assets/janus_logo.jpg'
 import { useDeviceTools } from './useDeviceTools'
-import { todayISO as todayStr, isCaptainEvent } from './deviceEntry'
+import { serviceDates, isCaptainEvent } from './deviceEntry'
 import { takeSignOutReason } from '../../lib/appUpdate'
 
 const shell = {
@@ -129,7 +129,7 @@ export default function CaptainLogin({ onLogin, onBack, onGuest }) {
     setLoading(true)
     try {
       const { data, error: err } = await supabase.from('events')
-        .select('*').eq('date', todayStr())
+        .select('*').in('date', serviceDates())   // after midnight, last night's event still counts
       if (err) throw err
       setEvents((data || []).filter(isCaptainEvent))
       setSelfEventToday((data || []).some(e => !isCaptainEvent(e)))

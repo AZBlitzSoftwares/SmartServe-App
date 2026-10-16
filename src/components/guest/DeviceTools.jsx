@@ -5,7 +5,7 @@ import {
   describeServer, isLaptopOrigin, normaliseBase, probeLaptop, switchToLaptop,
   switchToCloud, getSavedLaptop, appBuildLabel, DEFAULT_LAPTOP_BASE,
 } from '../../lib/serverSwitch'
-import { clearAllDeviceKeys, todayISO } from './deviceEntry'
+import { clearAllDeviceKeys, serviceDates } from './deviceEntry'
 import { clearAppCaches } from '../../lib/appUpdate'
 
 /* Staff tools for one tablet: what it is set up as, a clean reset, and
@@ -65,7 +65,7 @@ function quick(query) {
 async function eventIdsForThisTablet() {
   const saved = readJson('ss_captain_event') || readJson('ss_setup_event')
   if (saved?.id) return [saved.id]
-  const { data, error } = await quick(supabase.from('events').select('id').eq('date', todayISO()))
+  const { data, error } = await quick(supabase.from('events').select('id').in('date', serviceDates()))
   if (error) throw error
   return (data || []).map(e => e.id)
 }
