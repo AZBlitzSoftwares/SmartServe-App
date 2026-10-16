@@ -337,6 +337,11 @@ export default function SupervisorApp() {
                 Table {newAlert.tables?.table_number ?? newAlert.table_number ?? '?'} · {new Date(newAlert.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
               </div>
             </div>
+            {/* Done closes the request for everyone (the managers' screens too) */}
+            <button onClick={async () => { const id = newAlert.id; clearAlert(); await supabase.from('sos_requests').update({ status:'resolved', resolved_at:new Date().toISOString() }).eq('id', id) }}
+              style={{ background:'#fff', color:'#16A34A', border:'none', borderRadius:10, padding:'10px 18px', fontSize:13, fontWeight:800, cursor:'pointer' }}>
+              ✓ Done
+            </button>
             <button onClick={() => { clearAlert(); setActiveTab('kot') }} style={{ background:'#fff', color:'#DC2626', border:'none', borderRadius:10, padding:'10px 18px', fontSize:13, fontWeight:800, cursor:'pointer' }}>
               View →
             </button>

@@ -6,8 +6,9 @@
    with its action). The same laptop runs the Print Hub.
    readOnly: the Control Desk screen, a big screen anyone may look at: everything is shown,
    nothing can be changed (no actions on alerts, no reprint or void in a table). */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { playChatChime, unlockChime } from '../lib/chime'
 import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
 import TableView from './TableView'
@@ -171,7 +172,8 @@ export default function ControlDesk({ eventData, onShowPrinters, readOnly = fals
       alerts.push({
         key: 'sos-' + s.id, w: 70, icon: 'H', color: 'var(--navy2)',
         title: `Help requested${t ? ' · table T' + t : ''}`, sub: `${cap ? 'Table captain ' + cap + ' · ' : ''}${ago(s.created_at, now)}`,
-        action: 'Resolve', onAct: () => resolve(s),
+        // a manager's view-only screen can close a help request too
+        action: 'Done', onAct: () => resolve(s), always: true,
       })
     }
     for (const m of d.sold) {
@@ -195,6 +197,20 @@ export default function ControlDesk({ eventData, onShowPrinters, readOnly = fals
     const { error } = await supabase.from('sos_requests').update({ status: 'resolved', resolved_at: new Date().toISOString() }).eq('id', s.id)
     if (error) throw error
   }, 'Help request resolved')
+  // ---------------------------------------------------------------- help, on the managers' screens
+  // A captain's Help: a red bar at the top of every manager's (view-only) screen, with the pager
+  // chime, until someone taps Done (here, on the admin's desk or in the SOS list)
+  const helpList = useMemo(() => [...(d?.sos || [])].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))), [d])
+  const helpSeen = useRef(null)
+  useEffect(() => (readOnly ? unlockChime() : undefined), [readOnly])
+  useEffect(() => {
+    if (!readOnly || !d) return
+    const first = helpSeen.current === null
+    const known = helpSeen.current || new Set()
+    const fresh = d.sos.filter(s => !known.has(s.id) && (!first || Date.now() - new Date(s.created_at).getTime() < 120000))
+    helpSeen.current = new Set(d.sos.map(s => s.id))
+    if (fresh.length) { try { playChatChime() } catch { /* no sound here */ } }
+  }, [d, readOnly])
   const undoSold = m => run(() => rpc('ms_sold_out', { p_menu_item_id: m.id, p_sold_out: false, p_by: 'Control Desk' }), `${m.name} is available again`)
 
   // ---------------------------------------------------------------- tables
@@ -234,6 +250,22 @@ export default function ControlDesk({ eventData, onShowPrinters, readOnly = fals
 
   return (
     <div className="ms desk">
+      {readOnly && helpList.length > 0 && (
+        <div className="helpbar" role="alert">
+          {helpList.slice(0, 4).map(s => {
+            const t = s.tables?.table_number ?? s.table_number
+            const cap = d?.caps.find(c => c.id === s.captain_id)?.name
+            return (
+              <div className="hb" key={s.id}>
+                <span className="hbi">🔔</span><b>HELP · Table {t != null ? 'T' + t : '?'}</b>
+                <span>{cap ? 'Captain ' + cap + ' · ' : ''}{ago(s.created_at, now)}</span>
+                <button disabled={busy} onClick={() => resolve(s)}>✓ Done</button>
+              </div>
+            )
+          })}
+          {helpList.length > 4 && <div className="hbm">+ {helpList.length - 4} more under Needs attention</div>}
+        </div>
+      )}
       <div className="appbar">
         <div className="lft">
           <div className="brandmk"><div className="lt"><img src={logo} alt="" /></div><div className="wm"><small>Smart Serve</small><b>Maestro</b></div></div>
@@ -292,7 +324,7 @@ export default function ControlDesk({ eventData, onShowPrinters, readOnly = fals
                   <div className="al" key={a.key}>
                     <div className="ic" style={{ background: a.color }}>{a.icon}</div>
                     <div style={{ minWidth: 0 }}><b>{a.title}</b><small>{a.sub}</small></div>
-                    {!readOnly && <button className="ac" disabled={busy} onClick={a.onAct}>{a.action}</button>}
+                    {(!readOnly || a.always) && <button className="ac" disabled={busy} onClick={a.onAct}>{a.action}</button>}
                   </div>
                 )) : <div className="empty">All clear. Late dishes, printer problems, waiting plates, pacing, help requests and sold-out dishes appear here.</div>}
               </div>

@@ -32,6 +32,8 @@ export function useSOSAlert(eventData) {
       const known = seen.current || new Set()
       const fresh = reqs.filter(r => !known.has(r.id) && (!first || Date.now() - new Date(r.created_at).getTime() < 120000))
       if (fresh.length) setNewAlert(fresh[0])
+      // closed elsewhere (a manager tapped Done): the banner goes too
+      else setNewAlert(a => (a && !reqs.some(r => r.id === a.id) ? null : a))
       seen.current = new Set(reqs.map(r => r.id))
       setOpenRequests(reqs)
     }
