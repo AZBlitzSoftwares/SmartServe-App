@@ -584,25 +584,46 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
     && (!vipMode || vipEntry[d.id] || (!d.vip_only && !vipCourses.has(courseOf(d)))))
   const nVipShown = vipMode ? dishesShown.filter(d => vipEntry[d.id]).length : 0
   const catName = id => menu?.catsById?.[id]?.name || ''
-  const cuisineAll = cats.filter(c => dishesShown.some(d => d.category_id === c.id))
-  const cuisineRank = id => { const i = cuisineAll.findIndex(c => c.id === id); return i < 0 ? 99 : i }
+  // One Cuisine chip per cuisine; a kitchen with several cuisines (the bar: Cocktail, Tequila,
+  // Whisky … all made by Hot & Cold Beverages) is ONE chip with the kitchen's name, and its
+  // cuisines are headings inside the course. Those dishes stay out of the All / All menu: they
+  // show when their course (Beverages, Tea & Coffee) or their chip is chosen, and in a search.
+  const catsPerKitchen = {}
+  for (const c of cats) if (c.kitchen_id) catsPerKitchen[c.kitchen_id] = (catsPerKitchen[c.kitchen_id] || 0) + 1
+  const barKit = id => { const k = menu?.catsById?.[id]?.kitchen_id; return k && catsPerKitchen[k] > 1 ? k : null }
+  const chipOf = d => { const k = barKit(d.category_id); return k ? 'k:' + k : d.category_id }
+  const isBar = d => !!barKit(d.category_id)
+  const cuisineAll = []
+  for (const c of cats) {
+    if (!dishesShown.some(d => d.category_id === c.id)) continue
+    const k = barKit(c.id)
+    const id = k ? 'k:' + k : c.id
+    if (!cuisineAll.some(x => x.id === id)) cuisineAll.push({ id, name: k ? (kitchenById[k]?.name || c.name) : c.name })
+  }
+  const chipName = id => cuisineAll.find(x => x.id === id)?.name || catName(id)
+  const catOrder = cats.map(c => c.id)
+  const cuisineRank = id => { const i = catOrder.indexOf(id); return i < 0 ? 999 : i }
   // Cuisine first, then the courses that cuisine has: the two rows never end on an empty list
   const activeCuisine = cuisineAll.some(c => c.id === cuisineTab) ? cuisineTab : ALL
-  const courseTabs = [...courses, 'Other'].filter(c => dishesShown.some(d => courseOf(d) === c && (activeCuisine === ALL || d.category_id === activeCuisine)))
+  const courseTabs = [...courses, 'Other'].filter(c => dishesShown.some(d => courseOf(d) === c && (activeCuisine === ALL || chipOf(d) === activeCuisine)))
   const activeCourse = courseTabs.includes(courseTab) ? courseTab : ALL
   const query = q.trim().toLowerCase()
   const shown = query
     ? dishesShown.filter(d => `${d.name} ${d.description || ''} ${catName(d.category_id)} ${d.course || ''}`.toLowerCase().includes(query))
-    : dishesShown.filter(d => (activeCourse === ALL || courseOf(d) === activeCourse) && (activeCuisine === ALL || d.category_id === activeCuisine))
+    : dishesShown.filter(d => (activeCourse === ALL || courseOf(d) === activeCourse) && (activeCuisine === ALL || chipOf(d) === activeCuisine)
+      && !(isBar(d) && activeCourse === ALL && activeCuisine === ALL))
   // The menu course by course (Soup, Appetizer ...); in each course the dishes cuisine by cuisine,
-  // each card naming its cuisine
+  // each card naming its cuisine. The bar's drinks: a heading per category (Cocktail, Whisky …)
   const groupsShown = []
   if (!query) {
     for (const c of [...courses, 'Other']) {
       const list = shown.filter(d => courseOf(d) === c).sort((a, b) => cuisineRank(a.category_id) - cuisineRank(b.category_id))
       if (!list.length) continue
-      const czNames = [...new Set(list.map(d => catName(d.category_id)))].join(', ')
-      groupsShown.push({ key: c, title: c, sub: `${list.length} ${list.length === 1 ? 'dish' : 'dishes'}${activeCuisine === ALL ? ` · ${czNames}` : ''}`, list })
+      const czNames = [...new Set(list.map(d => chipName(chipOf(d))))].join(', ')
+      const catIds = [...new Set(list.map(d => d.category_id))]
+      const subs = list.some(isBar) && catIds.length > 1
+        ? catIds.map(id => ({ id, name: catName(id), list: list.filter(d => d.category_id === id) })) : null
+      groupsShown.push({ key: c, title: c, sub: `${list.length} ${list.length === 1 ? 'dish' : 'dishes'}${activeCuisine === ALL ? ` · ${czNames}` : ''}`, list, subs })
     }
   }
   const czTag = id => <span className={'cz z' + (cuisineRank(id) % 6)}>{catName(id)}</span>
@@ -748,7 +769,10 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
             <div className="dlist tiles">
               {query
                 ? shown.map(d => dishCard(d))
-                : groupsShown.flatMap(g => [<div key={'h' + g.key} className="ghead">{g.title}<span>· {g.sub}</span></div>, ...g.list.map(d => dishCard(d))])}
+                : groupsShown.flatMap(g => [<div key={'h' + g.key} className="ghead">{g.title}<span>· {g.sub}</span></div>,
+                  ...(g.subs
+                    ? g.subs.flatMap(sg => [<div key={'s' + g.key + sg.id} className="ghead gsub" data-sub={sg.name}>{sg.name}<span>· {sg.list.length}</span></div>, ...sg.list.map(d => dishCard(d))])
+                    : g.list.map(d => dishCard(d)))])}
               {!shown.length && <div className="empty">{query ? 'No dish matches that search.' : 'No dishes here.'}</div>}
             </div>
           </>

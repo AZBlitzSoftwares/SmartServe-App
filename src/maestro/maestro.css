@@ -698,3 +698,5 @@
 /* A VIP guest's KOT: the VIP first on the card, the card edged in gold */
 .ms.kd .kc.vipk{border-color:#D9A43B;border-width:2px}
 .ms.kd .vip.vtop{text-align:center;letter-spacing:.02em}
+/* The bar's drinks inside a course: a small heading per category (Cocktail, Whisky ...) */
+.ms .dlist .ghead.gsub{font-size:11.5px;font-weight:900;color:#7A4B00;border-bottom:1px dashed #E2C89A;margin-top:4px;padding-left:6px;text-transform:uppercase;letter-spacing:.05em}
