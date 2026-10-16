@@ -25,6 +25,9 @@ export const DEFAULT_COURSES = ['First Course', 'Soup', 'Starters', 'Mains', 'De
 // The few notes a captain adds with one tap, to a dish or to everything a guest orders;
 // anything else is typed or spoken (Other). Allergies are kept apart so they print clearly.
 export const QUICK_NOTES = ['Jain', 'No onion-garlic', 'Less spicy', 'Extra spicy', 'Less oil', 'No ajinomoto']
+// The "Soft Drink" item: which drink, with one tap (anything else under Other)
+export const SOFT_DRINK_NOTES = ['Coke', 'Diet Coke', 'Coke Zero', 'Sprite', 'Thums Up', 'Fanta', 'Limca', 'Soda', 'Tonic Water', 'Ginger Ale', 'Red Bull']
+export const quickNotesFor = name => (/\bsoft\s*drinks?\b/i.test(String(name || '')) ? SOFT_DRINK_NOTES : QUICK_NOTES)
 // Food preferences for a VIP guest (Event set-up), a longer list: set once, before the event
 export const PREF_CHIPS = ['Jain', 'No onion', 'No garlic', 'No tomato', 'No mushroom', 'No coriander', 'Less spicy', 'Extra spicy',
   'Less oil', 'Less salt', 'No ajinomoto', 'Gluten free', 'Dairy free', 'Vegan']

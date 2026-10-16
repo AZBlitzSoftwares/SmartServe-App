@@ -22,7 +22,7 @@ import logo from '../assets/janus_logo.jpg'
 import './maestro.css'
 import {
   coursesOf, courseRank, lateMinutes, dishStatus, deliveredAt, useLive, useNow, loadMenu, rpc, rpcRetry, errText, newRef,
-  QUICK_NOTES, splitNote, joinNote, servedHideMinutes, ago, shortName, tc, coverRange, rangeText, tableRanges, capOrder,
+  QUICK_NOTES, quickNotesFor, splitNote, joinNote, servedHideMinutes, ago, shortName, tc, coverRange, rangeText, tableRanges, capOrder,
   isExtraCover, coverLabel, coversOf, tableCovers, spareOwner,
 } from './msData'
 
@@ -705,7 +705,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
           <button className={'nbtn' + (noteOpen === 'out:' + o.ref ? ' act' : '')} onClick={() => toggleNote('out:' + o.ref)}>{o.note || o.allergy ? 'Note' : '+ Note'}</button>
           <button className="x" onClick={() => minusDish(l.dish)} title="Take this dish off">✕</button>
         </div>
-        {noteOpen === nk && <NoteEditor key={nk} note={o.note} allergy={o.allergy} onSave={(n, a) => saveNote({ kind: 'out', ref: o.ref }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />}
+        {noteOpen === nk && <NoteEditor key={nk} note={o.note} allergy={o.allergy} quick={quickNotesFor(l.dish.name)} onSave={(n, a) => saveNote({ kind: 'out', ref: o.ref }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />}
         </div>
       )
     }
@@ -728,7 +728,7 @@ export default function MaestroCaptain({ eventData, captain, onSwitchCaptain }) 
           canCancelFired(i) && <CancelFired disabled={busy} onCancel={() => cancelItems([i.id], i.name)} />
         )}
       </div>
-      {noteOpen === nk && i.state === 'held' && <NoteEditor key={nk} note={i.note} allergy={i.allergy} onSave={(n, a) => saveNote({ kind: 'item', id: i.id }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />}
+      {noteOpen === nk && i.state === 'held' && <NoteEditor key={nk} note={i.note} allergy={i.allergy} quick={quickNotesFor(i.name)} onSave={(n, a) => saveNote({ kind: 'item', id: i.id }, n, a)} onClose={() => { setNoteOpen(null); recheckTyping() }} onField={recheckTyping} />}
       </div>
     )
   }
@@ -1051,10 +1051,10 @@ export function Sheet({ title, text, children, onClose }) {
 
 // Notes in place, right under the dish (or the guest): six one-tap notes, then Other or Allergy
 // to type. Every tap is saved at once - nothing to confirm, no screen to leave.
-function NoteEditor({ note, allergy, onSave, onClose, onField }) {
+function NoteEditor({ note, allergy, onSave, onClose, onField, quick = QUICK_NOTES }) {
   const parts = splitNote(note)
-  const [picked, setPicked] = useState(() => new Set(parts.filter(x => QUICK_NOTES.includes(x))))
-  const [other, setOther] = useState(() => parts.filter(x => !QUICK_NOTES.includes(x)).join(', '))
+  const [picked, setPicked] = useState(() => new Set(parts.filter(x => quick.includes(x))))
+  const [other, setOther] = useState(() => parts.filter(x => !quick.includes(x)).join(', '))
   const [alg, setAlg] = useState(allergy || '')
   const [field, setField] = useState(() => null)   // 'other' | 'allergy' | null
   const cur = useRef({}); cur.current = { picked, other, alg, field }
@@ -1063,7 +1063,7 @@ function NoteEditor({ note, allergy, onSave, onClose, onField }) {
   const saveRef = useRef(onSave); saveRef.current = onSave
   // saves go one after another, so the last tap always wins
   const save = (p = cur.current.picked, o = cur.current.other, a = cur.current.alg) => {
-    const n = joinNote([...QUICK_NOTES.filter(x => p.has(x)), ...splitNote(o)])
+    const n = joinNote([...quick.filter(x => p.has(x)), ...splitNote(o)])
     const al = joinNote(splitNote(a))
     const key = JSON.stringify([n, al])
     if (key === saved.current) return
@@ -1076,13 +1076,13 @@ function NoteEditor({ note, allergy, onSave, onClose, onField }) {
   const val = field === 'allergy' ? alg : other
   const setVal = v => (field === 'allergy' ? setAlg(v) : setOther(v))
   const inputRef = useRef(null)
-  // closing the field: the keyboard goes down and the screen is back as it was
-  const closeField = () => { save(); try { inputRef.current?.blur() } catch { /* gone */ } setField(null); onField?.() }
+  // OK (or Enter): saved and the note closes, as with Done; the keyboard goes down
+  const closeField = () => { save(); try { inputRef.current?.blur() } catch { /* gone */ } setField(null); onField?.(); onClose() }
   const openField = f => { save(); setField(cur => (cur === f ? null : f)); onField?.() }
   return (
     <div className="ned">
       <div className="qn">
-        {QUICK_NOTES.map(x => <button key={x} className={picked.has(x) ? 'a' : ''} onClick={() => flip(x)}>{x}</button>)}
+        {quick.map(x => <button key={x} className={picked.has(x) ? 'a' : ''} onClick={() => flip(x)}>{x}</button>)}
         <button className={'qo' + (field === 'other' ? ' act' : '') + (other.trim() ? ' a' : '')} onClick={() => openField('other')}>✎ Other</button>
         <button className={'qal' + (field === 'allergy' ? ' act' : '') + (alg.trim() ? ' a' : '')} onClick={() => openField('allergy')}>⚠ Allergy</button>
         <button className="qd" onClick={() => { save(); try { inputRef.current?.blur() } catch { /* gone */ } onClose() }}>Done</button>
@@ -1091,7 +1091,7 @@ function NoteEditor({ note, allergy, onSave, onClose, onField }) {
         <div className="nin">
           <input ref={inputRef} autoFocus value={val} onChange={e => setVal(e.target.value)} onBlur={() => save()}
             onKeyDown={e => { if (e.key === 'Enter') closeField() }}
-            placeholder={field === 'allergy' ? 'Allergy, e.g. peanuts' : 'Type, e.g. no tomato in the pizza'} />
+            placeholder={field === 'allergy' ? 'Allergy, e.g. peanuts' : quick === QUICK_NOTES ? 'Type, e.g. no tomato in the pizza' : 'Type the drink, e.g. Pepsi'} />
           <button className="ok" onMouseDown={e => e.preventDefault()} onClick={closeField}>OK</button>
         </div>
       )}
