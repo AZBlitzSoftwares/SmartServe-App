@@ -2262,6 +2262,10 @@ function CaptainsSection({ eventId, step = 4, captains, setCaptains, tableCount,
 function CaptainRow({ c, tableCount, coverCount = 10, onSave, onRemove, saved, crowd, overlap, autoLabel }) {
   const [draft, setDraft] = useState(c.table_number ? String(c.table_number) : '')
   const [pin, setPin] = useState(c.pin || '')
+  // The name can be changed here too (the captain signs in with the new name and the same PIN)
+  const [nm, setNm] = useState(c.name || '')
+  const [seenName, setSeenName] = useState(c.name || '')
+  if (seenName !== (c.name || '')) { setSeenName(c.name || ''); setNm(c.name || '') }
   const [cf, setCf] = useState(c.cover_from ? String(c.cover_from) : '')
   const [ct, setCt] = useState(c.cover_to ? String(c.cover_to) : '')
   const [err, setErr] = useState('')
@@ -2295,6 +2299,13 @@ function CaptainRow({ c, tableCount, coverCount = 10, onSave, onRemove, saved, c
     const clear = v !== c.table_number && (c.cover_from != null || c.cover_to != null) ? { cover_from: null, cover_to: null } : {}
     await onSave(c, { table_number: v, ...clear })
   }
+  async function commitName() {
+    const v = nm.trim().replace(/\s+/g, ' ')
+    if (v === (c.name || '')) { setNm(c.name || ''); return }
+    if (!v) { setErr('Enter the captain’s name'); setNm(c.name || ''); return }
+    setErr('')
+    if (!(await onSave(c, { name: v }))) setNm(c.name || '')
+  }
   async function commitPin() {
     const v = pin.trim()
     if (v === (c.pin || '')) return
@@ -2320,7 +2331,14 @@ function CaptainRow({ c, tableCount, coverCount = 10, onSave, onRemove, saved, c
       background: tone === RED ? '#FEF2F2' : tone ? AMBER_BG : '#fff' }}>
       <div style={{ display:'flex', alignItems:'flex-start', gap:8 }}>
         <div style={{ flex:1, minWidth:0 }}>
-          <div title={c.name} style={{ fontSize:14, fontWeight:800, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.name}</div>
+          <input value={nm} title="Captain’s name: tap to change (signs in with the new name and the same PIN)" aria-label="Captain name"
+            data-testid="captain-name" maxLength={40}
+            onChange={e => { setNm(e.target.value); setErr('') }}
+            onFocus={e => { e.target.style.borderColor = 'var(--line)'; e.target.style.background = '#fff' }}
+            onBlur={e => { e.target.style.borderColor = 'transparent'; e.target.style.background = 'transparent'; commitName() }}
+            onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') { setNm(c.name || ''); setTimeout(() => e.target.blur(), 0) } }}
+            style={{ width:'100%', boxSizing:'border-box', fontSize:14, fontWeight:800, color:'var(--ink)', background:'transparent',
+              border:'1.5px dashed transparent', borderRadius:6, padding:'1px 4px', margin:'-2px 0 0 -5px', outline:'none' }} />
           <div style={{ fontSize:11.5, fontWeight:700, color: tone || 'var(--ink2)', minHeight:16 }}>
             {warn || 'Table ' + c.table_number + ' · ' + (covers ? capRangeText(range) === 'all covers' && autoLabel ? autoLabel : capRangeText(range) : autoLabel || 'all covers')}
             <Saved show={saved} />
