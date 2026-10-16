@@ -14,6 +14,7 @@ import SupervisorChat from '../components/supervisor/SupervisorChat'
 import { playChatChime, unlockChime } from '../lib/chime'
 import { lazyPage } from '../lib/lazyPage'
 import { setUnsavedCheck } from '../lib/appUpdate'
+import { serviceDates } from '../components/guest/deviceEntry'
 // ss-maestro: course-firing events get their own desk and reports, loaded only when used
 const ControlDesk = lazyPage(() => import('../maestro/ControlDesk'), 'controldesk')
 const MaestroReports = lazyPage(() => import('../maestro/MaestroReports'), 'msreports')
@@ -234,7 +235,8 @@ export default function SupervisorApp() {
     }
 
     // Admin: today's active event on first load, otherwise the newest
-    const todayActive = evs.find(e => eventStatus(e.date) === 'active')
+    // after midnight (until 6 am) last night's event is still the one being served
+    const todayActive = evs.find(e => eventStatus(e.date) === 'active') || evs.find(e => serviceDates().includes(e.date))
     if (todayActive) { setEventData(todayActive); eventManuallySet.current = true }
     else if (evs.length) { setEventData(evs[0]); eventManuallySet.current = true }
   }
