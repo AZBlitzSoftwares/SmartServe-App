@@ -456,3 +456,19 @@ test('a server without the printer search keeps printing and switches the search
   await waitFor(() => ctx.state.discovery.on === false, 'search switched off');
   assert.ok(ctx.state.recent.some((r) => /database update/.test(r.text)));
 });
+
+test("Barker B's own printer is checked, reported and shown under its kitchen", async (t) => {
+  const ctx = await setup(t);
+  const { mock, event } = ctx;
+  const pa = await ctx.printer();
+  const pb = await ctx.printer();
+  mock.addKitchen({ event_id: event.id, name: 'Hutong', prefix: 'OR', barkers: 2,
+    printer_ip: '127.0.0.1', printer_port: pa.port, printer_ip_b: '127.0.0.1', printer_port_b: pb.port });
+  ctx.start();
+  const reported = () => mock.callsTo('hub_printer_status').map((c) => c.args).filter((b) => b.p_status === 'online');
+  await waitFor(() => reported().some((b) => b.p_printer_port === pb.port), 'Barker B printer reported online');
+  assert.ok(reported().some((b) => b.p_printer_port === pa.port), 'kitchen printer reported too');
+  const board = renderBoard(ctx.state).join('\n');
+  assert.match(board, /Hutong\s+127\.0\.0\.1:\d+\s+ONLINE/);
+  assert.match(board, new RegExp(`Barker B\\s+127\\.0\\.0\\.1:${pb.port}\\s+ONLINE`));
+});

@@ -123,6 +123,16 @@ export default function ControlDesk({ eventData, onShowPrinters, readOnly = fals
           action: failed.length ? 'Reprint' : 'Seen', onAct: failed.length ? () => reprint(failed) : () => ack('pr-' + kt.id + '-0', 10),
         })
       }
+      // Barker B's own printer
+      const bDown = (Number(kt.barkers) || 2) >= 2 && String(kt.printer_ip_b || '').trim() && ['offline', 'paper_out', 'error'].includes(kt.printer_b_status)
+      if (bDown) {
+        alerts.push({
+          key: 'prb-' + kt.id, w: 90, icon: 'P', color: 'var(--warn)',
+          title: `${kt.name} Barker B printer ${kt.printer_b_status === 'paper_out' ? 'out of paper' : 'not responding'}`,
+          sub: 'Barker B\'s KOTs print on the Barker A printer automatically; they are also on the barker\'s screen',
+          action: 'Seen', onAct: () => ack('prb-' + kt.id, 10),
+        })
+      }
     }
     const waiting = orders.filter(k => k.stage === 'ready' && k.ready_at && now - new Date(k.ready_at) > WAIT_MS)
     const wByK = {}
@@ -204,12 +214,22 @@ export default function ControlDesk({ eventData, onShowPrinters, readOnly = fals
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d, now])
 
+  // One pill per KOT printer: a two-barker kitchen shows Barker A's and Barker B's printer
+  const pill = (s, label, key) => {
+    if (s === 'online') return <span key={key} className="pr pon">{label ? label + ' OK' : 'Printer OK'}</span>
+    if (s === 'paper_low') return <span key={key} className="pr pon">{label ? label + ' paper low' : 'Paper low'}</span>
+    if (['offline', 'paper_out', 'error'].includes(s)) return <span key={key} className="pr poff">{label ? label + (s === 'paper_out' ? ' paper out' : ' not responding') : (s === 'paper_out' ? 'Paper out' : 'Printer not responding')}</span>
+    return <span key={key} className="pr punk">{label ? label + ' ?' : 'Printer ?'}</span>
+  }
+  const hasB = kt => (Number(kt.barkers) || 2) >= 2 && !!String(kt.printer_ip_b || '').trim()
   const printerPill = kt => {
-    const s = kt.printer_status
-    if (s === 'online') return <span className="pr pon">Printer OK</span>
-    if (s === 'paper_low') return <span className="pr pon">Paper low</span>
-    if (['offline', 'paper_out', 'error'].includes(s)) return <span className="pr poff">{s === 'paper_out' ? 'Paper out' : 'Printer not responding'}</span>
-    return <span className="pr punk">Printer ?</span>
+    if (!hasB(kt)) {
+      if ((Number(kt.barkers) || 2) >= 2 && 'printer_ip_b' in kt) {
+        return <span className="prs">{pill(kt.printer_status, 'A', 'a')}<span className="pr punk" title="Barker B has no printer: its KOTs print on Barker A's printer">B on A</span></span>
+      }
+      return pill(kt.printer_status, '', 'a')
+    }
+    return <span className="prs">{pill(kt.printer_status, 'A', 'a')}{pill(kt.printer_b_status, 'B', 'b')}</span>
   }
 
   return (

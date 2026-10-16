@@ -700,3 +700,4 @@
 .ms.kd .vip.vtop{text-align:center;letter-spacing:.02em}
 /* The bar's drinks inside a course: a small heading per category (Cocktail, Whisky ...) */
 .ms .dlist .ghead.gsub{font-size:11.5px;font-weight:900;color:#7A4B00;border-bottom:1px dashed #E2C89A;margin-top:4px;padding-left:6px;text-transform:uppercase;letter-spacing:.05em}
+.ms .kt h5 .prs{display:inline-flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}

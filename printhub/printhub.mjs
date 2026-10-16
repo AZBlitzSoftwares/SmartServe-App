@@ -115,6 +115,13 @@ export function printerError(err, ep) {
  * A backup IP has no port column: if it is another kitchen's printer, use
  * that kitchen's port, otherwise 9100.
  */
+// Barker B's own printer of a two-barker kitchen (checked and shown like the kitchen printer)
+export function barkerB(k) {
+  return (Number(k?.barkers) || 2) >= 2 && String(k?.printer_ip_b ?? '').trim()
+    ? parseEndpoint(k.printer_ip_b, Number(k.printer_port_b) || 9100)
+    : null;
+}
+
 export function portForIpIn(kitchens, ip) {
   const raw = String(ip ?? '').trim();
   const k = (kitchens || []).find((x) => String(x.printer_ip ?? '').trim() === raw);
@@ -484,6 +491,7 @@ export function startHub(options = {}) {
 
   const portForIp = (eventId, ip) => portForIpIn(state.kitchens.get(eventId), ip);
 
+
   /** Every printer (and backup printer) of the active events. */
   function printerTargets() {
     const out = [];
@@ -494,6 +502,8 @@ export function startHub(options = {}) {
         if (main) out.push({ eventId, ep: main });
         const backup = parseEndpoint(k.backup_printer_ip, portForIp(eventId, k.backup_printer_ip));
         if (backup) out.push({ eventId, ep: backup });
+        const bp = barkerB(k);
+        if (bp) out.push({ eventId, ep: bp });
       }
     }
     return out;
@@ -647,13 +657,22 @@ export function startHub(options = {}) {
     state.events = next;
   }
 
+  let noBColumns = false;
   async function refreshKitchens() {
     const next = new Map();
     for (const ev of state.events.values()) {
-      const rows =
-        (await api.get(
-          `kitchens?event_id=eq.${ev.id}&select=id,event_id,name,prefix,printer_ip,printer_port,backup_printer_ip,is_active,sort_order`,
-        )) || [];
+      // Barker B's printer too (a database without those columns: the kitchen printers only)
+      const cols = 'id,event_id,name,prefix,printer_ip,printer_port,backup_printer_ip,is_active,sort_order';
+      let rows;
+      if (!noBColumns) {
+        try {
+          rows = (await api.get(`kitchens?event_id=eq.${ev.id}&select=${cols},barkers,printer_ip_b,printer_port_b`)) || [];
+        } catch (e) {
+          if (!/printer_ip_b|printer_port_b|barkers|42703|PGRST/.test(String(e?.message || e?.code || e))) throw e;
+          noBColumns = true;
+        }
+      }
+      if (noBColumns) rows = (await api.get(`kitchens?event_id=eq.${ev.id}&select=${cols}`)) || [];
       next.set(
         ev.id,
         rows
@@ -1096,6 +1115,11 @@ export function renderBoard(state, { logDir = null, color = false, width = 80, h
       const st = ep ? fmtStatus(statusOf(k.printer_ip, k.printer_port)) : red('NOT SET'.padEnd(11));
       const failed = String(cnt.failed).padStart(6);
       lines.push(`  ${name} ${printer} ${st} ${String(cnt.printed).padStart(7)}  ${cnt.failed ? red(failed) : failed}`);
+      const pb = barkerB(k);
+      if (pb) {
+        const ps = state.printers.get(pb.key)?.status || 'unknown';
+        lines.push(`  ${'  ↳ Barker B'.padEnd(18)} ${pb.label.slice(0, 22).padEnd(22)} ${fmtStatus(ps)}`);
+      }
       const b = parseEndpoint(k.backup_printer_ip, portForIpIn(list, k.backup_printer_ip));
       if (b) {
         const bs = state.printers.get(b.key)?.status || 'unknown';
