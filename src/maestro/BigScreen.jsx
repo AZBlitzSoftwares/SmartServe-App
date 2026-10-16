@@ -29,7 +29,8 @@ export default function BigScreen({ user, event, onSignOut }) {
 
   // Signs itself out (back to the sign-in page) when its login is switched off or its event is no
   // longer tonight: the switch from the dry run to the event then moves every screen by itself
-  const outRef = useRef(onSignOut); outRef.current = onSignOut
+  const outRef = useRef(onSignOut)
+  useEffect(() => { outRef.current = onSignOut })
   useEffect(() => {
     if (!user?.id || user.id === 'demo') return
     let alive = true
