@@ -13,9 +13,31 @@
    tells the cloud origin to forget the laptop.
 
    Stored as:  ss_server = { "mode": "laptop", "base": "http://192.168.1.10:8080" }
-   Absent      = cloud.                                                       */
+   Absent      = cloud.
 
-export const CLOUD_BASE = 'https://smart-serve-app.vercel.app'
+   The laptop's address depends on the router it joins, so it can change
+   between venues and even during an event. Three things deal with that:
+   - ss_server_last keeps the last laptop address used here (also after
+     "Use cloud server"), so the address box starts with it;
+   - a laptop page that loses its laptop finds it again on the Wi-Fi
+     (laptopWatch.js) and moves there with moveToLaptop(); a device that
+     came from the cloud app (the APK) goes by way of the cloud address
+     (?ss_server=laptop:<new address>), so the cloud origin saves the new
+     address too and the next app start opens it;
+   - a switch carries this device's saved sign-in, table and choices (its
+     ss_* and ms_* keys) in the address fragment (#ss_carry=...), so a
+     captain stays signed in and a guest tablet keeps its table: every
+     laptop address is a separate origin with its own empty storage.
+     The carry always goes from the origin holding the device's newest
+     state: laptop -> laptop (a move), laptop -> cloud ("Use cloud
+     server"), and cloud -> laptop only while the cloud's copy is the
+     newest (ss_server_fresh, cleared whenever the device goes to a
+     laptop). Each origin keeps its own unsent outbox, clock skew, print
+     station and menu cache: those never travel.
+   Only private network addresses (10.x, 172.16-31.x, 192.168.x, 100.64-127.x,
+   127.x) are ever followed automatically; a typed address can be anything. */
+
+export const CLOUD_BASE = (import.meta.env && import.meta.env.VITE_CLOUD_BASE) || 'https://smart-serve-app.vercel.app'
 export const DEFAULT_LAPTOP_BASE = 'http://192.168.1.10:8080'
 export const DEFAULT_LAPTOP_PORT = '8080'
 
@@ -28,6 +50,14 @@ const KEY = 'ss_server'
 const SENT_KEY = 'ss_server_sent_at'
 export const RESEND_PAUSE_MS = 3 * 60 * 1000
 const CLOUD_FLAG = 'ss_server'
+const LAST_KEY = 'ss_server_last'
+// On a laptop page: this device was sent here by the cloud app (the APK).
+const VIA_KEY = 'ss_via_cloud'
+const VIA_PARAM = 'ss_via'
+const CARRY = 'ss_carry'
+// On the cloud origin: its saved state is this device's newest (never sent to a
+// laptop, or just back from one with the laptop's state).
+const FRESH_KEY = 'ss_server_fresh'
 
 function read(key) {
   try { return localStorage.getItem(key) } catch { return null }
@@ -63,6 +93,29 @@ export function normaliseBase(input) {
   return u.protocol + '//' + u.hostname + ':' + DEFAULT_LAPTOP_PORT
 }
 
+/** True for an address that may be followed without anyone typing it: plain
+    http to a private network address (or this machine). A public address or
+    a web name never is: nobody can point tablets at a server on the internet. */
+export function isLocalBase(base) {
+  const b = normaliseBase(base)
+  if (!b || !b.startsWith('http://')) return false
+  let h
+  try { h = new URL(b).hostname } catch { return false }
+  if (h === 'localhost') return true
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h)
+  if (!m || m.slice(1).some(x => Number(x) > 255)) return false
+  const [a, b2] = [Number(m[1]), Number(m[2])]
+  return a === 10 || a === 127 || (a === 192 && b2 === 168) || (a === 172 && b2 >= 16 && b2 <= 31) ||
+    (a === 100 && b2 >= 64 && b2 <= 127)
+}
+
+/** The last laptop address used on this device (kept after "Use cloud server"). */
+export function lastLaptopBase() {
+  const v = normaliseBase(read(LAST_KEY))
+  if (v) return v
+  return getSavedLaptop()?.base || null
+}
+
 /** The saved laptop setting on THIS origin, or null for cloud. */
 export function getSavedLaptop() {
   try {
@@ -93,13 +146,83 @@ function pathHere() {
   return window.location.pathname + window.location.search
 }
 
-/** Leave for the laptop now. In the tablet app, after a moment, so the
-    link rules that keep the laptop inside the app are in place first. */
-function goToLaptop(base) {
+/* This device's saved state (sign-in, table, choices), for the next address. */
+// Not carried: the server settings, and what belongs to one server only - its
+// unsent outbox, the clock offset to it, its print station, its menu cache.
+const carriedKey = k => !!k && /^(ss|ms)_/.test(k) && !/^(ss_server|ss_mk_clock_skew|ss_print_station|ss_menu_v|ms_outbox_)/.test(k)
+function carryFragment() {
+  const out = {}
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (carriedKey(k)) out[k] = localStorage.getItem(k)
+    }
+  } catch { /* storage blocked: nothing to bring */ }
+  return Object.keys(out).length ? '#' + CARRY + '=' + encodeURIComponent(JSON.stringify(out)) : ''
+}
+
+/* The state a #ss_carry= fragment brings replaces this origin's copy (only
+   the carried kinds of key: an unsent outbox here is never touched). */
+function importCarry(hash) {
+  const m = /^#ss_carry=(.*)$/.exec(hash || '')
+  if (!m) return false
+  let data
+  try { data = JSON.parse(decodeURIComponent(m[1])) } catch { data = null }
+  if (!data || typeof data !== 'object') return false
+  const old = []
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (carriedKey(k)) old.push(k) }
+  old.forEach(remove)
+  for (const [k, v] of Object.entries(data)) if (carriedKey(k) && typeof v === 'string') write(k, v)
+  return true
+}
+
+/* On a laptop page at start: what the address brought with it. */
+function takeArrival() {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const via = params.get(VIA_PARAM) === 'cloud'
+    const hash = window.location.hash || ''
+    const carry = /^#ss_carry=/.test(hash)
+    if (!via && !carry) return
+    params.delete(VIA_PARAM)
+    const qs = params.toString()
+    window.history.replaceState(window.history.state, '', window.location.pathname + (qs ? '?' + qs : ''))
+    if (carry) importCarry(hash)
+    if (via) write(VIA_KEY, '1')
+  } catch { /* an odd address is no reason not to start */ }
+}
+
+/** Leave for the laptop now. From here on the laptop holds the newest state. */
+function goToLaptop(base, fragment = '') {
   write(SENT_KEY, String(Date.now()))
-  const go = () => window.location.replace(base + pathHere())
+  remove(FRESH_KEY)
+  let url = base + pathHere()
+  try {
+    const u = new URL(url)
+    u.searchParams.set(VIA_PARAM, 'cloud')
+    url = u.toString()
+  } catch { /* keep the plain address */ }
+  const go = () => window.location.replace(url + fragment)
+  // In the tablet app, after a moment, so the link rules that keep the laptop
+  // inside the app are in place first (medianLinks.js).
   if (typeof window.__ssLinkRulesAt === 'number') setTimeout(go, Math.max(0, 300 - (Date.now() - window.__ssLinkRulesAt)))
   else go()
+}
+
+/** From a laptop page to the laptop's new address, keeping this device's
+    state. A device that came from the cloud app goes by way of the cloud
+    address, which saves the new address for the next app start. */
+export function moveToLaptop(base) {
+  const b = normaliseBase(base)
+  if (!b) return false
+  const frag = carryFragment()
+  if (read(VIA_KEY) === '1') {
+    window.location.replace(CLOUD_BASE + window.location.pathname + '?' + CLOUD_FLAG + '=' +
+      encodeURIComponent('laptop:' + b) + frag)
+  } else {
+    window.location.replace(b + window.location.pathname + window.location.search + frag)
+  }
+  return true
 }
 
 /* Run once in main.jsx, before React renders.
@@ -110,21 +233,46 @@ function goToLaptop(base) {
 export function startupServerCheck() {
   if (typeof window === 'undefined') return 'render'
 
+  // The laptop page itself: take in what the address brought. It never sends anyone anywhere.
+  if (isLaptopOrigin()) { takeArrival(); return 'render' }
+
   // Back from the laptop: forget it on this origin, then tidy the address.
+  // Or the laptop moved (?ss_server=laptop:<address>): save it here and go there.
   try {
     const params = new URLSearchParams(window.location.search)
+    const flag = params.get(CLOUD_FLAG) || ''
+    if (flag.startsWith('laptop:')) {
+      const base = normaliseBase(flag.slice('laptop:'.length))
+      const frag = /^#ss_carry=/.test(window.location.hash || '') ? window.location.hash : ''
+      params.delete(CLOUD_FLAG)
+      const qs = params.toString()
+      window.history.replaceState(window.history.state, '', window.location.pathname + (qs ? '?' + qs : ''))
+      // Only for a device that already uses a laptop, and only to a private address:
+      // a link can never point a cloud-only tablet somewhere else.
+      if (base && isLocalBase(base) && getSavedLaptop()) {
+        write(KEY, JSON.stringify({ mode: 'laptop', base }))
+        write(LAST_KEY, base)
+        goToLaptop(base, frag)
+        return 'redirect'
+      }
+      return 'render'
+    }
     if (params.has(CLOUD_FLAG)) {
-      if (params.get(CLOUD_FLAG) === 'cloud') { remove(KEY); remove(SENT_KEY) }
+      const hash = window.location.hash || ''
+      if (params.get(CLOUD_FLAG) === 'cloud') {
+        // Back from the laptop with its state (only a device that was on one):
+        // the cloud's copy is the newest again.
+        const wasOnLaptop = !!getSavedLaptop()
+        remove(KEY); remove(SENT_KEY)
+        if (wasOnLaptop && importCarry(hash)) write(FRESH_KEY, '1')
+      }
       params.delete(CLOUD_FLAG)
       const qs = params.toString()
       window.history.replaceState(window.history.state, '',
-        window.location.pathname + (qs ? '?' + qs : '') + window.location.hash)
+        window.location.pathname + (qs ? '?' + qs : '') + (/^#ss_carry=/.test(hash) ? '' : hash))
       return 'render'
     }
   } catch { /* an odd address is no reason not to start */ }
-
-  // The laptop itself never sends anyone anywhere.
-  if (isLaptopOrigin()) return 'render'
 
   const saved = getSavedLaptop()
   if (!saved) return 'render'
@@ -164,21 +312,29 @@ export async function probeLaptop(base, timeoutMs = 4000) {
   }
 }
 
-/** Save the laptop address on this origin and go there. */
+/** Save the laptop address on this origin and go there, bringing this
+    device's sign-in and table along. On a laptop page: move to that address. */
 export function switchToLaptop(base) {
   const b = normaliseBase(base)
   if (!b) return false
+  if (isLaptopOrigin()) return moveToLaptop(b)
+  // Bring this device's state only while the cloud's copy is its newest: never
+  // sent to a laptop yet, or just back from one. Otherwise the laptop keeps its own.
+  const fresh = read(FRESH_KEY) === '1' || (!read(LAST_KEY) && !getSavedLaptop())
+  const carry = fresh ? carryFragment() : ''
   write(KEY, JSON.stringify({ mode: 'laptop', base: b }))
-  goToLaptop(b)
+  write(LAST_KEY, b)
+  goToLaptop(b, carry)
   return true
 }
 
 /** Back to the cloud. From the laptop that means a trip to the cloud
-    address with the flag that makes the cloud origin forget the laptop. */
+    address with the flag that makes the cloud origin forget the laptop,
+    bringing this device's state along (the laptop's is the newest). */
 export function switchToCloud() {
   remove(KEY); remove(SENT_KEY)
   if (isLaptopOrigin()) {
-    window.location.replace(CLOUD_BASE + window.location.pathname + '?' + CLOUD_FLAG + '=cloud')
+    window.location.replace(CLOUD_BASE + window.location.pathname + '?' + CLOUD_FLAG + '=cloud' + carryFragment())
     return
   }
   window.location.reload()

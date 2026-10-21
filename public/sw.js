@@ -76,6 +76,7 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return      // Supabase, fonts, anything off-site
   if (req.headers.has('range')) return                 // video / partial content
   if (url.pathname.startsWith('/downloads/')) return    // the Offline Kit: always from the network
+  if (url.pathname === '/ss-local.json' || url.pathname.startsWith('/__ss/')) return // the laptop server's live checks: never from a cache
 
   if (req.mode === 'navigate') {
     event.respondWith(page(event))

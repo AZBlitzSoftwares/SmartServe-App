@@ -6,6 +6,7 @@
 // seconds, so it works without it.
 import fs from 'node:fs'
 import http from 'node:http'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import pg from 'pg'
@@ -98,6 +99,18 @@ const CORS = {
   'access-control-expose-headers': 'content-range, content-location, location, preference-applied, range-unit',
   'access-control-max-age': '600',
 }
+// An address the cloud may hand to tablets: a private network address (10.x,
+// 172.16-31.x, 192.168.x, 100.64-127.x). 169.254.x.x means no router gave this
+// laptop an address; a public one is never published.
+const isLocalIp = (ip) => {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(ip || ''))
+  if (!m) return false
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  return a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127)
+}
+// The laptop's name as people know it ("Azeems-MacBook-Pro", not "...local").
+const laptopName = () => { try { return os.hostname().replace(/\.(local|lan|home)$/i, '').slice(0, 80) } catch { return '' } }
+
 const HOP = new Set(['connection', 'keep-alive', 'proxy-connection', 'proxy-authorization', 'upgrade', 'te', 'trailer'])
 
 // The app finds the laptop's API through this line (see src/lib/supabase.js).
@@ -178,7 +191,7 @@ export async function startCommand({ kotJump = null } = {}) {
 
   let events = snap.events.map((e) => e.id)
   const pgb = await pgBins()
-  const state = { stopping: false, startedAt: new Date().toISOString(), api: null, apiPort: 0, upload: lastUpload(), uploading: false, devices: new Map(), status: {} }
+  const state = { stopping: false, startedAt: new Date().toISOString(), api: null, apiPort: 0, upload: lastUpload(), uploading: false, devices: new Map(), status: {}, announce: null }
 
   // If starting fails half-way, stop what did start, so the launcher's retry begins clean.
   let pool = null
@@ -419,6 +432,11 @@ export async function startCommand({ kotJump = null } = {}) {
     L.push(` STATUS  Database ${s.pg ? 'OK' : 'DOWN'}   API ${s.api ? 'OK' : 'DOWN'}   Orders ${s.orders ?? '-'}${k}`)
     L.push(`         Tablets/phones seen in the last 2 minutes: ${s.devices ?? 0}`)
     L.push(` CLOUD   ${uploadLine()}`)
+    const al = announceLine()
+    if (al) L.push(al)
+    // A new address on this network (router restart, Wi-Fi rejoined): tell the cloud now.
+    const first = ips.find((a) => isLocalIp(a.ip))
+    if (first && state.announce && !state.announce.base?.startsWith(`http://${first.ip}:`)) announce()
     L.push('')
     L.push(' Keep this window open and the laptop awake (lid open). Ctrl+C stops the server.')
     // The QR codes only when the window is tall enough to show them with
@@ -468,15 +486,68 @@ export async function startCommand({ kotJump = null } = {}) {
     child.on('error', (e) => { out += String(e); done(-1) })
   }
 
+  // ---------------------------------------------------------- tell the cloud where this laptop is
+  // Whenever there is any internet, the cloud keeps this laptop's address on
+  // the event Wi-Fi for its events (ls_announce). Tablets still on the cloud
+  // then offer this laptop with one tap and fill in the address, so nobody
+  // types an IP, whatever address this network gave the laptop. Repeated every
+  // minute and at once when the address changes; on Ctrl+C the laptop says it
+  // stopped. Never from a test database, unless SS_LOCAL_ANNOUNCE=1.
+  const announceOn = hasCloudApi(cfg) && (!dev || process.env.SS_LOCAL_ANNOUNCE === '1')
+  let announcing = null // the call in flight
+  // Test only: the address to publish (a test machine has no private LAN address).
+  const announceBase = process.env.SS_LOCAL_ANNOUNCE_BASE || ''
+  function announce(stopped = false) {
+    if (!announceOn || (announcing && !stopped) || !events.length) return announcing || Promise.resolve()
+    const port = cfg.port
+    const addresses = announceBase ? [announceBase] : lanAddresses().map((a) => a.ip).filter(isLocalIp).map((ip) => `http://${ip}:${port}`)
+    if (!addresses.length) { state.announce = { at: new Date().toISOString(), ok: false, noAddress: true }; return Promise.resolve() }
+    const base = stopped && state.announce?.base ? state.announce.base : addresses[0]
+    announcing = sendAnnounce(base, addresses, stopped).finally(() => { announcing = null })
+    return announcing
+  }
+  async function sendAnnounce(base, addresses, stopped) {
+    const port = cfg.port
+    try {
+      const key = cfg.cloud.anonKey
+      const res = await fetch(String(cfg.cloud.url).replace(/\/+$/, '') + '/rest/v1/rpc/ls_announce', {
+        method: 'POST',
+        headers: { apikey: key, Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ p_events: events, p_base: base, p_addresses: addresses, p_port: port, p_label: laptopName(), p_started: state.startedAt, p_stopped: stopped }),
+        signal: AbortSignal.timeout(stopped ? 3000 : 8000),
+      })
+      const text = await res.text().catch(() => '')
+      const kept = res.ok ? Number(text) : 0
+      state.announce = { at: new Date().toISOString(), base, ok: res.ok && kept > 0, refused: res.ok && !(kept > 0) && !stopped,
+        missing: res.status === 404 || /PGRST202|ls_announce/.test(res.ok ? '' : text) }
+      if (!res.ok) logLine('server', `announce ${res.status}: ${text.slice(0, 300)}`)
+    } catch {
+      state.announce = { at: new Date().toISOString(), base, ok: false, offline: true }
+    }
+  }
+  const announceLine = () => {
+    if (!announceOn) return ''
+    const a = state.announce
+    if (!a) return ' FINDING Telling the cloud this laptop\'s address...'
+    if (a.ok) return ` FINDING Tablets on the cloud are offered ${a.base} (told the cloud ${fmtTime(a.at)}).`
+    if (a.noAddress) return ' FINDING This laptop has no private network address (not on the event Wi-Fi?): tablets need the address typed in.'
+    if (a.missing) return ' FINDING The cloud cannot keep the address yet (run 2026-10-21_local_server_address.sql). Type the address on the tablets.'
+    if (a.refused) return ' FINDING The cloud kept another laptop for this event (one laptop per event): stop the other one, or type this address on the tablets.'
+    return ' FINDING No internet: tablets need the address above typed in (or they find it once they are on the laptop).'
+  }
+
   // ---------------------------------------------------------- stop
-  let statusTimer, uploadTimer, firstUpload
+  let statusTimer, uploadTimer, firstUpload, announceTimer
   async function shutdown(sig) {
     if (state.stopping) { console.log('Still stopping - please wait a moment...'); return }
     state.stopping = true
     console.log(`\nStopping the local server${sig ? ` (${sig})` : ''}...`)
     clearInterval(statusTimer)
     clearInterval(uploadTimer)
+    clearInterval(announceTimer)
     clearTimeout(firstUpload)
+    if (announcing) await announcing.catch(() => {}) // a late "running" must not land after "stopped"
+    if (state.announce?.ok) await announce(true).catch(() => {}) // tablets stop offering this laptop
     if (state.uploadChild) try { state.uploadChild.kill() } catch { /* gone */ }
     server.close()
     server.closeAllConnections?.()
@@ -496,6 +567,8 @@ export async function startCommand({ kotJump = null } = {}) {
   statusTimer = setInterval(() => { gather().then(render).catch((e) => logLine('server', `status: ${e.message}`)) }, 5000)
   firstUpload = setTimeout(backgroundUpload, 20000)
   uploadTimer = setInterval(backgroundUpload, 60000)
+  announce()
+  announceTimer = setInterval(() => announce(), 60000)
   return new Promise(() => {}) // runs until Ctrl+C
 }
 

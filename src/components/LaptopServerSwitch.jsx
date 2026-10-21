@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import {
-  describeServer, getSavedLaptop, isLaptopOrigin, normaliseBase, probeLaptop, switchToLaptop, switchToCloud, DEFAULT_LAPTOP_BASE,
+  describeServer, normaliseBase, probeLaptop, switchToLaptop, switchToCloud,
 } from '../lib/serverSwitch'
+import { useLaptopAddress } from './useLaptopAddress'
 
 /* "Use laptop server" / "Use cloud server" for a screen that is already signed
    in: the kitchen screen's menu and the Control Desk's Offline kit card. The
@@ -12,7 +13,8 @@ export default function LaptopServerSwitch({ dark = false }) {
   const server = describeServer()
   const onLaptop = server.kind === 'laptop'
   const cloudInUse = !onLaptop && !server.savedLaptop
-  const [address, setAddress] = useState(() => getSavedLaptop()?.base || (isLaptopOrigin() ? window.location.origin : DEFAULT_LAPTOP_BASE))
+  const box = useLaptopAddress()
+  const { address, setAddress } = box
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [unreachable, setUnreachable] = useState(false)
@@ -55,6 +57,20 @@ export default function LaptopServerSwitch({ dark = false }) {
           style={{ ...btn, background: 'transparent', color: ink, border: `1.5px solid ${line}`, opacity: cloudInUse ? 0.5 : 1 }}>
           {cloudInUse ? '✓ Using cloud server' : 'Use cloud server'}
         </button>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+        {box.search?.state === 'running' ? (
+          <button onClick={box.stopSearch} style={{ ...btn, height: 30, fontSize: 12, background: 'transparent', color: ink, border: `1.5px solid ${line}` }}>Stop searching</button>
+        ) : (
+          <button data-testid="laptop-search" disabled={busy} onClick={() => { setMsg(''); setUnreachable(false); box.runSearch() }}
+            style={{ ...btn, height: 30, fontSize: 12, background: 'transparent', color: ink, border: `1.5px solid ${line}` }}>
+            🔍 Search this Wi-Fi
+          </button>
+        )}
+        {box.note && (
+          <span data-testid="laptop-note" style={{ flex: '1 1 220px', fontSize: 12, lineHeight: 1.45, fontWeight: box.tone === 'muted' ? 500 : 700,
+            color: box.tone === 'ok' ? (dark ? '#5EEAD4' : '#0F766E') : box.tone === 'warn' ? (dark ? '#FBBF24' : '#B45309') : muted }}>{box.note}</span>
+        )}
       </div>
       {msg && <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 700, color: '#DC2626' }}>{msg}</div>}
       {unreachable && (

@@ -3,8 +3,9 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import LaptopServerAsk from './components/guest/LaptopServerAsk.jsx'
-import { startupServerCheck } from './lib/serverSwitch'
+import { startupServerCheck, isLaptopOrigin } from './lib/serverSwitch'
 import { keepLaptopInApp } from './lib/medianLinks'
+import { startLaptopWatch } from './lib/laptopWatch'
 
 // Tablets: the on-screen keyboard must never cover the field being typed in.
 // index.html asks the browser to shrink the page above the keyboard
@@ -49,4 +50,6 @@ if (server !== 'redirect') {
   )
   if (server === 'ask') root.render(<LaptopServerAsk onUseCloud={renderApp} />)
   else renderApp()
+  // On the laptop: follow it if its address changes (src/lib/laptopWatch.js).
+  if (isLaptopOrigin()) startLaptopWatch()
 }

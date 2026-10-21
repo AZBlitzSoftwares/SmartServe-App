@@ -131,7 +131,11 @@ Decide once, then switch **all** devices. Stay on Plan B until the event ends.
 3. On **every** tablet and phone, open the browser and type the link from the panel (or your card):
    captains and guest tablets `http://192.168.1.10:8080/`, waiters `.../waiter`, Maestro kitchen
    screens `.../kitchen`.
-   **Captains, waiters and barkers sign in again** (same names and PINs). Guest tablets choose their table again.
+   Faster: a tablet that still has some internet shows **Laptop server is on** on its sign-in or set-up
+   screen and on the captain's table screen (the laptop tells the cloud its address every minute): tap
+   **Use laptop server** and enter the supervisor PIN, nothing to type. Tablets switched with
+   **Use laptop server** keep their captain sign-in or guest table. A device that types the address
+   **signs in again** (same names and PINs) and a guest tablet chooses its table again.
    Smart Serve Maestro: dishes a captain had held but not fired on the cloud are on the laptop only if
    **Refresh Event Data** ran; otherwise the captain takes them again (the course board shows what is there).
 4. **Print Hub**: close the normal Print Hub window (Ctrl+C), then double-click
@@ -284,6 +288,23 @@ node ss-local.mjs demo [--remove]                four demo events dated today (l
   (`app/`, SPA fallback) with `window.__SS_LOCAL__ = {url, key}` injected into index.html;
   `/realtime`, `/auth`, `/storage`, `/functions` answer 404. `/__ss/health` returns JSON status.
   Postgres listens on 127.0.0.1 only (`data/local.json` has the port and passwords).
+- **Finding the laptop** (its address comes from whichever router it joins): `start` calls the cloud's
+  `ls_announce` (db/2026-10-21_local_server_address.sql) at start, every minute and when its address
+  changes, with every LAN address (169.254.x.x left out) and the events it carries; on Ctrl+C it sends
+  `p_stopped`. Only private addresses (10/8, 172.16/12, 192.168/16, 100.64/10) are published; one
+  live laptop per event (another laptop's fresh entry is kept); a stopped server stays stopped. Off
+  in test mode unless `SS_LOCAL_ANNOUNCE=1` (`SS_LOCAL_ANNOUNCE_BASE` sets the address, for tests).
+  The app reads `ls_find` (today's events, told the cloud in the last 3 minutes): the "Laptop server
+  is on" offer (entry screens and captain table screen, the device's own event only, supervisor PIN)
+  and the address box. On laptop pages `src/lib/laptopWatch.js` asks `/ss-local.json` every 5 s;
+  after 20 s without an answer it asks the cloud directly, then searches this page's own /24 (12 at a
+  time) for a server carrying the same events and moves there, keeping the device's ss_*/ms_* keys
+  (`#ss_carry=`; never the outbox, clock skew, print station or menu cache). Not found: retries after
+  30 s, 1, 2, 5 min, with "Use cloud server". A device that came from the cloud app moves by way of
+  `?ss_server=laptop:<address>` (honoured only for a device already set to a laptop, private
+  addresses only) so the cloud origin saves the new address too. The cloud copy is carried to a
+  laptop only while it is the newest (`ss_server_fresh`). Laptops prepared before this update serve
+  the old app: run Prepare Event again after deploying. The panel shows a FINDING line.
 - **Upload**: REST upsert (`on_conflict=id`) with the cloud anon key, batches of 500, bad rows isolated
   row by row. Order: tables, new orders (ignore-duplicates), order_items, final KOTs, orders
   (merge: status changes after the KOTs, so the cloud's cancel trigger finds no open KOT and prints no

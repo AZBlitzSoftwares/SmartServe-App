@@ -159,14 +159,20 @@ AT THE VENUE
  6. "4 Start Print Hub" (close the normal Print Hub first). Every printer
     should show ONLINE.
  7. Move every device to the laptop, all at once:
-    - Tablets: on the Captain Sign In (or set-up) screen tap "Device",
-      enter the supervisor PIN, tap "Use laptop server", type the address.
+    - Tablets with some internet show "Laptop server is on" on the sign-in
+      and set-up screens (this laptop tells the cloud its address): tap
+      "Use laptop server" and the supervisor PIN. Nothing to type.
+    - Otherwise: tap "Device" (or "Use laptop server" on the "Can't reach
+      the server" screen), supervisor PIN, "Use laptop server". The address
+      is filled in when known; else type it, or tap "Search this Wi-Fi".
     - Kitchen screens: menu (three lines) > "Use laptop server".
     - Control Desk: Control tab > Offline kit > "Use laptop server".
     - Or type the address in the browser: /kitchen for kitchen screens,
       /supervisor for the desk, /waiter for waiter phones.
-    Everyone signs in again with the same names and PINs. KOT numbers jump
-    by 100 on the laptop - that is expected.
+    Switched devices keep their sign-in and table; a typed address signs in
+    again. If the laptop gets a new address during the event, devices on it
+    find it again by themselves within a minute. KOT numbers jump by 100 on
+    the laptop - that is expected.
 
 AFTER THE EVENT (with internet)
  8. Close the Local Server and Print Hub windows${mac ? ' (Ctrl+C)' : ''}, then

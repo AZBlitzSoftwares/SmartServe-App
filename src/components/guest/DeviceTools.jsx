@@ -3,15 +3,20 @@ import { supabase } from '../../lib/supabase'
 import { getDeviceId } from '../../lib/deviceId'
 import {
   describeServer, isLaptopOrigin, normaliseBase, probeLaptop, switchToLaptop,
-  switchToCloud, getSavedLaptop, appBuildLabel, DEFAULT_LAPTOP_BASE,
+  switchToCloud, appBuildLabel,
 } from '../../lib/serverSwitch'
-import { clearAllDeviceKeys, serviceDates } from './deviceEntry'
+import { useLaptopAddress } from '../useLaptopAddress'
+import { clearAllDeviceKeys } from './deviceEntry'
+import { checkStaffPin } from './staffPin'
 import { clearAppCaches } from '../../lib/appUpdate'
 
 /* Staff tools for one tablet: what it is set up as, a clean reset, and
    which server it uses. Opened from the "⚙ Device" button in the bottom
    corner, or by holding the logo for 2 seconds, on the Setup, Captain
-   Sign In, chooser and No-event screens. Supervisor or admin PIN first. */
+   Sign In, chooser and No-event screens. Supervisor or admin PIN first.
+   start="laptop" (the "Can't reach the server" screen's own button) opens
+   straight on the laptop address: without the server the PIN cannot be
+   checked anyway, and moving to the laptop is what such a tablet needs. */
 
 const OVERLAY = {
   position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 500,
@@ -43,49 +48,6 @@ const ERR = {
 
 function readJson(key) {
   try { return JSON.parse(localStorage.getItem(key) || 'null') } catch { return null }
-}
-
-/* Staff are standing at the tablet waiting, so the PIN check answers fast:
-   no automatic retries (the client retries a failed read three times, about
-   7 seconds) and at most 6 seconds per request. */
-const QUICK_MS = 6000
-function quick(query) {
-  let signal
-  try { signal = AbortSignal.timeout(QUICK_MS) } catch {
-    const ctl = new AbortController()
-    setTimeout(() => ctl.abort(), QUICK_MS)
-    signal = ctl.signal
-  }
-  return query.retry(false).abortSignal(signal)
-}
-
-/* The events a supervisor PIN has to belong to: the one this tablet is set
-   up for, or else any event running today. Admin PINs work everywhere -
-   the same rule as the exit gate. */
-async function eventIdsForThisTablet() {
-  const saved = readJson('ss_captain_event') || readJson('ss_setup_event')
-  if (saved?.id) return [saved.id]
-  const { data, error } = await quick(supabase.from('events').select('id').in('date', serviceDates()))
-  if (error) throw error
-  return (data || []).map(e => e.id)
-}
-
-/** 'ok' | 'wrong' | 'offline' */
-async function checkStaffPin(pin) {
-  try {
-    const { data: admins, error: e1 } = await quick(supabase.from('admins')
-      .select('id').eq('pin', pin).eq('is_active', true))
-    if (e1) return 'offline'
-    if (admins?.length > 0) return 'ok'
-    const { data: sups, error: e2 } = await quick(supabase.from('supervisors')
-      .select('id, event_id').eq('pin', pin).eq('is_active', true))
-    if (e2) return 'offline'
-    if (!sups?.length) return 'wrong'
-    const ids = await eventIdsForThisTablet()
-    return sups.some(s => ids.includes(s.event_id)) ? 'ok' : 'wrong'
-  } catch {
-    return 'offline'
-  }
 }
 
 function deviceState() {
@@ -138,21 +100,22 @@ export function LaptopPill({ inline = false }) {
 
 /* ── The panel ─────────────────────────────────────────────────────────── */
 
-export default function DeviceTools({ onClose }) {
+export default function DeviceTools({ onClose, start = null }) {
   // 'pin' -> 'tools'. 'offline' is the PIN step when the server cannot be
   // reached at all: only the server switch is offered then, because moving
   // to the laptop is exactly what a tablet with no internet needs and it
   // changes nothing on this tablet that cannot be switched back.
-  const [step, setStep] = useState('pin')
+  const [step, setStep] = useState(start === 'laptop' ? 'switch' : 'pin')
   const [pin, setPin] = useState('')
   const [err, setErr] = useState('')
   const [checking, setChecking] = useState(false)
 
   // Inside 'tools': null | 'reset' | 'laptop'
-  const [panel, setPanel] = useState(null)
+  const [panel, setPanel] = useState(start === 'laptop' ? 'laptop' : null)
   const [resetting, setResetting] = useState(false)
-  const [address, setAddress] = useState(() => getSavedLaptop()?.base ||
-    (isLaptopOrigin() ? window.location.origin : DEFAULT_LAPTOP_BASE))
+  const box = useLaptopAddress()
+  const { address } = box
+  const setAddress = box.setAddress
   const [laptopMsg, setLaptopMsg] = useState('')
   const [laptopBusy, setLaptopBusy] = useState(false)
   const [unreachable, setUnreachable] = useState(null)   // normalised base that did not answer
@@ -236,7 +199,11 @@ export default function DeviceTools({ onClose }) {
         onKeyDown={e => { if (e.key === 'Enter' && !laptopBusy) connectLaptop(false) }}
         inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
         data-testid="laptop-address"
-        style={{ ...INPUT, fontSize: 17 }} />
+        style={{ ...INPUT, fontSize: 17, marginBottom: 8 }} />
+      {box.note && (
+        <div data-testid="laptop-note" style={{ ...NOTE, marginBottom: 10, fontWeight: box.tone === 'muted' ? 500 : 700,
+          color: box.tone === 'ok' ? '#0F766E' : box.tone === 'warn' ? '#B45309' : '#6B7280' }}>{box.note}</div>
+      )}
       {laptopMsg && <div style={ERR}>{laptopMsg}</div>}
       {unreachable ? (
         <>
@@ -252,7 +219,14 @@ export default function DeviceTools({ onClose }) {
           {laptopBusy ? 'Connecting…' : 'Connect →'}
         </button>
       )}
-      <button style={{ ...GREY, marginBottom: 0 }} onClick={() => setPanel(null)}>Cancel</button>
+      {box.search?.state === 'running' ? (
+        <button style={GREY} onClick={box.stopSearch}>Stop searching</button>
+      ) : (
+        <button style={GREY} data-testid="laptop-search" onClick={() => { setLaptopMsg(''); setUnreachable(null); box.runSearch() }}>
+          🔍 Search this Wi-Fi for the laptop
+        </button>
+      )}
+      <button style={{ ...GREY, marginBottom: 0 }} onClick={() => (step === 'switch' ? onClose() : setPanel(null))}>Cancel</button>
     </div>
   )
 
@@ -279,6 +253,16 @@ export default function DeviceTools({ onClose }) {
               {checking ? 'Checking…' : 'Open'}
             </button>
             <button style={GREY} onClick={onClose}>Cancel</button>
+          </>
+        )}
+
+        {step === 'switch' && (
+          <>
+            <div style={NOTE}>
+              This tablet can't reach the cloud. If the event is running on the laptop server, connect to it here.
+            </div>
+            {laptopPanel}
+            <button style={GREY} onClick={() => { setStep('pin'); setPanel(null) }}>Other device tools (PIN)</button>
           </>
         )}
 

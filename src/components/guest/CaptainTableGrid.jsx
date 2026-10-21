@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import janusLogo from '../../assets/janus_logo.jpg'
+import LaptopOffer from './LaptopOffer'
 
 /* The captain's home screen: pick a table, then the menu opens.
 
@@ -159,6 +160,8 @@ export default function CaptainTableGrid({ eventData, captain, heldCarts, onPick
               fontSize:10, fontWeight:700, cursor:'pointer', marginTop:2 }}>Switch</button>
         </div>
       </div>
+
+      <LaptopOffer variant="row" />
 
       {/* ss-multi-kitchen: a linked captain has exactly one table, so the
           legend and the table-number box have nothing to do. */}

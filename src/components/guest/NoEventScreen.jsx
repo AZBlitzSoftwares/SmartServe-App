@@ -41,7 +41,7 @@ export default function NoEventScreen({ offline, onRetry }) {
         </div>
         <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, lineHeight: 1.6, marginBottom: 22 }}>
           {offline
-            ? 'Check the Wi-Fi or internet, then tap Retry. If the venue is running on the laptop, a supervisor can switch this tablet with ⚙ Device → Use laptop server…'
+            ? 'Check the Wi-Fi or internet, then tap Retry. If the event is running on the laptop server, tap Use laptop server.'
             : "No event is dated today. Ask the admin to check the event's date. This screen checks again by itself every 30 seconds."}
         </div>
         <button onClick={() => onRetry(false)}
@@ -50,6 +50,14 @@ export default function NoEventScreen({ offline, onRetry }) {
             fontFamily: 'inherit' }}>
           Retry
         </button>
+        {offline && (
+          <button data-testid="no-event-laptop" onClick={() => dev.openTools('laptop')}
+            style={{ display: 'block', margin: '12px auto 0', background: '#0F766E', color: '#fff', border: 'none',
+              borderRadius: 12, padding: '14px 24px', fontSize: 15, fontWeight: 800, cursor: 'pointer',
+              fontFamily: 'inherit' }}>
+            💻 Use laptop server
+          </button>
+        )}
       </div>
 
       <div style={{ color: 'rgba(255,255,255,0.2)', fontSize: 11, marginTop: 24 }}>
