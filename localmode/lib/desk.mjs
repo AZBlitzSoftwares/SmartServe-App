@@ -58,23 +58,6 @@ export function findDeskBrowser(cfg) {
   return null
 }
 
-/** Is the desk's own browser open already? (Its profile is locked while it runs.) */
-export function deskBrowserOpen(dir = deskProfileDir()) {
-  try {
-    if (IS_WIN) {
-      const f = path.join(dir, 'lockfile')
-      if (!fs.existsSync(f)) return false
-      try { fs.unlinkSync(f); return false } catch (e) { return e.code === 'EBUSY' || e.code === 'EPERM' }
-    }
-    const target = fs.readlinkSync(path.join(dir, 'SingletonLock')) // "computer-name-12345"
-    const pid = Number((/-(\d+)$/.exec(target) || [])[1])
-    if (!pid) return false
-    try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' }
-  } catch {
-    return false
-  }
-}
-
 /** Open url in the desk's browser. { ok, browser, url } or { ok: false, reason }. */
 export function openDesk(url, cfg) {
   const b = findDeskBrowser(cfg)

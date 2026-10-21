@@ -19,7 +19,7 @@ import { refuseRoot, pgBins, startPostgres, stopPostgres, pgAnswers, startPostgr
 import { countPending, describeUpload, lastUpload } from './upload.mjs'
 import { updatePrinthubConfig } from './printhub.mjs'
 import { prepareApp } from './data.mjs'
-import { openDesk, deskBrowserOpen } from './desk.mjs'
+import { openDesk } from './desk.mjs'
 
 // QR codes (npm package "qrcode"). Optional: without it the server works the
 // same, the panel and /qr just show the links as text.
@@ -329,19 +329,19 @@ export async function startCommand({ kotJump = null } = {}) {
   // The desk on this laptop, in its own Chrome window that prints the KOTs
   // without the print dialog (desk.mjs). localhost, so it never depends on
   // the laptop's network address. Once per launcher window: the launcher's
-  // automatic restart sets SS_LOCAL_NO_DESK, and an open desk is not doubled.
+  // automatic restart sets SS_LOCAL_NO_DESK. Always a window otherwise: on a
+  // Mac the desk's Chrome keeps running after its window is closed, so "the
+  // browser is running" does not mean the desk is on screen (a second window
+  // is harmless, a missing one is not).
   const deskUrl = `http://localhost:${cfg.port}/supervisor`
   let desk = { state: 'off' }
   if (cfg.openDesk !== false && process.env.SS_LOCAL_NO_DESK !== '1') {
-    if (deskBrowserOpen()) desk = { state: 'already' }
-    else {
-      const r = openDesk(deskUrl, cfg)
-      desk = r.ok ? { state: 'opened', browser: r.browser } : { state: 'failed', reason: r.reason }
-    }
+    const r = openDesk(deskUrl, cfg)
+    desk = r.ok ? { state: 'opened', browser: r.browser } : { state: 'failed', reason: r.reason }
   }
   const deskLines = () => {
-    if (desk.state === 'opened' || desk.state === 'already') {
-      return [` DESK ON THIS LAPTOP: ${desk.state === 'opened' ? `opened in its own ${desk.browser} window` : 'its own window is open'} (${deskUrl})`,
+    if (desk.state === 'opened') {
+      return [` DESK ON THIS LAPTOP: opened in its own ${desk.browser} window (${deskUrl})`,
         '   Auto-print ON: the KOT prints on this laptop\'s DEFAULT printer as soon as a waiter',
         `   is assigned - no print dialog. Closed that window? Double-click "${LAUNCHER.desk}".`]
     }
