@@ -88,8 +88,12 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   useEffect(() => { const t = setInterval(() => setNowTs(Date.now()), 1000); return () => clearInterval(t) }, [])
   // Remembered, so a supervisor away from the printer stays silenced
   const [autoPrint, setAutoPrint] = useState(() => localStorage.getItem('ss_autoprint') !== 'off')
-  // the waiter pick list: { kind: 'order' | 'sos', rec }
+  // the waiter pick list: { kind: 'order' | 'sos' | 'kot', rec }
   const [picker, setPicker] = useState(null)
+  // One KOT per category (event switch): the KOTs and the event's printers
+  const kotMode = !!eventData?.kot_per_category
+  const [kots, setKots] = useState([])
+  const [printers, setPrinters] = useState([])
   const [soundOn, setSoundOn] = useState(orderSoundOn)
   useEffect(() => { armOrderBeep() }, [])
   const [showCancelDialog, setShowCancelDialog] = useState(null) // order id being cancelled
@@ -181,6 +185,15 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
       .select('*, tables(table_number), order_items(quantity, menu_items(name, is_live_counter)), waiters(name), captains(name), assigned_at')
       .eq('event_id', eventData.id).order('created_at', { ascending: false })
     const all = data || []
+    if (eventData.kot_per_category) {
+      const [k, ks] = await Promise.all([
+        supabase.from('kots').select('id,order_id,kitchen_id,kot_no,table_number,captain_name,category_name,items,status,print_status,last_error,waiter_id,waiter_label,assigned_at,delivered_at,cancelled_at,created_at,printed_at')
+          .eq('event_id', eventData.id).eq('kind', 'order').order('created_at', { ascending:false }),
+        supabase.from('kitchens').select('id,name,printer_ip,printer_status,is_active').eq('event_id', eventData.id),
+      ])
+      if (!k.error) setKots(k.data || [])
+      if (!ks.error) setPrinters(ks.data || [])
+    }
     const activeCount = all.filter(o => !['delivered','cancelled'].includes(o.status)).length
     if (prevCount.current >= 0 && activeCount > prevCount.current) {
       // a beep; the new card itself flashes NEW ORDER (no banner across the top)
@@ -497,6 +510,16 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     border-top: 1.5px solid #000000;
     color: #000000;
   }
+  .kot-cat {
+    font-size: 17pt;
+    font-weight: 900;
+    text-align: center;
+    text-transform: uppercase;
+    border: 2px solid #000000;
+    padding: 1mm;
+    margin: 1mm 0 2mm;
+    word-break: break-word;
+  }
   .footer {
     text-align: center;
     font-size: 9pt;
@@ -509,10 +532,11 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
 <body>
 <div class="app-name">Janu's Smart Serve</div>
 <div class="event-name">${eventName}</div>
+${order.kotTitle ? `<div class="kot-cat">${order.kotTitle}</div>` : ''}
 <hr class="divider"/>
 <div class="row"><span>Date:</span><span>${dateStr}</span></div>
 <div class="row"><span>Time:</span><span>${timeStr}</span></div>
-<div class="row"><span>${isHelp ? 'Help' : 'Order'}:</span><span>${orderId}</span></div>
+<div class="row"><span>${order.kotNo ? 'KOT' : isHelp ? 'Help' : 'Order'}:</span><span>${order.kotNo || orderId}</span></div>
 <hr class="divider-dash"/>
 <div class="big-box">
   <div class="big-label">TABLE</div>
@@ -525,7 +549,7 @@ ${captainName ? `<div class="big-box">
 <hr class="divider"/>
 ${(order.order_items||[]).map(i => `
 <div class="item-row">
-  <span class="item-name">${i.menu_items?.name||'Item'}${i.menu_items?.is_live_counter ? '<span class=\"item-tag\">LIVE</span>' : ''}</span>
+  <span class="item-name">${i.menu_items?.name||'Item'}${i.menu_items?.is_live_counter ? '<span class=\"item-tag\">LIVE</span>' : ''}${i.note ? '<span class="item-tag">' + i.note + '</span>' : ''}</span>
   <span class="item-qty">x${i.quantity}</span>
 </div>`).join('')}
 <hr class="divider"/>
@@ -552,10 +576,17 @@ ${(order.order_items||[]).map(i => `
   const noteBusy = (wid, tn) => { if (!wid) return; (busyAt[wid] ||= []).push(tn != null ? 'T' + tn : 'busy') }
   orders.filter(o => o.status === 'in_progress' && o.waiter_id).forEach(o => noteBusy(o.waiter_id, o.tables?.table_number))
   sosRequests.filter(r => r.status === 'in_progress' && r.waiter_id).forEach(r => noteBusy(r.waiter_id, r.tables?.table_number ?? r.table_number))
+  if (kotMode) kots.filter(k => k.status === 'open' && k.waiter_id).forEach(k => noteBusy(k.waiter_id, k.table_number))
   const busyWaiterIds = Object.keys(busyAt)
   const busyOf = wid => (busyAt[wid] ? [...new Set(busyAt[wid])].join(' ') : '')
 
-  const filteredOrders = orders.filter(o => {
+  const splitOrders = new Set(kotMode ? kots.map(k => k.order_id) : [])
+  const filteredKots = !kotMode ? [] : kots.filter(k => {
+    const matchFilter = filter === 'active' ? k.status === 'open' : filter === 'delivered' ? k.status === 'delivered'
+      : filter === 'cancelled' ? k.status === 'cancelled' : true
+    return matchFilter && (!waiterFilter || k.waiter_id === waiterFilter) && (!tableFilter || k.table_number === tableFilter)
+  })
+  const filteredOrders = orders.filter(o => !splitOrders.has(o.id)).filter(o => {
     const matchFilter = filter==='active'?!['delivered','cancelled'].includes(o.status):filter==='delivered'?o.status==='delivered':filter==='cancelled'?o.status==='cancelled':true
     const matchWaiter = !waiterFilter||o.waiter_id===waiterFilter
     const matchTable = !tableFilter||o.tables?.table_number===tableFilter
@@ -577,8 +608,12 @@ ${(order.order_items||[]).map(i => `
   // to bottom and needs true chronological order.
   // new = nobody on it yet · progress = a waiter has it · delay = a waiter has had it
   // DELAY_MIN minutes and it is not delivered · done / void = finished
-  function cardState(rec, isSos) {
-    if (isSos) {
+  function cardState(rec, isSos, isKot) {
+    if (isKot) {
+      if (rec.status === 'delivered') return 'done'
+      if (rec.status === 'cancelled') return 'void'
+      if (!rec.waiter_id) return 'new'
+    } else if (isSos) {
       if (rec.status === 'resolved') return 'done'
       if (rec.status === 'cancelled') return 'void'
       if (rec.status === 'open' || (!rec.waiter_id && rec.status !== 'in_progress')) return 'new'
@@ -594,6 +629,7 @@ ${(order.order_items||[]).map(i => `
   const timeline = [
     ...filteredSOS.map(r => ({ kind:'sos', at:r.created_at, sos:r, st:cardState(r, true) })),
     ...filteredOrders.map(o => ({ kind:'order', at:o.created_at, order:o, st:cardState(o, false) })),
+    ...filteredKots.map(k => ({ kind:'kot', at:k.created_at, kot:k, st:cardState(k, false, true) })),
   ].sort((a, b) => filter === 'active'
     ? (RANK[a.st] - RANK[b.st]) || (new Date(a.at) - new Date(b.at))
     : new Date(b.at) - new Date(a.at))
@@ -608,12 +644,48 @@ ${(order.order_items||[]).map(i => `
     'other'
   ]
 
-  // Open the pick list for an order or a help request
+  // ---- One KOT per category: each KOT has its own waiter, print and Delivered
+  const printerOf = k => printers.find(p => p.id === k.kitchen_id) || null
+  function printKotSlip(k, label) {
+    printKOT({
+      id: k.id, created_at: k.created_at, kotTitle: k.category_name || 'KOT', kotNo: k.kot_no,
+      tables: { table_number: k.table_number }, captains: { name: k.captain_name || '' },
+      waiters: { name: label || k.waiter_label || '' }, waiter_id: k.waiter_id,
+      order_items: (Array.isArray(k.items) ? k.items : []).map(i => ({ quantity: i.qty || i.quantity || 1, note: i.note || '', menu_items: { name: i.name } })),
+    })
+  }
+  async function assignKot(k, waiterId) {
+    setAssigning('kot-' + k.id)
+    const { data, error } = await supabase.rpc('ss_kot_assign', { p_kot_id: k.id, p_waiter_id: waiterId })
+    setAssigning(null)
+    if (error) { alert('Could not assign: ' + (error.message || 'try again')); loadOrders(false); return }
+    loadOrders(false)
+    // no kitchen printer for this category: printed here, as the desk always did
+    if (data?.print === 'desk' && autoPrint) setTimeout(() => printKotSlip(k, data.waiter), 300)
+  }
+  async function deliverKot(k) {
+    await supabase.rpc('ss_kot_deliver', { p_kot_id: k.id })
+    loadOrders(false); clearFiltersIfEmpty(timelineRef.current - 1)
+  }
+  async function cancelKot(k) {
+    if (!window.confirm('Cancel KOT ' + (k.kot_no || '') + ' (' + (k.category_name || '') + ') for table ' + (k.table_number ?? '?') + '?' +
+      (['printed', 'printing'].includes(k.print_status) && k.kitchen_id ? '\n\nA CANCELLED slip prints on its printer.' : ''))) return
+    await supabase.rpc('ss_kot_cancel', { p_kot_id: k.id })
+    loadOrders(false); clearFiltersIfEmpty(timelineRef.current - 1)
+  }
+  async function reprintKot(k) {
+    const { data } = await supabase.rpc('ss_kot_reprint', { p_kot_id: k.id })
+    if (data === 'desk' || !k.kitchen_id) printKotSlip(k)
+    loadOrders(false)
+  }
+
+  // Open the pick list for an order, a help request or a KOT
   const openPicker = (kind, rec) => setPicker({ kind, rec })
   async function pickWaiter(w) {
     const p = picker; setPicker(null)
     if (!p || !w) return
     if (p.kind === 'sos') await assignSOSWaiter(p.rec.id, w.id)
+    else if (p.kind === 'kot') await assignKot(p.rec, w.id)
     else await assignWaiter(p.rec.id, w.id)
   }
   // A number nobody has yet: added to the event's waiters and assigned in one go
@@ -741,6 +813,9 @@ ${(order.order_items||[]).map(i => `
             .kt-t.on { background:#1E293B; color:#fff; }
             .kt-lbl { font-size:11px; font-weight:800; color:#475569; background:#F1F5F9; border-radius:999px; padding:2px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46%; }
             .kt-lbl.help { background:#FEF3C7; color:#92400E; }
+            .kt-lbl.cat { background:#EEF2FF; color:#3730A3; font-size:12px; text-transform:uppercase; letter-spacing:.02em; }
+            .kt-meta .prn { color:#64748B; font-size:11.5px; }
+            .kt-meta .prn.bad { color:#B91C1C; font-weight:700; }
             .kt-w { margin-left:auto; min-width:40px; text-align:center; border-radius:8px; padding:1px 8px; font-size:18px; font-weight:900; font-variant-numeric:tabular-nums; border:1.5px solid #0F172A; color:#0F172A; background:#fff; }
             .kt-w.none { border:1.5px dashed #CBD5E1; color:#94A3B8; font-size:16px; }
             .kt-meta { font-size:12px; color:#64748B; margin-top:4px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
@@ -790,18 +865,28 @@ ${(order.order_items||[]).map(i => `
           <div className="kt-grid">
           {timeline.map(row => {
             const isSos  = row.kind === 'sos'
-            const rec    = isSos ? row.sos : row.order
-            const id     = (isSos ? 'sos-' : 'ord-') + rec.id
+            const isKot  = row.kind === 'kot'
+            const rec    = isSos ? row.sos : isKot ? row.kot : row.order
+            const id     = (isSos ? 'sos-' : isKot ? 'kot-' : 'ord-') + rec.id
             const open   = expandedRow === id
             const st     = row.st
-            const lines_ = isSos ? (rec.sos_request_items || []) : (rec.order_items || [])
+            // a KOT keeps its dishes as [{ name, qty, note }]
+            const lines_ = isSos ? (rec.sos_request_items || []) : isKot
+              ? (Array.isArray(rec.items) ? rec.items : []).map(i => ({ quantity: i.qty || i.quantity || 1, note: i.note || '', menu_items: { name: i.name } }))
+              : (rec.order_items || [])
             const count  = isSos ? lines_.length : lines_.reduce((n, li) => n + (li.quantity || 1), 0)
             const w      = waiters.find(x => x.id === rec.waiter_id)
-            const waiterName = rec.waiters?.name || w?.name || ''
-            const waiterLabel = w ? waiterNo(w) : (waiterName ? waiterNo({ name: waiterName }) : '')
+            const waiterName = rec.waiters?.name || w?.name || (isKot ? rec.waiter_label || '' : '')
+            const waiterLabel = w ? waiterNo(w) : (isKot && rec.waiter_label ? rec.waiter_label : waiterName ? waiterNo({ name: waiterName }) : '')
             // Only ever set on a captain event
-            const captainName = rec.captains?.name || ''
+            const captainName = (isKot ? rec.captain_name : rec.captains?.name) || ''
             const tn = rec.tables?.table_number ?? rec.table_number ?? null
+            const prn = isKot ? printerOf(rec) : null
+            const prnText = !isKot ? '' : !rec.waiter_id ? (prn ? '🖨 ' + prn.name : '🖨 desk')
+              : rec.print_status === 'printed' ? '🖨 ' + (prn ? prn.name : 'desk') + ' ✓'
+              : rec.print_status === 'desk' ? '🖨 printed at the desk'
+              : rec.print_status === 'failed' ? '🖨 not printed - ' + (prn ? prn.name : 'printer')
+              : ['queued', 'printing'].includes(rec.print_status) ? '🖨 printing on ' + (prn ? prn.name : 'printer') + '…' : ''
             const tOn = tn != null && tableFilter === tn
             const timeStr = new Date(rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
             // Since the order came in (frozen once finished) - what the guest has waited
@@ -824,12 +909,14 @@ ${(order.order_items||[]).map(i => `
                   <div className="kt-head">
                     <span className={'kt-t' + (tOn ? ' on' : '')} title={tn != null ? 'Show only table ' + tn : ''}
                       onClick={e => { e.stopPropagation(); if (tn != null) setTableFilter(tOn ? null : tn) }}>T{tn ?? '?'}</span>
-                    <span className={'kt-lbl' + (isSos ? ' help' : '')}>{isSos ? '🔔 Help' : count + (count === 1 ? ' item' : ' items')}</span>
+                    <span className={'kt-lbl' + (isSos ? ' help' : isKot ? ' cat' : '')} title={isKot ? rec.kot_no : ''}>
+                      {isSos ? '🔔 Help' : isKot ? (rec.category_name || 'KOT') + ' · ' + count : count + (count === 1 ? ' item' : ' items')}</span>
                     <span className={'kt-w' + (waiterLabel ? '' : ' none')} title={waiterName ? 'Waiter ' + waiterName : 'No waiter yet'}>{waiterLabel || '–'}</span>
                   </div>
                   <div className="kt-meta">
                     <span>{timeStr}</span><span className="clk">⏱ {clock}{endTs ? ' ✓' : ''}</span>
                     {captainName && <span className="cap">🧑 {captainName}</span>}
+                    {isKot && <span className={'prn' + (rec.print_status === 'failed' ? ' bad' : '')}>{rec.kot_no} · {prnText}</span>}
                   </div>
                   <ul className="kt-items">
                     {shown.map((li, k) => <li key={k}><b>{li.quantity || 1}×</b><span>{nameOf(li)}</span></li>)}
@@ -837,9 +924,9 @@ ${(order.order_items||[]).map(i => `
                   </ul>
                 </div>
                 <div className="kt-act">
-                  {st === 'new' && <button className="kt-assign" disabled={assigning === (isSos ? 'sos-' : '') + rec.id} onClick={() => openPicker(isSos ? 'sos' : 'order', rec)}>Assign waiter</button>}
+                  {st === 'new' && <button className="kt-assign" disabled={assigning === (isSos ? 'sos-' : isKot ? 'kot-' : '') + rec.id} onClick={() => openPicker(isSos ? 'sos' : isKot ? 'kot' : 'order', rec)}>Assign waiter</button>}
                   {(st === 'progress' || st === 'delay') && (
-                    <button className="kt-deliver" onClick={() => isSos ? resolveSOSRequest(rec.id) : markDelivered(rec)}>✓ {isSos ? 'Done' : 'Delivered'}</button>
+                    <button className="kt-deliver" onClick={() => isSos ? resolveSOSRequest(rec.id) : isKot ? deliverKot(rec) : markDelivered(rec)}>✓ {isSos ? 'Done' : 'Delivered'}</button>
                   )}
                   <button className="kt-more" onClick={() => setExpandedRow(open ? null : id)} title="Details, print, cancel">{open ? '▲' : '⋯'}</button>
                 </div>
@@ -848,13 +935,13 @@ ${(order.order_items||[]).map(i => `
                     {captainName && <div style={{ color:'#2563EB', fontWeight:700, marginBottom:6 }}>Order taken by captain {captainName}</div>}
                     {waiterName && <div style={{ color:'#475569', fontWeight:700, marginBottom:6 }}>Waiter {waiterName}</div>}
                     {lines_.map((li, k) => (
-                      <div className="ln" key={k}><span style={{ fontWeight:600 }}>{nameOf(li)}</span><span style={{ color:'#64748B' }}>x{li.quantity || 1}</span></div>
+                      <div className="ln" key={k}><span style={{ fontWeight:600 }}>{nameOf(li)}{li.note ? <em style={{ marginLeft:6, fontStyle:'normal', background:'#0F172A', color:'#fff', borderRadius:4, padding:'0 5px', fontSize:11 }}>{li.note}</em> : null}</span><span style={{ color:'#64748B' }}>x{li.quantity || 1}</span></div>
                     ))}
                     <div className="btns">
-                      <button onClick={() => isSos ? printHelpKOT(rec) : printKOT(rec)}>🖨 {isSos ? 'Print help slip' : 'Print KOT'}</button>
-                      {(st === 'progress' || st === 'delay') && <button onClick={() => openPicker(isSos ? 'sos' : 'order', rec)}>Change waiter</button>}
+                      <button onClick={() => isSos ? printHelpKOT(rec) : isKot ? reprintKot(rec) : printKOT(rec)}>🖨 {isSos ? 'Print help slip' : 'Print KOT'}</button>
+                      {(st === 'progress' || st === 'delay') && <button onClick={() => openPicker(isSos ? 'sos' : isKot ? 'kot' : 'order', rec)}>Change waiter</button>}
                       {!['delivered','cancelled','resolved'].includes(rec.status) && (
-                        <button className="red" onClick={() => isSos ? cancelSOSRequest(rec.id) : setShowCancelDialog(rec.id)}>✕ Cancel</button>
+                        <button className="red" onClick={() => isSos ? cancelSOSRequest(rec.id) : isKot ? cancelKot(rec) : setShowCancelDialog(rec.id)}>✕ {isKot ? 'Cancel this KOT' : 'Cancel'}</button>
                       )}
                     </div>
                   </div>
@@ -870,8 +957,10 @@ ${(order.order_items||[]).map(i => `
 
       {picker && (
         <WaiterPicker waiters={waiters} busyOf={busyOf} current={picker.rec.waiter_id}
-          title={'Assign waiter · Table ' + (picker.rec.tables?.table_number ?? picker.rec.table_number ?? '?')}
-          sub={picker.kind === 'sos' ? 'Help request' : (picker.rec.order_items || []).reduce((n, li) => n + (li.quantity || 1), 0) + ' items · ' + new Date(picker.rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
+          title={'Assign waiter · Table ' + (picker.rec.tables?.table_number ?? picker.rec.table_number ?? '?') + (picker.kind === 'kot' ? ' · ' + (picker.rec.category_name || 'KOT') : '')}
+          sub={picker.kind === 'sos' ? 'Help request'
+            : picker.kind === 'kot' ? 'KOT ' + (picker.rec.kot_no || '') + ' · ' + (Array.isArray(picker.rec.items) ? picker.rec.items.reduce((n, i) => n + (i.qty || 1), 0) : 0) + ' items'
+            : (picker.rec.order_items || []).reduce((n, li) => n + (li.quantity || 1), 0) + ' items · ' + new Date(picker.rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
           allowNone={picker.kind === 'order' && !picker.rec.waiter_id}
           onPick={pickWaiter} onAdd={addAndPick}
           onNone={() => { const r = picker.rec; setPicker(null); assignWaiter(r.id, null) }}

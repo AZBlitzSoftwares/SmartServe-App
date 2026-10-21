@@ -32,6 +32,19 @@ export default function MenuManager({ eventData, onEventChange }) {
   const fileRef = useRef()
 
   useEffect(() => { if (eventData) loadMenu() }, [eventData])
+  // One KOT per category (guest / captain events): each category picks its KOT printer here too
+  const kpc = !!eventData?.kot_per_category && !isMs && !eventData?.multi_kitchen
+  const [printers, setPrinters] = useState([])
+  useEffect(() => {
+    if (!kpc || !eventData?.id) return
+    supabase.from('kitchens').select('id,name,is_default,is_active,sort_order').eq('event_id', eventData.id).order('sort_order')
+      .then(({ data }) => setPrinters(data || []))
+  }, [kpc, eventData?.id])
+  async function setCatPrinter(cat, kid) {
+    setCategories(cs => cs.map(c => (c.id === cat.id ? { ...c, kitchen_id: kid || null } : c)))
+    const { error } = await supabase.from('menu_categories').update({ kitchen_id: kid || null }).eq('id', cat.id)
+    if (error) { alert('Not saved: ' + error.message); loadMenu() }
+  }
   useEffect(() => {
     supabase.from('events').select('id,name').order('created_at',{ascending:false}).then(({data})=>setAllEvents(data||[]))
   }, [])
@@ -365,6 +378,25 @@ export default function MenuManager({ eventData, onEventChange }) {
         ))}
         <button onClick={()=>setShowAddCat(true)} style={{ flexShrink:0, background:'#FEF3C7', border:'1.5px solid #FCD34D', color:'#92400E', borderRadius:999, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Category</button>
       </div>
+
+      {kpc && (() => {
+        const cat = categories.find(c => c.id === activeCategory)
+        const def = printers.find(p => p.is_default && p.is_active) || printers.find(p => p.is_active)
+        return (
+          <div data-testid="cat-printer" style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', background:'#EEF2FF', border:'1px solid #C7D2FE',
+            borderRadius:12, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#312E81' }}>
+            {cat ? <>
+              <span>🖨 KOT printer for <b>{cat.name}</b>:</span>
+              <select value={cat.kitchen_id || ''} onChange={e => setCatPrinter(cat, e.target.value)}
+                style={{ border:'1.5px solid #A5B4FC', borderRadius:8, padding:'5px 8px', fontSize:13, fontWeight:700, background:'#fff' }}>
+                <option value="">{def ? 'Default · ' + def.name : 'Desk printer'}</option>
+                {printers.filter(p => p.is_active).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <span style={{ color:'#4338CA' }}>Each category prints as its own KOT.</span>
+            </> : <span>🖨 One KOT per category is on: pick a category above to choose its KOT printer (all categories: Control › KOT printing).</span>}
+          </div>
+        )
+      })()}
 
       {showAddCat && (
         <div style={{ background:'#fff', borderRadius:14, padding:16, marginBottom:14, boxShadow:'var(--shadow)', border:'2px solid #E8890C' }}>

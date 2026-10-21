@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { WaiterList, HelpItemsEditor } from './EventManager'
 import CaptainList from './CaptainList'
 import KitchenSetup from './KitchenSetup'
+import KotPrintingSetup from './KotPrintingSetup'
 import OfflineKitCard from './OfflineKitCard'
 import Fold from './Fold'
 import { jumpTo, setFold } from '../../lib/fold'
@@ -64,8 +65,8 @@ export default function TableManager({ eventData, onEventChange }) {
 
   // The jump bar: every section of this event type, in order
   const nav = {
-    self:    [['ss-ready','Ready check'], ['st-tables','Tables & tablets'], ['ss-waiters','Waiters'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
-    captain: [['ss-ready','Ready check'], ['ss-captains','Captains'], ['ss-waiters','Waiters'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
+    self:    [['ss-ready','Ready check'], ['st-tables','Tables & tablets'], ['ss-waiters','Waiters'], ['ss-printing','KOT printing'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
+    captain: [['ss-ready','Ready check'], ['ss-captains','Captains'], ['ss-waiters','Waiters'], ['ss-printing','KOT printing'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
     multi:   [['ks-ready','Ready check'], ['ks-chairs','Chairs'], ['ks-kitchens','Kitchens & printers'], ['ks-routing','Menu routing'], ['ks-captains','Captains'], ['ks-waiters','Waiters'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
     maestro: [['ms-ready','Ready check'], ['ks-chairs','1 Tables & chairs'], ['ks-kitchens','2 Kitchens & printers'], ['ms-barkers','3 Barkers'], ['ks-captains','4 Captains'],
       ['ms-courses','5 Courses'], ['ks-routing','6 Menu routing'], ['ms-rules','7 Kitchen rules'], ['ms-dishes','8 Dishes'], ['ms-vip','9 VIP guests'], ['ms-screens','10 Big screens'], ['ss-offline','11 Offline kit']],
@@ -128,6 +129,8 @@ export default function TableManager({ eventData, onEventChange }) {
         {(mode === 'self' || mode === 'captain') && <>
           {sectionHead('ss-waiters', 'Waiters', 'The people who carry food and answer help requests. The desk assigns them to orders.')}
           <WaiterList eventId={eventData.id} />
+          {sectionHead('ss-printing', 'KOT printing', 'One KOT per category, the event\'s printers, and which printer each category prints on.')}
+          <KotPrintingSetup eventData={eventData} onEventChange={onEventChange} />
         </>}
 
         {/* Maestro: the number of tables is in Tables & chairs (step 1) */}

@@ -138,6 +138,16 @@ export async function startMockPostgrest({ anonKey = 'test-anon-key-0123456789ab
     let out = rows;
     for (const [key, value] of params) {
       if (key === 'select' || key === 'order') continue;
+      // or=(a.eq.x,b.eq.y): a row matching any of them
+      if (key === 'or' && value.startsWith('(') && value.endsWith(')')) {
+        const alts = value.slice(1, -1).split(',').map((x) => {
+          const m = x.match(/^([a-z_]+)\.eq\.(.*)$/);
+          if (!m) throw new Error(`mock supports only eq inside or (${x})`);
+          return [m[1], m[2]];
+        });
+        out = out.filter((r) => alts.some(([c, v]) => String(r[c]) === v));
+        continue;
+      }
       if (value.startsWith('in.(') && value.endsWith(')')) {
         const set = new Set(value.slice(4, -1).split(','));
         out = out.filter((r) => set.has(String(r[key])));

@@ -629,6 +629,22 @@ export function startHub(options = {}) {
   let lastKitchensAt = 0;
   let targetsSignature = '';
 
+  // Multi-kitchen and Maestro events, and guest / captain events printing one KOT per
+  // category (a database without that switch: the multi-kitchen ones only)
+  let noKpc = false;
+  async function eventsOn(d) {
+    const sel = 'select=id,name,date,multi_kitchen';
+    if (!noKpc) {
+      try {
+        return (await api.get(`events?${sel}&or=(multi_kitchen.eq.true,kot_per_category.eq.true)&date=eq.${d}`)) || [];
+      } catch (e) {
+        if (!/kot_per_category|42703|PGRST/.test(String(e?.message || e?.code || e))) throw e;
+        noKpc = true;
+      }
+    }
+    return (await api.get(`events?${sel}&multi_kitchen=eq.true&date=eq.${d}`)) || [];
+  }
+
   async function refreshEvents() {
     const sel = 'select=id,name,date,multi_kitchen';
     let rows = [];
@@ -644,12 +660,10 @@ export function startHub(options = {}) {
         y.setDate(y.getDate() - 1);
         dates.push(localDate(y));
       }
-      for (const d of dates) {
-        rows.push(...((await api.get(`events?${sel}&multi_kitchen=eq.true&date=eq.${d}`)) || []));
-      }
+      for (const d of dates) rows.push(...(await eventsOn(d)));
       state.eventsNote = rows.length
         ? ''
-        : `No multi-kitchen event is dated today (${dates[0]}). Checking again every minute.`;
+        : `No event with kitchen printers is dated today (${dates[0]}). Checking again every minute.`;
     }
     const next = new Map(rows.map((r) => [r.id, r]));
     for (const [id, ev] of next) if (!state.events.has(id)) note('info', `Printing KOTs for event: ${ev.name || id}`);

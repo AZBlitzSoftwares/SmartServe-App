@@ -365,7 +365,25 @@ test('auto mode only picks multi-kitchen events dated today', async (t) => {
   await sleep(400);
   assert.equal(p.jobs.length, 1);
   assert.ok(mock.callsTo('hub_claim_kots').every((c) => c.args.p_event_id === event.id));
-  assert.ok(mock.callsTo('GET events').every((c) => c.args.multi_kitchen === 'eq.true' && /^eq\.\d{4}-\d\d-\d\d$/.test(c.args.date)));
+  assert.ok(mock.callsTo('GET events').every((c) => (c.args.multi_kitchen === 'eq.true'
+    || c.args.or === '(multi_kitchen.eq.true,kot_per_category.eq.true)') && /^eq\.\d{4}-\d\d-\d\d$/.test(c.args.date)));
+});
+
+test('a guest / captain event printing one KOT per category is printed too, with the waiter on the KOT', async (t) => {
+  const ctx = await setup(t);
+  const { mock } = ctx;
+  const p = await ctx.printer();
+  const ev = mock.addEvent({ name: 'Guest Event', date: localDate(), multi_kitchen: false, kot_per_category: true });
+  const k = mock.addKitchen({ event_id: ev.id, name: 'Printer 1', printer_ip: '127.0.0.1', printer_port: p.port });
+  mock.addKot({ kitchen: k, kot_no: 'L-001', table_number: 7, kitchen_name: 'Starters', waiter_label: '12',
+    items: [{ name: 'Paneer Tikka', qty: 2 }] });
+  ctx.start();
+  await waitFor(() => p.jobs.length === 1, 'the per-category KOT printed');
+  const text = p.jobs[0].decoded.lines.map((l) => l.text).join('\n');
+  assert.match(text, /STARTERS/);
+  assert.match(text, /TABLE 7/);
+  assert.match(text, /WAITER/);
+  assert.match(text, /\b12\b/);
 });
 
 test('a fixed event id (--event) is used even if not dated today', async (t) => {

@@ -310,8 +310,22 @@ function buildOrder(job, { backup, now }) {
   itemLines(r, items, { big: true });
   r.dashes();
   r.bold(true).size(1, 2).line(`Total items: ${totalQty(items)}`).size(1).bold(false);
+  waiterBox(r, job);
   footer(r, job, now);
   return r.toBuffer();
+}
+
+// One KOT per category (guest / captain events): the waiter the desk assigned, as big as fits,
+// at the bottom where the runner looks for it
+function waiterBox(r, job) {
+  const w = job.waiter_label == null ? '' : String(job.waiter_label).trim();
+  if (!w) return;
+  r.dashes();
+  r.align('center').bold(true).size(1).line('WAITER');
+  const mult = w.length <= WIDTH / 4 ? 4 : w.length <= WIDTH / 3 ? 3 : 2;
+  r.size(mult);
+  for (const l of wrap(w, Math.floor(WIDTH / mult))) r.line(l);
+  r.size(1).bold(false).align('left');
 }
 
 function buildCancel(job, { backup, now }) {

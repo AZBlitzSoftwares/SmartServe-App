@@ -405,7 +405,7 @@ export async function startCommand({ kotJump = null } = {}) {
     const head = pend === undefined ? '' : pend ? `${pend} change(s) not in the cloud yet. ` : 'cloud has everything. '
     if (state.uploading) return head + 'Uploading now...'
     const u = state.upload
-    return head + (u ? `Last try ${fmtTime(u.at)}: ${describeUpload(u)}` : 'First upload try in a minute.')
+    return head + (u ? `Last try ${fmtTime(u.at)}: ${describeUpload(u)}` : 'First upload in a few seconds.')
   }
 
   let lastPrinted = ''
@@ -590,8 +590,11 @@ export async function startCommand({ kotJump = null } = {}) {
   await gather()
   await render()
   statusTimer = setInterval(() => { gather().then(render).catch((e) => logLine('server', `status: ${e.message}`)) }, 5000)
-  firstUpload = setTimeout(backgroundUpload, 20000)
-  uploadTimer = setInterval(backgroundUpload, 60000)
+  // Every event runs on the laptop from the start; the cloud is kept a few seconds
+  // behind whenever there is internet (config "uploadEverySeconds", default 10).
+  const uploadEveryMs = Math.max(5, Number(cfg.uploadEverySeconds) || 10) * 1000
+  firstUpload = setTimeout(backgroundUpload, 5000)
+  uploadTimer = setInterval(backgroundUpload, uploadEveryMs)
   announce()
   announceTimer = setInterval(() => announce(), 60000)
   return new Promise(() => {}) // runs until Ctrl+C
