@@ -4,6 +4,7 @@ import './index.css'
 import App from './App.jsx'
 import LaptopServerAsk from './components/guest/LaptopServerAsk.jsx'
 import { startupServerCheck } from './lib/serverSwitch'
+import { keepLaptopInApp } from './lib/medianLinks'
 
 // Tablets: the on-screen keyboard must never cover the field being typed in.
 // index.html asks the browser to shrink the page above the keyboard
@@ -30,6 +31,10 @@ import { startupServerCheck } from './lib/serverSwitch'
   window.addEventListener('focusin', () => { setTimeout(reveal, 350); setTimeout(reveal, 800) })
   update()
 })()
+
+// The tablet app (APK) must open the event laptop inside the app, not in its
+// in-app browser: set its link rules first (src/lib/medianLinks.js).
+if (keepLaptopInApp()) window.__ssLinkRulesAt = Date.now()
 
 // Before anything is drawn: a device set to the event laptop goes there now
 // (the APK always opens the cloud address). See src/lib/serverSwitch.js.

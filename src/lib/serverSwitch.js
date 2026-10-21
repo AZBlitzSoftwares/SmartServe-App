@@ -93,10 +93,13 @@ function pathHere() {
   return window.location.pathname + window.location.search
 }
 
-/** Leave for the laptop now. */
+/** Leave for the laptop now. In the tablet app, after a moment, so the
+    link rules that keep the laptop inside the app are in place first. */
 function goToLaptop(base) {
   write(SENT_KEY, String(Date.now()))
-  window.location.replace(base + pathHere())
+  const go = () => window.location.replace(base + pathHere())
+  if (typeof window.__ssLinkRulesAt === 'number') setTimeout(go, Math.max(0, 300 - (Date.now() - window.__ssLinkRulesAt)))
+  else go()
 }
 
 /* Run once in main.jsx, before React renders.
