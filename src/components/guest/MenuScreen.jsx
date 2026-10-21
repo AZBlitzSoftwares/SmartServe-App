@@ -232,6 +232,10 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   const [items, setItems] = useState(initialMenu?.items || [])
   const [search, setSearch] = useState('')
   const [vegMode, setVegMode] = useState('all')
+  // Filters at the top, as on the Maestro captain tablet: a category (null = all) and a
+  // course (null = all; the course row only shows when the dishes have two or more courses)
+  const [catSel, setCatSel] = useState(null)
+  const [courseSel, setCourseSel] = useState(null)
   const [loading, setLoading] = useState(!initialMenu)
   const sectionRefs = useRef({})
   const scrollRef = useRef()
@@ -303,62 +307,87 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
     setLoading(false)
   }
 
-  // Scroll to category section
-  function scrollToCategory(catId) {
-    const el = sectionRefs.current[catId]
-    if (el) el.scrollIntoView({ behavior:'smooth', block:'start' })
-  }
 
 
+  // Courses in the event's own order (events.courses), then any others as they come
+  const courseOf = i => String(i.course || '').trim()
+  const courseList = (() => {
+    const have = [...new Set(items.map(courseOf).filter(Boolean))]
+    const order = (eventData?.courses || []).map(c => String(c).trim())
+    return [...order.filter(c => have.includes(c)), ...have.filter(c => !order.includes(c))]
+  })()
+  const showCourses = courseList.length >= 2
+  const courseNow = showCourses && courseList.includes(courseSel) ? courseSel : null
+
+  const matchVegOf = i => vegMode === 'all' || (vegMode==='veg' ? i.is_veg!==false : i.is_veg===false)
   const filtered = items.filter(i => {
     const matchSearch = search.length === 0 || i.name.toLowerCase().includes(search.toLowerCase()) || (i.description||'').toLowerCase().includes(search.toLowerCase())
-    const matchVeg = vegMode === 'all' || (vegMode==='veg' ? i.is_veg!==false : i.is_veg===false)
-    return matchSearch && matchVeg
+    // a search looks through the whole menu; the category and course filters are for browsing
+    if (search.length > 0) return matchSearch && matchVegOf(i)
+    return matchVegOf(i) && (!courseNow || courseOf(i) === courseNow)
   })
+  // categories that have dishes under the current course / veg filter
+  const catsShown = categories.filter(cat => filtered.some(i => i.category_id === cat.id))
+  const catNow = catSel && catsShown.some(c => c.id === catSel) ? catSel : null
 
   // Group items by category (for section view)
   const grouped = categories.map(cat => ({
     cat,
     items: filtered.filter(i => i.category_id === cat.id)
-  })).filter(g => g.items.length > 0)
+  })).filter(g => g.items.length > 0 && (!catNow || g.cat.id === catNow))
+  const pickCat = id => { setCatSel(id); try { scrollRef.current?.scrollTo({ top: 0 }) } catch { /* old browser */ } }
+  const pickCourse = c => { setCourseSel(c); try { scrollRef.current?.scrollTo({ top: 0 }) } catch { /* old browser */ } }
 
   // Flat list for search
   const flatFiltered = search.length > 0 ? filtered : null
 
   const getQty = id => cart.find(c=>c.id===id)?.quantity||0
 
+  // A dish tile: two to a row with the photo on top (the Maestro captain tablet shows three
+  // without photos; here the photo sells the dish). Same colours as before.
   function ItemCard({ item }) {
     const qty = getQty(item.id)
     const isVeg = item.is_veg !== false
     return (
-      <div style={{ background:'#fff', borderBottom:'1px solid #F0F0F0', padding:'14px 16px', display:'flex', gap:12, alignItems:'flex-start' }}>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
-            <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:16, height:16, borderRadius:3, border:'2px solid '+(isVeg?'#16A34A':'#DC2626'), flexShrink:0 }}>
-              <span style={{ width:7, height:7, borderRadius:'50%', background:isVeg?'#16A34A':'#DC2626', display:'block' }}></span>
+      <div className="ss-dish" data-dish={item.name}
+        style={{ background:'#fff', borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column',
+          boxShadow:'0 1px 3px rgba(0,0,0,0.08)', border: qty > 0 ? '2px solid #E8890C' : '1px solid #EDEDED', minWidth:0 }}>
+        <div style={{ position:'relative', height:'clamp(110px, min(22vw, 21vh), 180px)', background:'linear-gradient(135deg,#F7F4FB,#E8E0F0)', flexShrink:0 }}>
+          {item.photo_url
+            ? <img src={item.photo_url} alt={item.name} loading="lazy" decoding="async" style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} onError={e=>e.target.style.display='none'} />
+            : <div style={{ width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:40 }}>🍽️</div>
+          }
+          {item.is_live_counter && <span style={{ position:'absolute', top:8, left:8, fontSize:10, color:'#92400E', fontWeight:800, background:'#FEF3C7', padding:'2px 8px', borderRadius:999 }}>⏱ Live counter</span>}
+          {qty > 0 && <span style={{ position:'absolute', top:8, right:8, fontSize:12, color:'#fff', fontWeight:900, background:'#E8890C', padding:'2px 9px', borderRadius:999 }}>{qty} added</span>}
+        </div>
+        <div style={{ padding:'10px 11px 11px', display:'flex', flexDirection:'column', flex:1, minWidth:0 }}>
+          <div style={{ display:'flex', alignItems:'flex-start', gap:6, marginBottom:4 }}>
+            <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:15, height:15, borderRadius:3, border:'2px solid '+(isVeg?'#16A34A':'#DC2626'), flexShrink:0, marginTop:2 }}>
+              <span style={{ width:6, height:6, borderRadius:'50%', background:isVeg?'#16A34A':'#DC2626', display:'block' }}></span>
             </span>
-            {item.is_live_counter && <span style={{ fontSize:10, color:'#D97706', fontWeight:700, background:'#FEF3C7', padding:'1px 7px', borderRadius:999 }}>⏱ Live counter</span>}
+            <div style={{ fontWeight:800, fontSize:15, color:'#1A1A1A', lineHeight:1.3, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{item.name}</div>
           </div>
-          <div style={{ fontWeight:700, fontSize:15, color:'#1A1A1A', marginBottom:4, lineHeight:1.3 }}>{item.name}</div>
-          {item.description && <div style={{ fontSize:12, color:'#888', lineHeight:1.5, marginBottom:10, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{item.description}</div>}
+          {item.description && <div style={{ fontSize:12, color:'#888', lineHeight:1.45, marginBottom:8, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{item.description}</div>}
+          <div style={{ marginTop:'auto', paddingTop:4 }}>
           {qty===0
-            ? <button onClick={()=>addToCart(item)} style={{ background:'#fff', color:'#E8890C', border:'1.5px solid #E8890C', borderRadius:8, padding:'7px 22px', fontSize:13, fontWeight:800, cursor:'pointer', letterSpacing:'0.3px' }}>ADD +</button>
-            : <div style={{ display:'inline-flex', alignItems:'center', background:'#E8890C', borderRadius:8, overflow:'hidden' }}>
-                <button onClick={()=>removeFromCart(item.id)} style={{ background:'none', border:'none', color:'#fff', fontSize:20, fontWeight:800, cursor:'pointer', padding:'5px 13px', lineHeight:1 }}>−</button>
-                <span style={{ color:'#fff', fontWeight:800, fontSize:14, minWidth:22, textAlign:'center' }}>{qty}</span>
-                <button onClick={()=>addToCart(item)} style={{ background:'none', border:'none', color:'#fff', fontSize:20, fontWeight:800, cursor:'pointer', padding:'5px 13px', lineHeight:1 }}>+</button>
+            ? <button onClick={()=>addToCart(item)} style={{ width:'100%', background:'#fff', color:'#E8890C', border:'1.5px solid #E8890C', borderRadius:9, padding:'9px 0', fontSize:14, fontWeight:800, cursor:'pointer', letterSpacing:'0.3px' }}>ADD +</button>
+            : <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:'#E8890C', borderRadius:9, overflow:'hidden' }}>
+                <button onClick={()=>removeFromCart(item.id)} style={{ background:'none', border:'none', color:'#fff', fontSize:22, fontWeight:800, cursor:'pointer', padding:'5px 18px', lineHeight:1 }}>−</button>
+                <span style={{ color:'#fff', fontWeight:800, fontSize:15, minWidth:22, textAlign:'center' }}>{qty}</span>
+                <button onClick={()=>addToCart(item)} style={{ background:'none', border:'none', color:'#fff', fontSize:22, fontWeight:800, cursor:'pointer', padding:'5px 18px', lineHeight:1 }}>+</button>
               </div>
           }
-        </div>
-        <div style={{ flexShrink:0, width:110, height:90, borderRadius:12, overflow:'hidden' }}>
-          {item.photo_url
-            ? <img src={item.photo_url} alt={item.name} loading="lazy" decoding="async" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>e.target.style.display='none'} />
-            : <div style={{ width:'100%', height:'100%', background:'linear-gradient(135deg,#F7F4FB,#E8E0F0)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:36 }}>🍽️</div>
-          }
+          </div>
         </div>
       </div>
     )
   }
+  const TILE_GRID = { display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:12, padding:'12px 12px 4px' }
+  // Filter chips: same look as the rest of the app (dark when chosen, amber outline otherwise)
+  const chip = on => ({ flexShrink:0, padding:'6px 14px', borderRadius:999, fontSize:13, fontWeight:800, cursor:'pointer',
+    border:'1.5px solid ' + (on ? '#1A0A0A' : 'rgba(232,137,12,0.55)'), background: on ? '#1A0A0A' : '#fff', color: on ? '#fff' : '#3A2A1A',
+    whiteSpace:'nowrap' })
+  const rowLbl = { flexShrink:0, fontSize:10, fontWeight:800, color:'#999', letterSpacing:'0.6px', textTransform:'uppercase', marginRight:2 }
 
   return (
     <div style={{ height:'100vh', display:'flex', flexDirection:'column', background:'#F5F5F5', overflow:'hidden' }}>
@@ -430,12 +459,38 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         </div>
       </div>
 
-      {/* VEG FILTER — only shown when the menu contains both veg and non-veg */}
-      {hasVeg && hasNonVeg && (
-        <div style={{ display:'flex', gap:8, padding:'8px 14px', background:'#fff', borderBottom:'1px solid #eee', flexShrink:0, overflowX:'auto', scrollbarWidth:'none' }}>
-          {[['all','🍽️ All'],['veg','🟢 Veg Only'],['nonveg','🔴 Non-Veg']].map(([val,label]) => (
-            <button key={val} onClick={()=>setVegMode(val)} style={{ flexShrink:0, padding:'5px 14px', borderRadius:999, fontSize:12, fontWeight:700, border:'1.5px solid', cursor:'pointer', background:vegMode===val?(val==='veg'?'#16A34A':val==='nonveg'?'#DC2626':'#1A0A0A'):'#fff', color:vegMode===val?'#fff':'#555', borderColor:vegMode===val?'transparent':'#ddd' }}>{label}</button>
-          ))}
+      {/* FILTERS at the top, as on the Maestro captain tablet: Category, then Course (only
+          when the dishes have courses) with Veg / Non-Veg at its end (only when the menu
+          has both). Hidden while searching: a search looks through the whole menu. */}
+      {search.length === 0 && catsShown.length > 0 && (
+        <div className="ss-filters" style={{ background:'#fff', borderBottom:'1px solid #eee', flexShrink:0, padding:'7px 0 7px' }}>
+          <div className="ss-frow" style={{ display:'flex', alignItems:'center', gap:7, padding:'0 14px', overflowX:'auto', scrollbarWidth:'none' }}>
+            <span style={rowLbl}>Category</span>
+            <button style={chip(!catNow)} onClick={() => pickCat(null)}>All</button>
+            {catsShown.map(cat => (
+              <button key={cat.id} style={chip(catNow === cat.id)} onClick={() => pickCat(catNow === cat.id ? null : cat.id)}>{catLabel(cat.name)}</button>
+            ))}
+          </div>
+          {(showCourses || (hasVeg && hasNonVeg)) && (
+            <div style={{ display:'flex', alignItems:'center', gap:7, marginTop:7, padding:'0 14px' }}>
+              {showCourses && (
+                <div className="ss-frow" style={{ display:'flex', alignItems:'center', gap:7, overflowX:'auto', scrollbarWidth:'none', flex:1, minWidth:0 }}>
+                  <span style={rowLbl}>Course</span>
+                  <button style={chip(!courseNow)} onClick={() => pickCourse(null)}>All</button>
+                  {courseList.map(c => (
+                    <button key={c} style={chip(courseNow === c)} onClick={() => pickCourse(courseNow === c ? null : c)}>{c}</button>
+                  ))}
+                </div>
+              )}
+              {hasVeg && hasNonVeg && (
+                <div style={{ display:'flex', gap:6, flexShrink:0, marginLeft: showCourses ? 0 : 0 }}>
+                  {[['all','🍽️ All'],['veg','🟢 Veg'],['nonveg','🔴 Non-Veg']].map(([val,label]) => (
+                    <button key={val} onClick={()=>setVegMode(val)} style={{ flexShrink:0, padding:'5px 12px', borderRadius:999, fontSize:12, fontWeight:700, border:'1.5px solid', cursor:'pointer', background:vegMode===val?(val==='veg'?'#16A34A':val==='nonveg'?'#DC2626':'#1A0A0A'):'#fff', color:vegMode===val?'#fff':'#555', borderColor:vegMode===val?'transparent':'#ddd' }}>{label}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -452,7 +507,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
             <div style={{ padding:'10px 16px 6px', fontSize:13, color:'#888', fontWeight:600 }}>{filtered.length} results for "{search}"</div>
             {filtered.length===0
               ? <div style={{ textAlign:'center', padding:60 }}><div style={{ fontSize:40, marginBottom:12 }}>🔍</div><div style={{ color:'#888', fontWeight:600 }}>No dishes found</div></div>
-              : filtered.map(item => <ItemCard key={item.id} item={item} />)
+              : <div style={TILE_GRID}>{filtered.map(item => <ItemCard key={item.id} item={item} />)}</div>
             }
           </>
         ) : (
@@ -466,7 +521,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
                   <span style={{ fontWeight:900, fontSize:15, color:'#E8890C', letterSpacing:'0.5px', textTransform:'uppercase' }}>{catLabel(cat.name)}</span>
                   <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)', background:'rgba(255,255,255,0.1)', padding:'2px 8px', borderRadius:999, fontWeight:600 }}>{catItems.length} item{catItems.length!==1?'s':''}</span>
                 </div>
-                {catItems.map(item => <ItemCard key={item.id} item={item} />)}
+                <div style={TILE_GRID}>{catItems.map(item => <ItemCard key={item.id} item={item} />)}</div>
               </div>
             ))
         )}
@@ -474,7 +529,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
 
       {/* FLOATING BOTTOM BUTTONS — MENU (right) + Track Order (left of menu) */}
       {search.length === 0 && categories.length > 0 && (
-        <MenuModal categories={categories} items={items} onSelect={scrollToCategory} cartCount={cartCount} hasActiveOrders={hasActiveOrders} onShowStatus={onShowStatus} menuSheetOpen={menuSheetOpen} onMenuSheetChange={setMenuSheetOpen} onBack={onBack} captain={captain} />
+        <MenuModal categories={categories} items={items} onSelect={id => pickCat(id)} cartCount={cartCount} hasActiveOrders={hasActiveOrders} onShowStatus={onShowStatus} menuSheetOpen={menuSheetOpen} onMenuSheetChange={setMenuSheetOpen} onBack={onBack} captain={captain} />
       )}
 
       {/* FEEDBACK BUBBLE */}

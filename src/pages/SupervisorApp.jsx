@@ -12,6 +12,7 @@ import TableManager from '../components/supervisor/TableManager'
 import FeedbackReport from '../components/supervisor/FeedbackReport'
 import SupervisorChat from '../components/supervisor/SupervisorChat'
 import { playChatChime, unlockChime } from '../lib/chime'
+import { armOrderBeep, playOrderBeep } from '../lib/orderBeep'
 import { lazyPage } from '../lib/lazyPage'
 import { setUnsavedCheck } from '../lib/appUpdate'
 import { serviceDates } from '../components/guest/deviceEntry'
@@ -83,7 +84,11 @@ export default function SupervisorApp() {
 
   // SOS alert hook — runs regardless of which tab is active
   const { openRequests, newAlert, clearAlert } = useSOSAlert(eventData)
-  const [newOrderAlert, setNewOrderAlert] = useState(null)
+  // New orders: a beep, no banner (the Live Orders card itself flashes NEW ORDER). On the
+  // Live Orders tab the board beeps; on any other tab this beeps.
+  const onOrdersTab = useRef(false)
+  useEffect(() => { armOrderBeep() }, [])
+  useEffect(() => { onOrdersTab.current = chosenTab === 'kot' }, [chosenTab])
   const prevOrderCount = useRef(-1)
 
   useEffect(() => {
@@ -116,7 +121,7 @@ export default function SupervisorApp() {
 
       if (latest.id !== lastSeenOrderId.current) {
         lastSeenOrderId.current = latest.id
-        setNewOrderAlert(latest)
+        if (!onOrdersTab.current) playOrderBeep()
       }
     }
 
@@ -284,33 +289,6 @@ export default function SupervisorApp() {
           have something at the bottom of a long page, and all of them
           would have hit this sooner or later. */}
 
-      {/* ── FLOATING ORDER ALERT ── */}
-      {newOrderAlert && (
-        <>
-          <style>{`@keyframes orderFlash{0%,100%{opacity:1}50%{opacity:0.85}}.order-alert{animation:orderFlash 0.7s ease-in-out 4}`}</style>
-          <div className="order-alert" style={{
-            position:'fixed', top:0, left:0, right:0, zIndex:9998,
-            background:'#16A34A', padding:'14px 20px',
-            display:'flex', alignItems:'center', gap:14, boxShadow:'0 4px 24px rgba(22,163,74,0.6)'
-          }}>
-            <span style={{ fontSize:32 }}>🎫</span>
-            <div style={{ flex:1 }}>
-              <div style={{ color:'#fff', fontWeight:800, fontSize:16 }}>
-                🆕 New Order — Table {newOrderAlert.tables?.table_number}
-              </div>
-              <div style={{ color:'rgba(255,255,255,0.85)', fontSize:13, marginTop:2 }}>
-                {new Date(newOrderAlert.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} · Tap to view
-              </div>
-            </div>
-            <button onClick={() => { setNewOrderAlert(null); setActiveTab('kot') }} style={{ background:'#fff', color:'#16A34A', border:'none', borderRadius:10, padding:'10px 18px', fontSize:13, fontWeight:800, cursor:'pointer' }}>
-              View →
-            </button>
-            <button onClick={() => setNewOrderAlert(null)} style={{ background:'rgba(255,255,255,0.2)', border:'none', borderRadius:8, padding:'8px 12px', color:'#fff', fontSize:18, cursor:'pointer', lineHeight:1 }}>✕</button>
-          </div>
-          <div style={{ height:72 }} />
-        </>
-      )}
-
       {/* ss-chat-alert-removed-69 - the chat panel opens itself now, with a
           chime. The banner it replaced cost 72px of board height and queued
           up behind the new-order banner, so an urgent message could be
@@ -472,7 +450,7 @@ export default function SupervisorApp() {
           </div>
         )}
         {activeTab==='kot'     && eventData?.multi_kitchen && !eventData?.maestro && <KitchenBoard eventData={eventData} />}
-        {activeTab==='kot'     && !eventData?.multi_kitchen && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={(order) => { setNewOrderAlert(order); setOrderCount(c=>c+1) }} />}
+        {activeTab==='kot'     && !eventData?.multi_kitchen && <KOTDashboard eventData={eventData} onOrderCountChange={setOrderCount} onNewOrder={() => setOrderCount(c=>c+1)} />}
         {activeTab==='menu'    && <MenuManager eventData={eventData} onEventChange={setEventData} />}
         {activeTab==='reports' && eventData?.maestro && (
           <Suspense fallback={<div style={{ padding:40, textAlign:'center', color:'#888' }}>Loading…</div>}>

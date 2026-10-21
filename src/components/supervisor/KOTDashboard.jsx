@@ -1,7 +1,74 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { armOrderBeep, playOrderBeep, orderSoundOn, setOrderSound } from '../../lib/orderBeep'
 
-const BUILD_VERSION = 'v2.5 \u00B7 2026-09-22'
+// A waiter who has had an order this long without delivering it shows DELAY
+const DELAY_MIN = 5
+
+// The number called across the hall: waiter_number, else the "(07)" in "Raju (07)", else the name
+function waiterNo(w) {
+  if (!w) return ''
+  if (w.waiter_number != null && String(w.waiter_number).trim() !== '') return String(w.waiter_number).trim()
+  const m = String(w.name || '').match(/\(([^)]+)\)\s*$/)
+  return m ? m[1] : String(w.name || '')
+}
+const normNo = v => String(v ?? '').trim().replace(/^0+(?=\d)/, '').toLowerCase()
+// 1, 2, 3 ... 10, 11 in number order, then any names
+function byWaiterNo(a, b) {
+  const x = parseInt(waiterNo(a), 10), y = parseInt(waiterNo(b), 10)
+  if (!isNaN(x) && !isNaN(y) && x !== y) return x - y
+  if (!isNaN(x) !== !isNaN(y)) return isNaN(x) ? 1 : -1
+  return waiterNo(a).localeCompare(waiterNo(b), undefined, { numeric: true })
+}
+
+/* The pick list: every waiter of the event in number order, the busy ones showing where
+   they are (they can still be picked), and a box to type a number. A number nobody has
+   yet can be added and assigned in one go. */
+function WaiterPicker({ waiters, busyOf, title, sub, current, allowNone, onPick, onNone, onAdd, onClose }) {
+  const [typed, setTyped] = useState('')
+  const list = [...waiters].sort(byWaiterNo)
+  const t = typed.trim()
+  const match = t ? list.find(w => normNo(waiterNo(w)) === normNo(t) || normNo(w.name) === normNo(t)) : null
+  const touch = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer:coarse)').matches
+  const go = () => { if (match) onPick(match); else if (t) onAdd(t) }
+  return (
+    <div className="wp-bg" onClick={onClose}>
+      <div className="wp" onClick={e => e.stopPropagation()}>
+        <div className="wp-h">
+          <div><b>{title}</b>{sub && <small>{sub}</small>}</div>
+          <button className="wp-x" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="wp-type">
+          <input value={typed} onChange={e => setTyped(e.target.value)} autoFocus={!touch} inputMode="numeric"
+            placeholder="Type a waiter number" onKeyDown={e => { if (e.key === 'Enter') go(); if (e.key === 'Escape') onClose() }} />
+          {t && (match
+            ? <button className="wp-go" onClick={() => onPick(match)}>Assign {waiterNo(match)}</button>
+            : <button className="wp-go add" onClick={() => onAdd(t)}>Add waiter {t} and assign</button>)}
+        </div>
+        <div className="wp-grid">
+          {list.map(w => {
+            const busy = busyOf(w.id)
+            const on = match && match.id === w.id
+            return (
+              <button key={w.id} className={'wp-w' + (busy ? ' busy' : '') + (on ? ' on' : '') + (current === w.id ? ' cur' : '')}
+                onClick={() => onPick(w)} title={w.name}>
+                <b>{waiterNo(w)}</b>
+                <small>{current === w.id ? 'now' : busy ? busy : 'free'}</small>
+              </button>
+            )
+          })}
+          {!list.length && <div className="wp-empty">No waiters yet: type a number above to add one.</div>}
+        </div>
+        <div className="wp-f">
+          {allowNone && <button className="wp-none" onClick={onNone}>No waiter</button>}
+          <button className="wp-cancel" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const BUILD_VERSION = 'v2.6 \u00B7 2026-10-22'
 
 const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
@@ -21,7 +88,10 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   useEffect(() => { const t = setInterval(() => setNowTs(Date.now()), 1000); return () => clearInterval(t) }, [])
   // Remembered, so a supervisor away from the printer stays silenced
   const [autoPrint, setAutoPrint] = useState(() => localStorage.getItem('ss_autoprint') !== 'off')
-  const [showAllWaiters, setShowAllWaiters] = useState(null)
+  // the waiter pick list: { kind: 'order' | 'sos', rec }
+  const [picker, setPicker] = useState(null)
+  const [soundOn, setSoundOn] = useState(orderSoundOn)
+  useEffect(() => { armOrderBeep() }, [])
   const [showCancelDialog, setShowCancelDialog] = useState(null) // order id being cancelled
   const [cancelReason, setCancelReason] = useState('')
   const [cancelCustomReason, setCancelCustomReason] = useState('')
@@ -29,7 +99,6 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const [tableFilter, setTableFilter] = useState(null)
   const [now, setNow] = useState(Date.now())
   const prevCount = useRef(-1)
-  const audioEnabled = useRef(false)
 
   /* The order list gets a measured height so it scrolls inside itself and
      the controls above it stay put.
@@ -114,31 +183,18 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     const all = data || []
     const activeCount = all.filter(o => !['delivered','cancelled'].includes(o.status)).length
     if (prevCount.current >= 0 && activeCount > prevCount.current) {
+      // a beep; the new card itself flashes NEW ORDER (no banner across the top)
       if (onNewOrder) onNewOrder(all.find(o => o.status === 'placed'))
-      if (audioEnabled.current) {
-        try {
-          const ctx = new (window.AudioContext || window.webkitAudioContext)()
-          const osc = ctx.createOscillator(), gain = ctx.createGain()
-          osc.connect(gain); gain.connect(ctx.destination)
-          osc.frequency.setValueAtTime(880, ctx.currentTime); osc.frequency.setValueAtTime(660, ctx.currentTime+0.15); osc.frequency.setValueAtTime(880, ctx.currentTime+0.3)
-          gain.gain.setValueAtTime(0.4, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.5)
-          osc.start(ctx.currentTime); osc.stop(ctx.currentTime+0.5)
-        } catch(e) {}
-      }
+      playOrderBeep()
     }
     prevCount.current = activeCount; setOrders(all); onOrderCountChange(activeCount)
     if (showSpinner) setLoading(false)
   }
 
-  function enableSound() {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)()
-      const osc = ctx.createOscillator(), gain = ctx.createGain()
-      osc.connect(gain); gain.connect(ctx.destination)
-      osc.frequency.value = 880; gain.gain.setValueAtTime(0.2, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.3)
-      osc.start(); osc.stop(ctx.currentTime+0.3)
-      audioEnabled.current = true; alert('✅ Sound alerts enabled!')
-    } catch(e) { alert('Could not enable sound on this device.') }
+  function toggleSound() {
+    const v = !soundOn
+    setSoundOn(v); setOrderSound(v)
+    if (v) setTimeout(playOrderBeep, 50)
   }
 
   async function assignWaiter(orderId, waiterId) {
@@ -489,44 +545,15 @@ ${(order.order_items||[]).map(i => `
     setTimeout(() => { w.print(); w.close() }, 500)
   }
 
-  // Waiters busy on orders OR on active SOS requests
-  const busyWaiterIds = [
-    ...orders.filter(o=>o.status==='in_progress'&&o.waiter_id).map(o=>o.waiter_id),
-    ...sosRequests.filter(s=>s.status==='in_progress'&&s.waiter_id).map(s=>s.waiter_id)
-  ].filter(Boolean)
-  // Jobs done, not orders done. A waiter returning from a help run had been
-  // reading as zero jobs and jumping back to the front of the queue.
-  const waiterOrderCount = {}
-  const waiterLastAt = {}
-  waiters.forEach(w => { waiterOrderCount[w.id] = 0; waiterLastAt[w.id] = 0 })
-
-  function tally(list) {
-    list.forEach(x => {
-      if (!x.waiter_id || waiterOrderCount[x.waiter_id] === undefined) return
-      waiterOrderCount[x.waiter_id]++
-      // Latest of assigned or finished. A waiter who delivered two minutes
-      // ago must rank behind one assigned an hour ago and still out.
-      const times = [x.assigned_at, x.delivered_at, x.resolved_at]
-        .filter(Boolean).map(v => new Date(v).getTime())
-      const t = times.length ? Math.max(...times) : 0
-      if (t > waiterLastAt[x.waiter_id]) waiterLastAt[x.waiter_id] = t
-    })
-  }
-  tally(orders)
-  tally(sosRequests)
-
-  // Purely last activity, oldest first. Job count is deliberately NOT used:
-  // with every waiter free and every order delivered the counts go equal, the
-  // tie-break takes over, and the order collapses back toward 1,2,3,4,5.
-  //
-  // Sorting on time alone means whoever came back most recently goes last and
-  // whoever has been idle longest goes first, which holds whether waiters are
-  // busy or all free. That is the first come first go rule.
-  //
-  // A waiter who has never worked has 0, so they lead until they do.
-  const availableWaiters = waiters
-    .filter(w => !busyWaiterIds.includes(w.id))
-    .sort((a, b) => (waiterLastAt[a.id] || 0) - (waiterLastAt[b.id] || 0))
+  // Waiters busy on orders OR on active help requests, and where (shown on the pick list
+  // and the waiter strip). There is no "next waiter" suggestion: the operator picks whoever
+  // is standing there.
+  const busyAt = {}
+  const noteBusy = (wid, tn) => { if (!wid) return; (busyAt[wid] ||= []).push(tn != null ? 'T' + tn : 'busy') }
+  orders.filter(o => o.status === 'in_progress' && o.waiter_id).forEach(o => noteBusy(o.waiter_id, o.tables?.table_number))
+  sosRequests.filter(r => r.status === 'in_progress' && r.waiter_id).forEach(r => noteBusy(r.waiter_id, r.tables?.table_number ?? r.table_number))
+  const busyWaiterIds = Object.keys(busyAt)
+  const busyOf = wid => (busyAt[wid] ? [...new Set(busyAt[wid])].join(' ') : '')
 
   const filteredOrders = orders.filter(o => {
     const matchFilter = filter==='active'?!['delivered','cancelled'].includes(o.status):filter==='delivered'?o.status==='delivered':filter==='cancelled'?o.status==='cancelled':true
@@ -548,10 +575,28 @@ ${(order.order_items||[]).map(i => `
   // A help request from 22:39 must not sit above an order from 22:40 just
   // because it is a different type. During a rush the supervisor reads top
   // to bottom and needs true chronological order.
+  // new = nobody on it yet · progress = a waiter has it · delay = a waiter has had it
+  // DELAY_MIN minutes and it is not delivered · done / void = finished
+  function cardState(rec, isSos) {
+    if (isSos) {
+      if (rec.status === 'resolved') return 'done'
+      if (rec.status === 'cancelled') return 'void'
+      if (rec.status === 'open' || (!rec.waiter_id && rec.status !== 'in_progress')) return 'new'
+    } else {
+      if (rec.status === 'delivered') return 'done'
+      if (rec.status === 'cancelled') return 'void'
+      if (!rec.waiter_id && ['pending', 'placed'].includes(rec.status)) return 'new'
+    }
+    const since = rec.assigned_at ? (nowTs - new Date(rec.assigned_at).getTime()) / 60000 : 0
+    return since >= DELAY_MIN ? 'delay' : 'progress'
+  }
+  const RANK = { new: 0, delay: 1, progress: 2, done: 3, void: 4 }
   const timeline = [
-    ...filteredSOS.map(r => ({ kind:'sos', at:r.created_at, sos:r })),
-    ...filteredOrders.map(o => ({ kind:'order', at:o.created_at, order:o })),
-  ].sort((a, b) => new Date(b.at) - new Date(a.at))
+    ...filteredSOS.map(r => ({ kind:'sos', at:r.created_at, sos:r, st:cardState(r, true) })),
+    ...filteredOrders.map(o => ({ kind:'order', at:o.created_at, order:o, st:cardState(o, false) })),
+  ].sort((a, b) => filter === 'active'
+    ? (RANK[a.st] - RANK[b.st]) || (new Date(a.at) - new Date(b.at))
+    : new Date(b.at) - new Date(a.at))
   timelineRef.current = timeline.length
 
   const CANCEL_REASONS = [
@@ -563,8 +608,24 @@ ${(order.order_items||[]).map(i => `
     'other'
   ]
 
-  // Whole-row colours. One place to change any of them.
-  const PAINT_BG = { green:'#16A34A', amber:'#D97706', red:'#DC2626' }
+  // Open the pick list for an order or a help request
+  const openPicker = (kind, rec) => setPicker({ kind, rec })
+  async function pickWaiter(w) {
+    const p = picker; setPicker(null)
+    if (!p || !w) return
+    if (p.kind === 'sos') await assignSOSWaiter(p.rec.id, w.id)
+    else await assignWaiter(p.rec.id, w.id)
+  }
+  // A number nobody has yet: added to the event's waiters and assigned in one go
+  async function addAndPick(num) {
+    const n = String(num).trim()
+    if (!n) return
+    const { data, error } = await supabase.from('waiters')
+      .insert({ event_id: eventData.id, name: n, waiter_number: n, is_active: true }).select().single()
+    if (error || !data) { alert('Could not add waiter ' + n + (error?.message ? ': ' + error.message : '')); return }
+    setWaiters(list => [...list, data])
+    await pickWaiter(data)
+  }
 
   return (
     <div>
@@ -593,7 +654,11 @@ ${(order.order_items||[]).map(i => `
               padding:'7px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
             🖨 Auto-print {autoPrint ? 'ON' : 'OFF'}
           </button>
-          <button onClick={enableSound} style={{ background:'#FEF3C7', border:'1px solid #FCD34D', color:'#92400E', borderRadius:10, padding:'7px 12px', fontSize:12, fontWeight:700 }}>🔔 Sound</button>
+          <button onClick={toggleSound} title="Beep when a new order comes in"
+            style={{ background: soundOn ? '#EFF6FF' : '#F3F4F6', border:'1px solid ' + (soundOn ? '#BFDBFE' : '#E5E7EB'),
+              color: soundOn ? '#1D4ED8' : '#6B7280', borderRadius:10, padding:'7px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+            {soundOn ? '🔔 Sound ON' : '🔕 Sound OFF'}
+          </button>
           <button onClick={()=>{ loadOrders(false); loadSOS() }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'7px 14px', fontSize:13, fontWeight:700 }}>Refresh</button>
         </div>
       </div>
@@ -602,15 +667,15 @@ ${(order.order_items||[]).map(i => `
         <div style={{ background:'#fff', borderRadius:14, padding:'12px 16px', marginBottom:14, boxShadow:'var(--shadow)' }}>
           <div style={{ fontSize:12, fontWeight:700, color:'var(--ink2)', marginBottom:8, textTransform:'uppercase' }}>Waiter Status</div>
           <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-            {waiters.map(w => {
+            {[...waiters].sort(byWaiterNo).map(w => {
               const busy = busyWaiterIds.includes(w.id)
-              const assignedOrder = orders.find(o=>o.waiter_id===w.id&&o.status==='in_progress')
+              const sel = waiterFilter === w.id
               return (
-                <div key={w.id} onClick={()=>setWaiterFilter(waiterFilter===w.id?null:w.id)}
-                  style={{ background:waiterFilter===w.id?'#1A0A0A':busy?'#FEF2F2':'#F0FDF4', border:'2px solid', borderColor:waiterFilter===w.id?'#E8890C':busy?'#FECACA':'#BBF7D0', borderRadius:9, padding:'4px 10px', fontSize:12, cursor:'pointer' }}>
-                  <span style={{ fontWeight:800, color:waiterFilter===w.id?'#E8890C':busy?'#DC2626':'#16A34A' }}>{w.name}</span>
-                  {busy&&assignedOrder&&<span style={{ color:'#888', marginLeft:6 }}>→ T{assignedOrder.tables?.table_number}</span>}
-                  <span style={{ marginLeft:6, fontSize:11 }}>{busy?'🔴':'🟢'}</span>
+                <div key={w.id} onClick={()=>setWaiterFilter(sel?null:w.id)} title={w.name}
+                  style={{ background: sel ? '#1E293B' : busy ? '#EFF6FF' : '#F0FDF4', border:'1.5px solid',
+                    borderColor: sel ? '#1E293B' : busy ? '#BFDBFE' : '#BBF7D0', borderRadius:9, padding:'4px 10px', fontSize:12, cursor:'pointer' }}>
+                  <span style={{ fontWeight:800, color: sel ? '#fff' : busy ? '#1D4ED8' : '#15803D' }}>{waiterNo(w)}</span>
+                  {busy && <span style={{ color: sel ? '#CBD5E1' : '#64748B', marginLeft:6 }}>→ {busyOf(w.id)}</span>}
                 </div>
               )
             })}
@@ -647,353 +712,149 @@ ${(order.order_items||[]).map(i => `
             </div>
           )}
 
-          {/* Compact rows. Colour carries the state because that is what gets
-              scanned on a busy screen; the text is for confirming, not finding. */}
-          {/* Split in half rather than flowing across rows, so the first half
-              reads down the left column and the second down the right. Row-major
-              would put the newest top-left and the next top-right, which destroys
-              the chronological read. */}
+          {/* Tiles, 3 to 4 to a row. Calm colours: a white card, and one small band at the
+              top that says what to do. Only two things flash: NEW ORDER (light blue) until a
+              waiter is on it, and DELAY (soft red) when a waiter has had it DELAY_MIN minutes
+              and it is not delivered. On the Active tab new orders come first, then delayed
+              ones, oldest first in each. */}
           <style>{`
-            .ss-kot-cols { display:grid; grid-template-columns:1fr; gap:10px; align-items:start; }
-            @media (min-width: 1100px) { .ss-kot-cols { grid-template-columns:1fr 1fr; } }
-
-            /* A row with no waiter on it flashes red to green until someone is
-               assigned. Hard alternation rather than a fade - a fade spends
-               half its time in a muddy in-between and stops reading as an
-               alarm across a screen holding thirty rows.
-               steps(1,end) gives the clean flip; 1.2s is fast enough to catch
-               the eye from across the KOT station without strobing. */
-            @keyframes ssKotFlash {
-              0%, 49.9%   { background-color:#DC2626; }
-              50%, 100%   { background-color:#16A34A; }
-            }
-            .ss-kot-flash { background-color:#DC2626; animation:ssKotFlash 1.2s steps(1,end) infinite; }
-            /* Some tablets and any supervisor who has switched motion off in
-               the OS get a solid red instead - still unmissable, no movement. */
-            @media (prefers-reduced-motion: reduce) {
-              .ss-kot-flash { animation:none; background-color:#DC2626; }
-            }
+            .kt-grid { display:grid; grid-template-columns:1fr; gap:12px; align-items:start; padding:2px 2px 8px; }
+            @media (min-width: 600px)  { .kt-grid { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+            @media (min-width: 900px)  { .kt-grid { grid-template-columns:repeat(3, minmax(0,1fr)); } }
+            @media (min-width: 1280px) { .kt-grid { grid-template-columns:repeat(4, minmax(0,1fr)); } }
+            .kt { background:#fff; border:1px solid #E5E7EB; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 1px 2px rgba(15,23,42,.05); }
+            .kt.st-new { border-color:#93C5FD; }
+            .kt.st-delay { border-color:#FCA5A5; }
+            .kt.st-done, .kt.st-void { opacity:.78; }
+            .kt-band { font-size:11.5px; font-weight:900; letter-spacing:.08em; padding:5px 10px; text-align:center; text-transform:uppercase; }
+            .kt-band.b-progress { background:#F1F5F9; color:#334155; }
+            .kt-band.b-done { background:#F0FDF4; color:#15803D; }
+            .kt-band.b-void { background:#F3F4F6; color:#6B7280; }
+            @keyframes ktNew { 0%,49.9% { background:#DBEAFE; color:#1E40AF; } 50%,100% { background:#3B82F6; color:#fff; } }
+            @keyframes ktDelay { 0%,49.9% { background:#FEE2E2; color:#B91C1C; } 50%,100% { background:#EF4444; color:#fff; } }
+            .kt-band.b-new { background:#DBEAFE; color:#1E40AF; animation:ktNew 1.2s steps(1,end) infinite; }
+            .kt-band.b-delay { background:#FEE2E2; color:#B91C1C; animation:ktDelay 1.2s steps(1,end) infinite; }
+            @media (prefers-reduced-motion: reduce) { .kt-band.b-new, .kt-band.b-delay { animation:none; } }
+            .kt-body { padding:9px 11px 6px; cursor:pointer; }
+            .kt-head { display:flex; align-items:center; gap:8px; }
+            .kt-t { font-size:22px; font-weight:900; color:#0F172A; border-radius:7px; padding:0 4px; margin-left:-4px; }
+            .kt-t.on { background:#1E293B; color:#fff; }
+            .kt-lbl { font-size:11px; font-weight:800; color:#475569; background:#F1F5F9; border-radius:999px; padding:2px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46%; }
+            .kt-lbl.help { background:#FEF3C7; color:#92400E; }
+            .kt-w { margin-left:auto; min-width:40px; text-align:center; border-radius:8px; padding:1px 8px; font-size:18px; font-weight:900; font-variant-numeric:tabular-nums; border:1.5px solid #0F172A; color:#0F172A; background:#fff; }
+            .kt-w.none { border:1.5px dashed #CBD5E1; color:#94A3B8; font-size:16px; }
+            .kt-meta { font-size:12px; color:#64748B; margin-top:4px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+            .kt-meta .clk { font-weight:800; color:#334155; font-variant-numeric:tabular-nums; }
+            .kt-meta .cap { color:#2563EB; font-weight:700; }
+            .kt-items { list-style:none; margin:7px 0 0; padding:0; font-size:13px; color:#1E293B; }
+            .kt-items li { display:flex; gap:6px; padding:1px 0; }
+            .kt-items li b { min-width:24px; color:#0F172A; }
+            .kt-items li span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+            .kt-items .more { color:#64748B; font-size:12px; }
+            .kt-act { display:flex; gap:6px; padding:6px 11px 10px; margin-top:auto; }
+            .kt-act button { border-radius:9px; padding:8px 10px; font-size:13px; font-weight:800; cursor:pointer; }
+            .kt-assign { flex:1; background:#1E3A8A; color:#fff; border:none; }
+            .kt-deliver { flex:1; background:#fff; color:#15803D; border:1.5px solid #16A34A; }
+            .kt-more { background:#fff; color:#475569; border:1px solid #E2E8F0; min-width:40px; }
+            .kt-detail { border-top:1px solid #F1F5F9; background:#FAFAFA; padding:9px 11px 11px; font-size:13px; }
+            .kt-detail .ln { display:flex; justify-content:space-between; padding:3px 0; border-bottom:1px solid #F0F0F0; }
+            .kt-detail .btns { display:flex; gap:6px; flex-wrap:wrap; margin-top:9px; }
+            .kt-detail .btns button { border-radius:9px; padding:7px 11px; font-size:12.5px; font-weight:800; cursor:pointer; background:#fff; border:1px solid #E2E8F0; color:#334155; }
+            .kt-detail .btns .red { color:#B91C1C; border-color:#FECACA; background:#FEF2F2; }
+            .kt-detail .btns .grn { color:#15803D; border-color:#BBF7D0; background:#F0FDF4; }
+            .wp-bg { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:300; display:flex; align-items:center; justify-content:center; padding:16px; }
+            .wp { background:#fff; border-radius:16px; width:100%; max-width:760px; max-height:88vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+            .wp-h { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:16px 18px 8px; }
+            .wp-h b { font-size:18px; font-weight:900; color:#0F172A; display:block; }
+            .wp-h small { font-size:12.5px; color:#64748B; }
+            .wp-x { background:#F1F5F9; border:none; border-radius:999px; width:36px; height:36px; font-size:16px; cursor:pointer; }
+            .wp-type { display:flex; gap:8px; padding:4px 18px 10px; }
+            .wp-type input { flex:1; min-width:0; border:1.5px solid #CBD5E1; border-radius:10px; padding:10px 12px; font-size:16px; font-weight:700; outline:none; }
+            .wp-type input:focus { border-color:#3B82F6; }
+            .wp-go { background:#1E3A8A; color:#fff; border:none; border-radius:10px; padding:0 14px; font-size:14px; font-weight:800; cursor:pointer; white-space:nowrap; }
+            .wp-go.add { background:#0F766E; }
+            .wp-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(74px, 1fr)); gap:8px; padding:4px 18px 12px; overflow-y:auto; }
+            .wp-w { border:1.5px solid #CBD5E1; background:#fff; border-radius:12px; padding:9px 4px 7px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:1px; }
+            .wp-w b { font-size:22px; font-weight:900; color:#0F172A; font-variant-numeric:tabular-nums; line-height:1.1; }
+            .wp-w small { font-size:10.5px; color:#16A34A; font-weight:700; }
+            .wp-w.busy { background:#F8FAFC; border-color:#E2E8F0; }
+            .wp-w.busy b { color:#64748B; }
+            .wp-w.busy small { color:#2563EB; }
+            .wp-w.cur { border-color:#94A3B8; background:#F1F5F9; }
+            .wp-w.on { border-color:#2563EB; box-shadow:0 0 0 3px #BFDBFE; }
+            .wp-w:hover { border-color:#3B82F6; }
+            .wp-empty { grid-column:1/-1; color:#64748B; font-size:13px; padding:10px 0; }
+            .wp-f { display:flex; gap:8px; justify-content:flex-end; padding:10px 18px 16px; border-top:1px solid #F1F5F9; }
+            .wp-f button { border-radius:10px; padding:10px 16px; font-size:14px; font-weight:800; cursor:pointer; background:#fff; border:1px solid #E2E8F0; color:#334155; }
           `}</style>
-          <div className="ss-kot-cols">
-          {[timeline.slice(0, Math.ceil(timeline.length/2)),
-            timeline.slice(Math.ceil(timeline.length/2))].map((col, ci) => (
-          <div key={ci} style={{ background:'#fff', borderRadius:14, overflow:'hidden',
-            boxShadow:'var(--shadow)', display: col.length ? 'block' : 'none' }}>
-          {col.map(row => {
+          <div className="kt-grid">
+          {timeline.map(row => {
             const isSos  = row.kind === 'sos'
             const rec    = isSos ? row.sos : row.order
             const id     = (isSos ? 'sos-' : 'ord-') + rec.id
             const open   = expandedRow === id
-            const status = isSos
-              ? (rec.status === 'open' ? 'new' : rec.status === 'resolved' ? 'done'
-                 : rec.status === 'cancelled' ? 'void' : 'progress')
-              : (!rec.waiter_id && !['delivered','cancelled'].includes(rec.status) ? 'new'
-                 : rec.status === 'delivered' ? 'done'
-                 : rec.status === 'cancelled' ? 'void' : 'progress')
-
-            const tone = status === 'new'  ? { bg:'#FEF2F2', fg:'#B91C1C', bar:'#DC2626' }
-                       : status === 'done' ? { bg:'#F0FDF4', fg:'#15803D', bar:'#16A34A' }
-                       : status === 'void' ? { bg:'#F3F4F6', fg:'#6B7280', bar:'#9CA3AF' }
-                       : { bg:'#FFF7ED', fg:'#C2410C', bar:'#E8890C' }
-
+            const st     = row.st
             const lines_ = isSos ? (rec.sos_request_items || []) : (rec.order_items || [])
-            const count = isSos ? lines_.length
-              : lines_.reduce((n, li) => n + (li.quantity || 1), 0)
-            const waiterName = rec.waiters?.name || (waiters.find(w => w.id === rec.waiter_id)?.name) || ''
-            // Only ever set on a captain event, so every self-service board
-            // looks exactly as it did before.
+            const count  = isSos ? lines_.length : lines_.reduce((n, li) => n + (li.quantity || 1), 0)
+            const w      = waiters.find(x => x.id === rec.waiter_id)
+            const waiterName = rec.waiters?.name || w?.name || ''
+            const waiterLabel = w ? waiterNo(w) : (waiterName ? waiterNo({ name: waiterName }) : '')
+            // Only ever set on a captain event
             const captainName = rec.captains?.name || ''
-            // waiters.name is stored as "Raju (07)" or just "07". The number is
-            // what gets called across a hall, so that is what the row shows -
-            // the same extraction the printed KOT slip already uses.
-            const wNumMatch = waiterName.match(/\(([^)]+)\)\s*$/)
-            const waiterLabel = waiterName ? (wNumMatch ? wNumMatch[1] : waiterName) : ''
+            const tn = rec.tables?.table_number ?? rec.table_number ?? null
+            const tOn = tn != null && tableFilter === tn
             const timeStr = new Date(rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
-            // ss-eight-waiters-74. Three meant the waiter they wanted was
-            // usually behind More - a tap on nearly every order, while a guest
-            // waited. Eight covers almost every assignment outright, and More
-            // still opens the rest on an event with more staff than that.
-            const chips = showAllWaiters === id ? availableWaiters : availableWaiters.slice(0, 8)
-
-            // Two inline, because a row in a two column grid has no space for
-            // three plus More. The rest live behind the chevron.
-            const inlineChips = availableWaiters.slice(0, 2)
-
-            // From when the order was received, not from assignment - the guest
-            // has been waiting since they ordered, and that is the number that
-            // matters. Frozen once delivered or resolved.
+            // Since the order came in (frozen once finished) - what the guest has waited
             const endTs = rec.delivered_at || rec.resolved_at
-            const elapsedSec = Math.max(0, Math.floor(((endTs ? new Date(endTs).getTime() : nowTs)
-              - new Date(rec.created_at).getTime()) / 1000))
-            const elapsedMin = Math.floor(elapsedSec / 60)
-            const clock = elapsedMin + ':' + String(elapsedSec % 60).padStart(2, '0')
-            const running = !endTs && !['delivered','cancelled','resolved'].includes(rec.status)
-            const timerTone = elapsedMin <= 5 ? { bg:'#DCFCE7', fg:'#15803D' }
-                            : elapsedMin <= 10 ? { bg:'#FEF3C7', fg:'#B45309' }
-                            : { bg:'#FEE2E2', fg:'#B91C1C' }
-
-            /* The whole row carries one colour, because that is the only thing
-               a supervisor can read across thirty rows at a glance.
-
-                 no waiter yet  -> flashing red/green
-                 waiter on it   -> solid green, amber past 5 min, red past 10
-                 finished       -> plain white, out of the way
-
-               The minute thresholds run off the same elapsed clock printed on
-               the row, which counts from when the guest ordered. Assignment
-               time was the alternative and is worse: an order that sat
-               unassigned for eight minutes would turn green the moment a
-               waiter took it, and the row would read "on track" while the
-               guest had already been waiting eight minutes. Counting from the
-               order means such a row hands over already amber, which is true.
-               To switch, change the two elapsedMin below to a value derived
-               from rec.assigned_at. */
-            const paint = status === 'new'      ? 'flash'
-                        : status === 'progress' ? (elapsedMin < 5 ? 'green'
-                                                 : elapsedMin < 10 ? 'amber' : 'red')
-                        : null
-            const painted = paint !== null
-            // Delivered and cancelled rows stay white on purpose. Painting a
-            // delivered row solid green would collide with green meaning
-            // "assigned and on time" on the Active tab.
-            const rowBg = paint && paint !== 'flash' ? PAINT_BG[paint] : '#fff'
-            // Pills sit on top of a colour that changes under them, so they
-            // are translucent white rather than any fixed tint.
-            const onPill = 'rgba(255,255,255,0.22)'
-
+            const elapsedSec = Math.max(0, Math.floor(((endTs ? new Date(endTs).getTime() : nowTs) - new Date(rec.created_at).getTime()) / 1000))
+            const clock = Math.floor(elapsedSec / 60) + ':' + String(elapsedSec % 60).padStart(2, '0')
+            // Since the waiter got it - what DELAY is measured on
+            const withMin = rec.assigned_at ? Math.max(0, Math.floor((nowTs - new Date(rec.assigned_at).getTime()) / 60000)) : 0
+            const band = st === 'new' ? (isSos ? 'New help request' : 'New order')
+                       : st === 'delay' ? 'Delay · ' + withMin + ' min with waiter ' + (waiterLabel || '')
+                       : st === 'progress' ? (waiterLabel ? 'Waiter ' + waiterLabel + ' · ' + withMin + ' min' : 'In progress')
+                       : st === 'done' ? (isSos ? 'Done ✓' : 'Delivered ✓')
+                       : 'Cancelled'
+            const shown = lines_.slice(0, 4)
+            const nameOf = li => isSos ? li.item_name : (li.menu_items?.name || 'Item')
             return (
-              <div key={id} className={paint === 'flash' ? 'ss-kot-flash' : undefined}
-                style={{ borderLeft:'4px solid ' + (painted ? 'rgba(0,0,0,0.22)' : tone.bar),
-                  borderBottom:'1px solid ' + (painted ? 'rgba(255,255,255,0.3)' : 'var(--line)'),
-                  // Left unset while flashing so the keyframes own it.
-                  background: paint === 'flash' ? undefined : rowBg,
-                  transition: paint === 'flash' ? 'none' : 'background-color 0.5s ease' }}>
-
-                <div onClick={() => { setExpandedRow(open ? null : id); setShowAllWaiters(null) }}
-                  style={{ display:'flex', alignItems:'center', gap:9, padding:'6px 12px',
-                    cursor:'pointer', minHeight:36, boxSizing:'border-box' }}>
-                  {/* Filters to this table, the same as tapping a waiter chip.
-                      stopPropagation so filtering does not also expand the row. */}
-                  {(() => {
-                    const tn = rec.tables?.table_number ?? rec.table_number ?? null
-                    const on = tn != null && tableFilter === tn
-                    return (
-                      <span onClick={e => { e.stopPropagation(); if (tn != null) setTableFilter(on ? null : tn) }}
-                        title={tn != null ? 'Show only table ' + tn : ''}
-                        style={{ fontSize:14, fontWeight:800, minWidth:34, cursor:'pointer',
-                          borderRadius:6, padding:'2px 5px', flexShrink:0,
-                          background: on ? '#1A0A0A' : 'transparent',
-                          color: on ? '#E8890C' : (painted ? '#FFFFFF' : 'inherit') }}>T{tn ?? '?'}</span>
-                    )
-                  })()}
-                  {/* Waiter number, ahead of the clock and in a white box so it
-                      survives every row colour including the flashing ones. The
-                      slot is always drawn so the column lines up down the board;
-                      an empty dashed box is itself the signal that this order
-                      still has nobody on it. */}
-                  <span title={waiterName ? 'Waiter ' + waiterName : 'No waiter assigned yet'}
-                    style={{ flexShrink:0, minWidth:36, textAlign:'center',
-                      borderRadius:6, padding:'2px 7px', boxSizing:'border-box',
-                      fontSize:14, fontWeight:900, lineHeight:1.15,
-                      fontVariantNumeric:'tabular-nums',
-                      background: waiterLabel ? '#FFFFFF' : 'transparent',
-                      color: waiterLabel ? '#0A0A0A'
-                        : (painted ? 'rgba(255,255,255,0.7)' : '#BBBBBB'),
-                      border: waiterLabel ? '1.5px solid #0A0A0A'
-                        : '1.5px dashed ' + (painted ? 'rgba(255,255,255,0.55)' : '#DDDDDD') }}>
-                    {waiterLabel || '\u2013'}
-                  </span>
-                  <span style={{ fontSize:12, minWidth:42,
-                    color: painted ? 'rgba(255,255,255,0.9)' : 'var(--ink2)' }}>{timeStr}</span>
-                  <span style={{ fontSize:11, fontWeight:800, padding:'3px 9px', borderRadius:999,
-                    background: painted ? onPill : tone.bg,
-                    color: painted ? '#FFFFFF' : tone.fg,
-                    minWidth:58, textAlign:'center', flexShrink:0 }}>
-                    {isSos ? 'HELP' : count + (count === 1 ? ' item' : ' items')}
-                  </span>
-                  {/* Who took the order. On a captain event this is the only
-                      way back from a wrong dish to the person who wrote it down,
-                      which is the whole reason captains are named. */}
-                  {captainName && (
-                    <span title={'Taken by captain ' + captainName}
-                      style={{ flexShrink:0, fontSize:10, fontWeight:800, padding:'2px 7px',
-                        borderRadius:999, maxWidth:74, overflow:'hidden',
-                        textOverflow:'ellipsis', whiteSpace:'nowrap',
-                        background: painted ? onPill : '#EFF6FF',
-                        color: painted ? '#FFFFFF' : '#2563EB' }}>
-                      🧑 {captainName}
-                    </span>
-                  )}
-                  {/* Dish names are deliberately NOT on the collapsed row. What
-                      gets scanned here is table, time, count, timer and who is on
-                      it. The names are listed in full with quantities once the row
-                      is open. This space is left free so the timer and the action
-                      buttons are not crushed against a wall of text. */}
-                  <span style={{ flex:1, minWidth:0 }} />
-                  <span style={{ flexShrink:0,
-                    background: painted ? onPill : timerTone.bg,
-                    color: painted ? '#FFFFFF' : timerTone.fg,
-                    borderRadius:999, padding:'2px 9px', fontSize:11, fontWeight:800,
-                    fontVariantNumeric:'tabular-nums', minWidth:46, textAlign:'center' }}>
-                    {clock}{running ? '' : ' \u2713'}
-                  </span>
-                  {/* Inline actions. Unassigned shows chips, assigned shows the
-                      waiter and Deliver - so which rows still need a waiter is
-                      obvious without opening anything.
-                      On a painted row every button goes white-on-colour: a green
-                      button on a row that is itself flashing green disappears
-                      for half of every second. */}
-                  <span onClick={e => e.stopPropagation()}
-                    style={{ display:'flex', alignItems:'center', gap:5, flexShrink:0 }}>
-                    {status === 'new' ? (
-                      <>
-                        {inlineChips.map((w, wi) => (
-                          <button key={w.id}
-                            onClick={() => isSos ? assignSOSWaiter(rec.id, w.id) : assignWaiter(rec.id, w.id)}
-                            title={'Assign ' + w.name}
-                            style={{ background: wi === 0 ? '#FFFFFF' : 'rgba(255,255,255,0.82)',
-                              color: wi === 0 ? '#15803D' : '#1A0A0A',
-                              border:'none', borderRadius:8, padding:'5px 10px', fontSize:12,
-                              fontWeight:800, cursor:'pointer' }}>{w.waiter_number || w.name}</button>
-                        ))}
-                        <button onClick={() => setExpandedRow(open ? null : id)}
-                          title="More waiters"
-                          style={{ background:'rgba(255,255,255,0.18)',
-                            border:'1px solid rgba(255,255,255,0.55)',
-                            borderRadius:8, padding:'5px 8px', fontSize:12, fontWeight:700,
-                            color:'#FFFFFF', cursor:'pointer' }}>⋯</button>
-                      </>
-                    ) : status === 'progress' ? (
-                      <>
-                        {/* waiter-number-leads-row: the number is up front with
-                            the table now, so repeating the name here only
-                            crowded the Deliver button. */}
-                        <button onClick={() => isSos ? resolveSOSRequest(rec.id) : markDelivered(rec)}
-                          style={{ background: painted ? '#FFFFFF' : '#16A34A',
-                            color: painted ? '#15803D' : '#fff',
-                            border:'none', borderRadius:8,
-                            padding:'5px 12px', fontSize:12, fontWeight:800, cursor:'pointer' }}>
-                          ✓ {isSos ? 'Done' : 'Deliver'}
-                        </button>
-                      </>
-                    ) : (
-                      /* Delivered and cancelled rows: the waiter number is up
-                         front with the table, so nothing goes at the end of the row. */
-                      null
-                    )}
-                  </span>
-                  <span style={{ fontSize:11, transform:'rotate('+(open?180:0)+'deg)',
-                    color: painted ? 'rgba(255,255,255,0.85)' : '#999',
-                    transition:'transform 0.15s', flexShrink:0 }}>▼</span>
+              <div key={id} className={'kt st-' + st} data-card={id}>
+                <div className={'kt-band b-' + st}>{band}</div>
+                <div className="kt-body" onClick={() => setExpandedRow(open ? null : id)}>
+                  <div className="kt-head">
+                    <span className={'kt-t' + (tOn ? ' on' : '')} title={tn != null ? 'Show only table ' + tn : ''}
+                      onClick={e => { e.stopPropagation(); if (tn != null) setTableFilter(tOn ? null : tn) }}>T{tn ?? '?'}</span>
+                    <span className={'kt-lbl' + (isSos ? ' help' : '')}>{isSos ? '🔔 Help' : count + (count === 1 ? ' item' : ' items')}</span>
+                    <span className={'kt-w' + (waiterLabel ? '' : ' none')} title={waiterName ? 'Waiter ' + waiterName : 'No waiter yet'}>{waiterLabel || '–'}</span>
+                  </div>
+                  <div className="kt-meta">
+                    <span>{timeStr}</span><span className="clk">⏱ {clock}{endTs ? ' ✓' : ''}</span>
+                    {captainName && <span className="cap">🧑 {captainName}</span>}
+                  </div>
+                  <ul className="kt-items">
+                    {shown.map((li, k) => <li key={k}><b>{li.quantity || 1}×</b><span>{nameOf(li)}</span></li>)}
+                    {lines_.length > shown.length && <li className="more">+ {lines_.length - shown.length} more</li>}
+                  </ul>
                 </div>
-
-                {/* The detail panel stays light with dark text. It is read, not
-                    scanned, and dish names on a flashing background are unusable. */}
+                <div className="kt-act">
+                  {st === 'new' && <button className="kt-assign" disabled={assigning === (isSos ? 'sos-' : '') + rec.id} onClick={() => openPicker(isSos ? 'sos' : 'order', rec)}>Assign waiter</button>}
+                  {(st === 'progress' || st === 'delay') && (
+                    <button className="kt-deliver" onClick={() => isSos ? resolveSOSRequest(rec.id) : markDelivered(rec)}>✓ {isSos ? 'Done' : 'Delivered'}</button>
+                  )}
+                  <button className="kt-more" onClick={() => setExpandedRow(open ? null : id)} title="Details, print, cancel">{open ? '▲' : '⋯'}</button>
+                </div>
                 {open && (
-                  <div style={{ padding:'0 12px 12px', background:'#FAFAFA' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, margin:'2px 0 8px' }}>
-                      <span style={{ background:timerTone.bg, color:timerTone.fg, borderRadius:999,
-                        padding:'3px 11px', fontSize:12, fontWeight:800 }}>
-                        ⏱ {clock}{running ? '' : ' final'}
-                      </span>
-                      <span style={{ fontSize:11, color:'var(--ink2)' }}>since order received</span>
-                    </div>
-
-                    {/* ss-kot-waiter-first-74. Assigning a waiter is the only
-                        thing this panel is opened to DO. It was below the dish
-                        list, which meant scrolling past the order to reach the
-                        buttons on every single assignment.
-
-                        Eight waiters are offered now rather than three. The
-                        right one was usually behind More, which made it a tap
-                        on nearly every order. More is still there for an event
-                        with more staff than that. */}
-                    {status === 'new' ? (
-                      <div style={{ marginBottom:10 }}>
-                        <div style={{ fontSize:12, color:'var(--ink2)', marginBottom:6, fontWeight:600 }}>
-                          Assign waiter{availableWaiters.length ? ' \u00B7 ' + availableWaiters[0].name + ' suggested' : ''}
-                        </div>
-                        <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
-                          {chips.map((w, idx) => (
-                            <button key={w.id}
-                              onClick={() => isSos ? assignSOSWaiter(rec.id, w.id) : assignWaiter(rec.id, w.id)}
-                              disabled={assigning === (isSos ? 'sos-' : '') + rec.id}
-                              style={{ background: idx===0 && showAllWaiters!==id ? '#16A34A' : '#1A0A0A',
-                                color:'#fff', border:'none', borderRadius:10, padding:'9px 16px',
-                                fontSize:13, fontWeight:800, cursor:'pointer' }}>
-                              {w.waiter_number || w.name}
-                            </button>
-                          ))}
-                          {availableWaiters.length > 8 && (
-                            <button onClick={e => { e.stopPropagation(); setShowAllWaiters(showAllWaiters===id ? null : id) }}
-                              style={{ background:'var(--bg)', border:'1px solid var(--line)',
-                                borderRadius:10, padding:'9px 14px', fontSize:13, fontWeight:700,
-                                color:'var(--ink2)', cursor:'pointer' }}>
-                              {showAllWaiters===id ? 'Less' : 'More'}
-                            </button>
-                          )}
-                          {!isSos && (
-                            <button onClick={() => assignWaiter(rec.id, null)}
-                              style={{ background:'var(--bg)', border:'1px solid var(--line)',
-                                borderRadius:10, padding:'9px 14px', fontSize:13, fontWeight:700,
-                                color:'var(--ink2)', cursor:'pointer' }}>No Waiter</button>
-                          )}
-                        </div>
-                      </div>
-                    ) : waiterName ? (
-                      <div style={{ fontSize:12, color:'var(--ink2)', marginBottom:10, fontWeight:600 }}>
-                        Waiter {waiterName} assigned
-                      </div>
-                    ) : null}
-
-                    {captainName && (
-                      <div style={{ fontSize:12, color:'#2563EB', fontWeight:700, marginBottom:8 }}>
-                        Order taken by captain {captainName}
-                      </div>
-                    )}
-                    <div style={{ marginBottom:10 }}>
-                      {lines_.map((li, i) => (
-                        <div key={i} style={{ display:'flex', justifyContent:'space-between',
-                          fontSize:13, padding:'3px 0', borderBottom:'1px solid #F0F0F0' }}>
-                          <span style={{ fontWeight:600 }}>{isSos ? li.item_name : li.menu_items?.name}</span>
-                          <span style={{ color:'#888' }}>x{li.quantity}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* ss-kot-waiter-moved-74 - now above the order, where it
-                        is the first thing the panel offers. */}
-
-                    <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                      <button onClick={() => isSos ? printHelpKOT(rec) : printKOT(rec)}
-                        style={{ background:'var(--bg)', border:'1px solid var(--line)', borderRadius:10,
-                          padding:'9px 16px', fontSize:13, fontWeight:700, color:'var(--ink2)',
-                          cursor:'pointer' }}>
-                        🖨 {isSos ? 'Print Help Slip' : 'Print KOT'}
-                      </button>
-
+                  <div className="kt-detail">
+                    {captainName && <div style={{ color:'#2563EB', fontWeight:700, marginBottom:6 }}>Order taken by captain {captainName}</div>}
+                    {waiterName && <div style={{ color:'#475569', fontWeight:700, marginBottom:6 }}>Waiter {waiterName}</div>}
+                    {lines_.map((li, k) => (
+                      <div className="ln" key={k}><span style={{ fontWeight:600 }}>{nameOf(li)}</span><span style={{ color:'#64748B' }}>x{li.quantity || 1}</span></div>
+                    ))}
+                    <div className="btns">
+                      <button onClick={() => isSos ? printHelpKOT(rec) : printKOT(rec)}>🖨 {isSos ? 'Print help slip' : 'Print KOT'}</button>
+                      {(st === 'progress' || st === 'delay') && <button onClick={() => openPicker(isSos ? 'sos' : 'order', rec)}>Change waiter</button>}
                       {!['delivered','cancelled','resolved'].includes(rec.status) && (
-                        <>
-                          {isSos ? (
-                            rec.status !== 'open' && (
-                              <button onClick={() => resolveSOSRequest(rec.id)}
-                                style={{ flex:1, minWidth:140, background:'#16A34A', color:'#fff',
-                                  border:'none', borderRadius:10, padding:'9px 16px', fontSize:13,
-                                  fontWeight:800, cursor:'pointer' }}>✓ Mark Resolved</button>
-                            )
-                          ) : (
-                            rec.waiter_id && (
-                              <button onClick={() => markDelivered(rec)}
-                                style={{ flex:1, minWidth:140, background:'#16A34A', color:'#fff',
-                                  border:'none', borderRadius:10, padding:'9px 16px', fontSize:13,
-                                  fontWeight:800, cursor:'pointer' }}>✓ Mark Delivered</button>
-                            )
-                          )}
-                          <button onClick={() => isSos ? cancelSOSRequest(rec.id) : setShowCancelDialog(rec.id)}
-                            style={{ background:'#FEF2F2', border:'1px solid #FECACA', color:'#B91C1C',
-                              borderRadius:10, padding:'9px 16px', fontSize:13, fontWeight:800,
-                              cursor:'pointer' }}>✕ Cancel</button>
-                        </>
+                        <button className="red" onClick={() => isSos ? cancelSOSRequest(rec.id) : setShowCancelDialog(rec.id)}>✕ Cancel</button>
                       )}
                     </div>
                   </div>
@@ -1002,12 +863,20 @@ ${(order.order_items||[]).map(i => `
             )
           })}
           </div>
-          ))}
-          </div>
         </>
       )}
       </div>
       {/* end scrolling list */}
+
+      {picker && (
+        <WaiterPicker waiters={waiters} busyOf={busyOf} current={picker.rec.waiter_id}
+          title={'Assign waiter · Table ' + (picker.rec.tables?.table_number ?? picker.rec.table_number ?? '?')}
+          sub={picker.kind === 'sos' ? 'Help request' : (picker.rec.order_items || []).reduce((n, li) => n + (li.quantity || 1), 0) + ' items · ' + new Date(picker.rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
+          allowNone={picker.kind === 'order' && !picker.rec.waiter_id}
+          onPick={pickWaiter} onAdd={addAndPick}
+          onNone={() => { const r = picker.rec; setPicker(null); assignWaiter(r.id, null) }}
+          onClose={() => setPicker(null)} />
+      )}
 
       {/* Cancel reason dialog */}
       {showCancelDialog && (
