@@ -118,6 +118,11 @@ export async function chooseEvents(listUpcoming, cfg, { optional = false } = {})
 
 // ---------------------------------------------------------------- rows
 
+// Tables that belong to one server only and are never copied to the laptop:
+// which laptop prints for an event (print_stations), and where the event's
+// laptop is (local_servers, the cloud's list for the tablets).
+const SERVER_ONLY = new Set(['print_stations', 'local_servers'])
+
 // Which rows of which table belong to the chosen events. Tables that do not
 // exist in the cloud are skipped; any other table with an event_id is copied
 // by event; everything else is listed in the report as "not copied".
@@ -147,7 +152,7 @@ function copyPlan(tables) {
     done.add(t)
   }
   for (const t of tables.keys()) {
-    if (!done.has(t) && has(t, 'event_id')) { copy.push({ table: t, where: EV }); done.add(t) }
+    if (!done.has(t) && has(t, 'event_id') && !SERVER_ONLY.has(t)) { copy.push({ table: t, where: EV }); done.add(t) }
   }
   return { copy, notCopied: [...tables.keys()].filter((t) => !done.has(t)) }
 }
@@ -218,6 +223,7 @@ export async function downloadEventDataApi(api, eventIds, localTables) {
   // Any newer table that belongs to an event
   for (const [t, cols] of localTables) {
     if (copy.some((p) => p.table === t) || notCopied.some((x) => x.startsWith(t + ' '))) continue
+    if (SERVER_ONLY.has(t)) { notCopied.push(`${t} (belongs to one server only)`); continue }
     if (cols.some((c) => c.name === 'event_id')) await read(t, () => api.all(t, `event_id=in.(${ids})`))
     else notCopied.push(t)
   }

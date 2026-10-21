@@ -44,7 +44,16 @@ export class CloudReader {
     const seen = new Set()
     let last = null
     for (;;) {
-      const page = await this.get(`${table}?select=*${filter ? '&' + filter : ''}${last != null ? `&id=gt.${last}` : ''}&order=id.asc&limit=${PAGE}`)
+      let page
+      try {
+        page = await this.get(`${table}?select=*${filter ? '&' + filter : ''}${last != null ? `&id=gt.${last}` : ''}&order=id.asc&limit=${PAGE}`)
+      } catch (e) {
+        // A table without an id column (one row per event, e.g. print_stations): read it in one go.
+        if (last == null && e.status === 400 && e.body?.code === '42703' && /\bid\b/.test(e.body?.message || '')) {
+          return await this.get(`${table}?select=*${filter ? '&' + filter : ''}&limit=${PAGE}`)
+        }
+        throw e
+      }
       if (!page.length) return rows
       for (const r of page) if (!seen.has(r.id)) { seen.add(r.id); rows.push(r) }
       const next = page[page.length - 1].id
