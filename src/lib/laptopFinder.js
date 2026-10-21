@@ -71,7 +71,7 @@ export async function publishedLaptops({ eventId = null } = {}) {
 /** From a laptop page: ask the cloud directly (its address is built into the
     app) where the laptop of these events is now. Works whenever the venue has
     any internet; [] otherwise. */
-export async function cloudLaptopsFor(eventIds) {
+export async function cloudLaptopsFor(eventIds, { timeoutMs = 6000 } = {}) {
   const url = import.meta.env && import.meta.env.VITE_SUPABASE_URL
   const key = import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY
   if (!url || !key || !eventIds || !eventIds.length) return []
@@ -80,7 +80,7 @@ export async function cloudLaptopsFor(eventIds) {
       method: 'POST',
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
       body: JSON.stringify({ p_dates: serviceDates() }),
-      signal: timeoutSignal(6000),
+      signal: timeoutSignal(timeoutMs),
     })
     if (!res.ok) return []
     return groupByBase(await res.json(), eventIds)
@@ -174,4 +174,17 @@ export async function searchWifi({ nets, port = DEFAULT_LAPTOP_PORT, wantEvents 
     if (secure && tried > 0 && fastFails === tried) return { found, blocked: true, nets: searched }
   }
   return { found, blocked: false, nets: searched }
+}
+
+/** Start-up on the cloud page of a tablet set to a laptop: where is the laptop
+    of this device's event now, as the cloud knows it? Quick (it holds up the
+    start): the address, or null with no internet, no event on this device,
+    or nothing announced. The saved address when it is still the live one. */
+export async function movedLaptopBase(savedBase, timeoutMs = 1500) {
+  const eventId = deviceEventId()
+  if (!eventId) return null
+  try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return null } catch { /* unknown */ }
+  const found = await cloudLaptopsFor([eventId], { timeoutMs })
+  if (!found.length || found.some(l => l.base === savedBase)) return null
+  return found[0].base
 }

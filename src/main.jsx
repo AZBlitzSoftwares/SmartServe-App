@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import LaptopServerAsk from './components/guest/LaptopServerAsk.jsx'
-import { startupServerCheck, isLaptopOrigin } from './lib/serverSwitch'
+import { startupServerCheck, isLaptopOrigin, goToSavedLaptop, getSavedLaptop } from './lib/serverSwitch'
+import { movedLaptopBase } from './lib/laptopFinder'
 import { keepLaptopInApp } from './lib/medianLinks'
 import { startLaptopWatch } from './lib/laptopWatch'
 
@@ -41,7 +42,14 @@ if (keepLaptopInApp()) window.__ssLinkRulesAt = Date.now()
 // (the APK always opens the cloud address). See src/lib/serverSwitch.js.
 const server = startupServerCheck()
 
-if (server !== 'redirect') {
+// Going to the saved laptop: first a quick question to the cloud, in case the
+// laptop of this event has a new address (no internet: straight on, at most
+// 1.5 s later).
+if (server === 'go') {
+  movedLaptopBase(getSavedLaptop()?.base).catch(() => null).then(moved => goToSavedLaptop(moved))
+}
+
+if (server !== 'redirect' && server !== 'go') {
   const root = createRoot(document.getElementById('root'))
   const renderApp = () => root.render(
     <StrictMode>

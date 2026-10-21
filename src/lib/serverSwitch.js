@@ -228,6 +228,8 @@ export function moveToLaptop(base) {
 /* Run once in main.jsx, before React renders.
      'render'   carry on and draw the app here
      'redirect' we are leaving for the laptop: draw nothing
+     'go'       set to a laptop: main.jsx checks the cloud for a new address,
+                then calls goToSavedLaptop - draw nothing
      'ask'      we sent this device to the laptop a moment ago and it is
                 back here - show the choice instead of redirecting again  */
 export function startupServerCheck() {
@@ -283,8 +285,29 @@ export function startupServerCheck() {
   const sentAt = Number(read(SENT_KEY)) || 0
   if (sentAt && Date.now() - sentAt < RESEND_PAUSE_MS) return 'ask'
 
-  goToLaptop(saved.base)
-  return 'redirect'
+  // main.jsx asks the cloud first whether this event's laptop has a new
+  // address (goToSavedLaptop), then leaves: draw nothing meanwhile.
+  return 'go'
+}
+
+/* Leaving for the saved laptop at start-up. With any internet the cloud may
+   know that this event's laptop now has another address (another router, a
+   new address from the same router): go there instead of into an error page
+   at the old one. `moved` = that address, or null (no internet, nothing
+   known, the same address). Only to a private address, and only for a device
+   already set to a laptop, as with ?ss_server=laptop:. */
+export function goToSavedLaptop(moved = null) {
+  const saved = getSavedLaptop()
+  if (!saved) return false
+  const base = normaliseBase(moved)
+  if (base && base !== saved.base && isLocalBase(base)) {
+    write(KEY, JSON.stringify({ mode: 'laptop', base }))
+    write(LAST_KEY, base)
+    goToLaptop(base)
+  } else {
+    goToLaptop(saved.base)
+  }
+  return true
 }
 
 /** "Open laptop server" on the ask screen. */
