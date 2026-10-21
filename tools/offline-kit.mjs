@@ -30,6 +30,8 @@ const { loadEnv } = await import('vite')
 const ENV = loadEnv('production', ROOT, 'VITE_')
 const CLOUD_URL = ENV.VITE_SUPABASE_URL || ''
 const ANON_KEY = ENV.VITE_SUPABASE_ANON_KEY || ''
+// Where "6 Open Desk" opens the cloud desk (the app's own address, as serverSwitch.js has it).
+const APP_URL = ENV.VITE_CLOUD_BASE || 'https://smart-serve-app.vercel.app'
 
 // ---------------------------------------------------------------- zip (no packages)
 const CRC = (() => {
@@ -104,6 +106,7 @@ const LAUNCHERS = [
   ['3 Start Local Server', 'Start Local Server'],
   ['4 Start Print Hub', 'Start Print Hub (Local)'],
   ['5 Upload to Cloud', 'Upload to Cloud'],
+  ['6 Open Desk', 'Open Desk'],
 ]
 function launcher(src, ext) {
   let s = read('localmode', `${src}.${ext}`).toString('utf8')
@@ -155,9 +158,10 @@ AT THE VENUE
  4. "2 Refresh Event Data" (only if there is some internet): brings the
     orders taken so far and any last changes.
  5. "3 Start Local Server". Keep the window open. It shows this laptop's
-    address, for example http://192.168.1.10:8080
- 6. "4 Start Print Hub" (close the normal Print Hub first). Every printer
-    should show ONLINE.
+    address, for example http://192.168.1.10:8080, and opens the Control
+    Desk on this laptop in its own Chrome window (see PRINTING below).
+ 6. Network kitchen printers only: "4 Start Print Hub" (close the normal
+    Print Hub first). Every printer should show ONLINE.
  7. Move every device to the laptop, all at once:
     - Tablets with some internet show "Laptop server is on" on the sign-in
       and set-up screens (this laptop tells the cloud its address): tap
@@ -166,7 +170,8 @@ AT THE VENUE
       the server" screen), supervisor PIN, "Use laptop server". The address
       is filled in when known; else type it, or tap "Search this Wi-Fi".
     - Kitchen screens: menu (three lines) > "Use laptop server".
-    - Control Desk: Control tab > Offline kit > "Use laptop server".
+    - Control Desk on another device: Control tab > Offline kit > "Use laptop
+      server". On this laptop it is already open (step 5).
     - Or type the address in the browser: /kitchen for kitchen screens,
       /supervisor for the desk, /waiter for waiter phones.
     Switched devices keep their sign-in and table; a typed address signs in
@@ -177,6 +182,26 @@ AT THE VENUE
 AFTER THE EVENT (with internet)
  8. Close the Local Server and Print Hub windows${mac ? ' (Ctrl+C)' : ''}, then
     "5 Upload to Cloud". Wait for "Everything on this laptop is now in the cloud."
+
+PRINTING
+ - USB printer on this laptop (guest and captain events): make the KOT
+   printer this laptop's DEFAULT printer:
+${mac
+    ? `     System Settings > Printers & Scanners > Default printer
+     (choose the printer, not "Last Printer Used").`
+    : `     Settings > Printers & scanners > untick "Let Windows manage my
+     default printer" > click the printer > Set as default.`}
+   Then use the desk in the window that "3 Start Local Server" or
+   "6 Open Desk" opens. With Auto-print ON the KOT prints by itself as soon
+   as a waiter is assigned, with no print dialog. In any other browser
+   window the print dialog comes back.
+ - "6 Open Desk" without the Local Server opens the cloud desk the same way:
+   use it on normal days too. Closed the desk window? "6 Open Desk" again.
+ - That window prints to ONE printer (the default). A second counter with
+   its own printer needs its own laptop and desk window, or network
+   printers with "4 Start Print Hub".
+ - Network printers for several kitchens (Maestro, multi-kitchen): the
+   Print Hub, not the desk window.
 
 GOOD TO KNOW
  - Make menu, kitchen, printer and staff changes in the cloud BEFORE
@@ -208,7 +233,7 @@ function kitEntries(os) {
   const lmFiles = ['ss-local.mjs', 'package.json', 'package-lock.json', 'README.md', 'config.example.json', 'dev/standin-schema.sql',
     ...fs.readdirSync(path.join(lm, 'lib')).filter((f) => f.endsWith('.mjs')).sort().map((f) => `lib/${f}`)]
   for (const f of lmFiles) add(`files/localmode/${f}`, fs.readFileSync(path.join(lm, f)))
-  add('files/localmode/config.json', JSON.stringify({ cloud: { url: CLOUD_URL, anonKey: ANON_KEY }, port: 8080, events: [] }, null, 2) + '\n')
+  add('files/localmode/config.json', JSON.stringify({ cloud: { url: CLOUD_URL, anonKey: ANON_KEY }, appUrl: APP_URL, port: 8080, openDesk: true, events: [] }, null, 2) + '\n')
   // the Print Hub (no packages needed) and its Virtual Printers for a test without printers
   const ph = path.join(ROOT, 'printhub')
   const phFiles = fs.readdirSync(ph).filter((f) => /\.(mjs|html)$/.test(f) || f === 'README.md' || f === 'config.example.json').sort()

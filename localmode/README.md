@@ -18,6 +18,7 @@ Use the launchers in this folder (double-click). Mac: the `.command` files. Wind
 | **Start Local Server** | Plan B: runs the event from the laptop. Keep the window open |
 | **Start Print Hub (Local)** | Plan B: the Print Hub, printing from the laptop |
 | **Upload to Cloud** | After the event, with internet |
+| **Open Desk** | The Control Desk in its own Chrome window that prints KOTs without the print dialog (see "Printing from the desk") |
 
 ---
 
@@ -35,6 +36,7 @@ cloud's address and its public key. Unzip it and follow `READ ME FIRST.txt`:
 | **3 Start Local Server** | Plan B: runs the event from the laptop. Keep the window open |
 | **4 Start Print Hub** | Plan B: prints the KOTs from the laptop |
 | **5 Upload to Cloud** | After the event, with internet |
+| **6 Open Desk** | The Control Desk in its own Chrome window: KOTs print by themselves on the laptop's default printer, no print dialog. The laptop's desk while the Local Server runs (Start Local Server opens it by itself), otherwise the cloud desk |
 
 - One laptop can carry several events of the same day (type `1,2` in Prepare Event). Events at
   different venues: one laptop per venue. Never two laptops for the same event.
@@ -321,3 +323,25 @@ node ss-local.mjs demo [--remove]                four demo events dated today (l
 - `--force` on prepare discards local changes that could not be uploaded. Use only when sure.
 - Crash recovery: on start, a leftover Postgres from an earlier run is stopped cleanly, a stale lock
   file is removed, a leftover PostgREST is killed.
+
+---
+
+## Printing from the desk (USB printer on the laptop)
+
+Guest and captain events print the KOT from the Control Desk as soon as a waiter is assigned
+(Auto-print ON). A normal browser asks with its print dialog every time. **Open Desk** (kit: **6 Open
+Desk**) starts Chrome - or Edge if there is no Chrome - with its own profile and `--kiosk-printing`,
+so every slip goes straight to the laptop's **default printer**:
+
+- Make the KOT printer the default printer (Mac: System Settings > Printers & Scanners > Default
+  printer, not "Last Printer Used"; Windows: untick "Let Windows manage my default printer", then
+  the printer > Set as default).
+- **Start Local Server** opens it by itself once (`http://localhost:8080/supervisor`, so it never
+  depends on the laptop's network address). `"openDesk": false` in config.json switches that off.
+- Without the Local Server, Open Desk opens the cloud desk (`appUrl` in config.json) the same way.
+- The profile lives outside the kit (Mac: ~/Library/Application Support/SmartServe/Desk Browser,
+  Windows: %LOCALAPPDATA%\SmartServe\Desk Browser): the desk sign-in survives a new kit, and the
+  normal Chrome is never touched. Sign in once in that window.
+- One window prints to one printer. A second printer needs a second laptop and desk, or network
+  printers with the Print Hub.
+- Another browser: `SS_DESK_BROWSER=/path/to/browser` or `"deskBrowser"` in config.json.

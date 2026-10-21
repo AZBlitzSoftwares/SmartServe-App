@@ -36,8 +36,8 @@ export const DB_NAME = 'smartserve'
 // launchers sit at the top of the kit with numbers in their names.
 export const IS_KIT = !fs.existsSync(path.join(REPO, 'src'))
 export const LAUNCHER = IS_KIT
-  ? { prepare: '1 Prepare Event', refresh: '2 Refresh Event Data', start: '3 Start Local Server', printhub: '4 Start Print Hub', upload: '5 Upload to Cloud' }
-  : { prepare: 'Prepare Event', refresh: 'Refresh Event Data', start: 'Start Local Server', printhub: 'Start Print Hub (Local)', upload: 'Upload to Cloud' }
+  ? { prepare: '1 Prepare Event', refresh: '2 Refresh Event Data', start: '3 Start Local Server', printhub: '4 Start Print Hub', upload: '5 Upload to Cloud', desk: '6 Open Desk' }
+  : { prepare: 'Prepare Event', refresh: 'Refresh Event Data', start: 'Start Local Server', printhub: 'Start Print Hub (Local)', upload: 'Upload to Cloud', desk: 'Open Desk' }
 export const IS_WIN = process.platform === 'win32'
 export const IS_MAC = process.platform === 'darwin'
 

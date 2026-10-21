@@ -15,7 +15,8 @@ const dl = { display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, p
 const STEPS = [
   ['Once on the laptop', 'Install Node.js (LTS) from nodejs.org, then unzip the kit (Windows: right-click > Extract All).'],
   ['The day before, with internet', 'Double-click "1 Prepare Event" and type the number of the event (several events of one day: 1,2). The first time it also downloads its own parts (about 150 MB).'],
-  ['At the venue, if the internet is bad', '"2 Refresh Event Data" (if there is any internet), then "3 Start Local Server" and "4 Start Print Hub". Move every device to the laptop together and stay there until the end.'],
+  ['At the venue, if the internet is bad', '"2 Refresh Event Data" (if there is any internet), then "3 Start Local Server" (it also opens the desk on the laptop) and, for network kitchen printers, "4 Start Print Hub". Move every device to the laptop together and stay there until the end.'],
+  ['Printing to a USB printer', 'Make the KOT printer the laptop\'s default printer. The desk window that "3 Start Local Server" or "6 Open Desk" opens prints each KOT by itself as soon as a waiter is assigned, without the print dialog. "6 Open Desk" without the Local Server opens the cloud desk the same way, for normal days.'],
   ['Moving the devices', 'Tablets with some internet show "Laptop server is on" on the sign-in and set-up screens: Use laptop server + supervisor PIN. Otherwise Device > supervisor PIN > Use laptop server (the address is filled in, or Search this Wi-Fi). Kitchen screens: menu > Use laptop server. This desk: the switch below. Sign-ins and tables are kept; devices follow the laptop if its address changes; KOT numbers jump by 100.'],
   ['After the event, with internet', '"5 Upload to Cloud" sends every order, KOT and dish taken on the laptop to the cloud.'],
 ]

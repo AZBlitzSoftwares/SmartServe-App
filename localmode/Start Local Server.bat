@@ -23,6 +23,8 @@ if "%CODE%"=="0" goto done
 if "%CODE%"=="2" goto done
 echo.
 echo The local server stopped unexpectedly (code %CODE%). Restarting in 5 seconds...
+rem The desk window opened on the first start stays open: do not open another.
+set SS_LOCAL_NO_DESK=1
 timeout /t 5 /nobreak >nul
 goto run
 

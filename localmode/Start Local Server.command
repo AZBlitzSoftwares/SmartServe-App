@@ -34,6 +34,8 @@ while true; do
   fi
   echo
   echo "The local server stopped unexpectedly (code $code). Restarting in 5 seconds... (Ctrl+C to cancel)"
+  # The desk window opened on the first start stays open: do not open another.
+  export SS_LOCAL_NO_DESK=1
   sleep 5 || break
 done
 

@@ -7,6 +7,7 @@
 //   node ss-local.mjs upload [--all]               send what the laptop recorded to the cloud
 //   node ss-local.mjs status                       what is prepared, is the server running
 //   node ss-local.mjs printhub [options]           Print Hub against the local server
+//   node ss-local.mjs desk [--cloud|--local]       the Control Desk in its own Chrome window, KOTs print without a dialog
 //
 // Testing before anything goes to the cloud (TEST MODE - never writes to the cloud):
 //   node ss-local.mjs prepare --dev [--force]      cloud structure (read only) + ../db/*.sql on the laptop
@@ -40,7 +41,7 @@ function numberFlag(name, def) {
   return n
 }
 
-const USAGE = 'Use: node ss-local.mjs prepare [--refresh] | prepare --dev [--standin] | demo [--remove] | start [--kot-jump N] | upload | status | printhub'
+const USAGE = 'Use: node ss-local.mjs prepare [--refresh] | prepare --dev [--standin] | demo [--remove] | start [--kot-jump N] | upload | status | printhub | desk [--cloud|--local]'
 
 try {
   let code = 0
@@ -78,6 +79,13 @@ try {
     case 'printhub': {
       const { printhubCommand } = await import('./lib/printhub.mjs')
       code = await printhubCommand(rest)
+      break
+    }
+    case 'desk': {
+      only(['--cloud', '--local'])
+      if (flags.has('--cloud') && flags.has('--local')) throw new UserError('Use --cloud or --local, not both.')
+      const { deskCommand } = await import('./lib/desk.mjs')
+      await deskCommand({ cloud: flags.has('--cloud'), local: flags.has('--local') })
       break
     }
     default:

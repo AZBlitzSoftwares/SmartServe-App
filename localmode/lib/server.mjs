@@ -19,6 +19,7 @@ import { refuseRoot, pgBins, startPostgres, stopPostgres, pgAnswers, startPostgr
 import { countPending, describeUpload, lastUpload } from './upload.mjs'
 import { updatePrinthubConfig } from './printhub.mjs'
 import { prepareApp } from './data.mjs'
+import { openDesk, deskBrowserOpen } from './desk.mjs'
 
 // QR codes (npm package "qrcode"). Optional: without it the server works the
 // same, the panel and /qr just show the links as text.
@@ -325,6 +326,29 @@ export async function startCommand({ kotJump = null } = {}) {
   // Keep a Mac awake while the server runs (closing the lid still sleeps it).
   if (IS_MAC) { try { spawn('caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' }).on('error', () => {}) } catch { /* optional */ } }
 
+  // The desk on this laptop, in its own Chrome window that prints the KOTs
+  // without the print dialog (desk.mjs). localhost, so it never depends on
+  // the laptop's network address. Once per launcher window: the launcher's
+  // automatic restart sets SS_LOCAL_NO_DESK, and an open desk is not doubled.
+  const deskUrl = `http://localhost:${cfg.port}/supervisor`
+  let desk = { state: 'off' }
+  if (cfg.openDesk !== false && process.env.SS_LOCAL_NO_DESK !== '1') {
+    if (deskBrowserOpen()) desk = { state: 'already' }
+    else {
+      const r = openDesk(deskUrl, cfg)
+      desk = r.ok ? { state: 'opened', browser: r.browser } : { state: 'failed', reason: r.reason }
+    }
+  }
+  const deskLines = () => {
+    if (desk.state === 'opened' || desk.state === 'already') {
+      return [` DESK ON THIS LAPTOP: ${desk.state === 'opened' ? `opened in its own ${desk.browser} window` : 'its own window is open'} (${deskUrl})`,
+        '   Auto-print ON: the KOT prints on this laptop\'s DEFAULT printer as soon as a waiter',
+        `   is assigned - no print dialog. Closed that window? Double-click "${LAUNCHER.desk}".`]
+    }
+    if (desk.state === 'failed') return [` DESK: ${desk.reason}`]
+    return [` DESK: "${LAUNCHER.desk}" opens it on this laptop, printing KOTs without the print dialog.`]
+  }
+
   // ---------------------------------------------------------- status
   const hasKots = !!(await pool.query("select to_regclass('public.kots') as r")).rows[0].r
   const STATUS_SQL = `select (select count(*)::int from public.orders where event_id::text = any($1::text[])) as orders` +
@@ -424,7 +448,8 @@ export async function startCommand({ kotJump = null } = {}) {
       L.push('    (Wi-Fi or cable) - the links for the devices will then appear here.')
     }
     L.push('')
-    L.push(` PRINT HUB: close the normal Print Hub window, then double-click "${LAUNCHER.printhub}"`)
+    L.push(...deskLines())
+    L.push(` PRINT HUB (network kitchen printers): close the normal Print Hub, then "${LAUNCHER.printhub}"`)
     L.push(IS_KIT ? '   in the Offline Kit folder.' : '   in the localmode folder (or: node ss-local.mjs printhub).')
     if (phNote) L.push(`   ${phNote}`)
     L.push('')
