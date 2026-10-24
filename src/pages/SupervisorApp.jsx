@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, Suspense } from 'react'
 import PrintStationRunner from '../components/supervisor/PrintStation'
+import { AutoAssignRunner } from '../components/supervisor/AutoAssign'
 import { supabase } from '../lib/supabase'
 import SupervisorLogin from '../components/supervisor/SupervisorLogin'
 import KOTDashboard from '../components/supervisor/KOTDashboard'
@@ -465,6 +466,7 @@ export default function SupervisorApp() {
 
       {/* "Print from this laptop" (Control › Kitchens & printers) keeps printing on every tab */}
       <PrintStationRunner />
+      <AutoAssignRunner />
 
       {/* Docked over the board rather than living in a tab. A supervisor
           answering "table 12 has been waiting" needs to see table 12 while

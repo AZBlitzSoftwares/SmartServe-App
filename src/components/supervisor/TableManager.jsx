@@ -4,6 +4,7 @@ import { WaiterList, HelpItemsEditor } from './EventManager'
 import CaptainList from './CaptainList'
 import KitchenSetup from './KitchenSetup'
 import KotPrintingSetup from './KotPrintingSetup'
+import { AutoAssignSetting } from './AutoAssign'
 import OfflineKitCard from './OfflineKitCard'
 import Fold from './Fold'
 import { jumpTo, setFold } from '../../lib/fold'
@@ -127,7 +128,8 @@ export default function TableManager({ eventData, onEventChange }) {
         {mode === 'self' && <TablesSection eventData={eventData} onEventChange={onEventChange} showTablets />}
 
         {(mode === 'self' || mode === 'captain') && <>
-          {sectionHead('ss-waiters', 'Waiters', 'The people who carry food and answer help requests. The desk assigns them to orders.')}
+          {sectionHead('ss-waiters', 'Waiters', 'The people who carry food and answer help requests. The desk assigns them to orders, or they are assigned automatically.')}
+          <AutoAssignSetting eventData={eventData} onEventChange={onEventChange} />
           <WaiterList eventId={eventData.id} />
           {sectionHead('ss-printing', 'KOT printing', 'One KOT per category, the event\'s printers, and which printer each category prints on.')}
           <KotPrintingSetup eventData={eventData} onEventChange={onEventChange} />
