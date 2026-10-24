@@ -201,6 +201,28 @@ body {
   border-top: 1.5px solid #000000;
   color: #000000;
 }
+/* The KOT number: runners and counters work by it, so it is the biggest thing on
+   the slip, white on black at the top */
+.kot-no-box {
+  background: #000000;
+  color: #ffffff;
+  text-align: center;
+  padding: 1.5mm 1mm 2mm;
+  margin: 1mm 0 2mm;
+}
+.kot-no-label {
+  font-size: 10pt;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: #ffffff;
+}
+.kot-no-num {
+  font-size: 40pt;
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: 1px;
+  color: #ffffff;
+}
 .kot-cat {
   font-size: 17pt;
   font-weight: 900;
@@ -223,11 +245,12 @@ body {
 <body>
 <div class="app-name">Janu's Smart Serve</div>
 <div class="event-name">${eventName}</div>
+${order.kotNo ? `<div class="kot-no-box"><div class="kot-no-label">KOT NO.</div><div class="kot-no-num">${order.kotNo}</div></div>` : ''}
 ${order.kotTitle ? `<div class="kot-cat">${order.kotTitle}</div>` : ''}
 <hr class="divider"/>
 <div class="row"><span>Date:</span><span>${dateStr}</span></div>
 <div class="row"><span>Time:</span><span>${timeStr}</span></div>
-<div class="row"><span>${order.kotNo ? 'KOT' : isHelp ? 'Help' : 'Order'}:</span><span>${order.kotNo || orderId}</span></div>
+${order.kotNo ? '' : `<div class="row"><span>${isHelp ? 'Help' : 'Order'}:</span><span>${orderId}</span></div>`}
 <hr class="divider-dash"/>
 <div class="big-box">
 <div class="big-label">TABLE</div>

@@ -459,20 +459,14 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         </div>
       </div>
 
-      {/* FILTERS at the top, as on the Maestro captain tablet: Category, then Course (only
-          when the dishes have courses) with Veg / Non-Veg at its end (only when the menu
-          has both). Hidden while searching: a search looks through the whole menu. */}
+      {/* FILTERS at the top: Course first (only when the dishes have courses), with Veg /
+          Non-Veg at its end (only when the menu has both), then Category - which lists only
+          the categories of the course picked. Hidden while searching: a search looks
+          through the whole menu. */}
       {search.length === 0 && catsShown.length > 0 && (
         <div className="ss-filters" style={{ background:'#fff', borderBottom:'1px solid #eee', flexShrink:0, padding:'7px 0 7px' }}>
-          <div className="ss-frow" style={{ display:'flex', alignItems:'center', gap:7, padding:'0 14px', overflowX:'auto', scrollbarWidth:'none' }}>
-            <span style={rowLbl}>Category</span>
-            <button style={chip(!catNow)} onClick={() => pickCat(null)}>All</button>
-            {catsShown.map(cat => (
-              <button key={cat.id} style={chip(catNow === cat.id)} onClick={() => pickCat(catNow === cat.id ? null : cat.id)}>{catLabel(cat.name)}</button>
-            ))}
-          </div>
           {(showCourses || (hasVeg && hasNonVeg)) && (
-            <div style={{ display:'flex', alignItems:'center', gap:7, marginTop:7, padding:'0 14px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:7, padding:'0 14px' }}>
               {showCourses && (
                 <div className="ss-frow" style={{ display:'flex', alignItems:'center', gap:7, overflowX:'auto', scrollbarWidth:'none', flex:1, minWidth:0 }}>
                   <span style={rowLbl}>Course</span>
@@ -491,6 +485,13 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
               )}
             </div>
           )}
+          <div className="ss-frow" style={{ display:'flex', alignItems:'center', gap:7, padding:'0 14px', overflowX:'auto', scrollbarWidth:'none' }}>
+            <span style={rowLbl}>Category</span>
+            <button style={chip(!catNow)} onClick={() => pickCat(null)}>All</button>
+            {catsShown.map(cat => (
+              <button key={cat.id} style={chip(catNow === cat.id)} onClick={() => pickCat(catNow === cat.id ? null : cat.id)}>{catLabel(cat.name)}</button>
+            ))}
+          </div>
         </div>
       )}
 

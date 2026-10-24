@@ -70,7 +70,7 @@ function WaiterPicker({ waiters, busyOf, title, sub, current, allowNone, onPick,
   )
 }
 
-const BUILD_VERSION = 'v2.7 \u00B7 2026-10-24'
+const BUILD_VERSION = 'v2.8 \u00B7 2026-10-24'
 
 const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
@@ -102,6 +102,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const [cancelReason, setCancelReason] = useState('')
   const [cancelCustomReason, setCancelCustomReason] = useState('')
   const [waiterFilter, setWaiterFilter] = useState(null)
+  // Find a KOT by its number (runners and counters work by KOT number): "22", "k22", "K-022"
+  const [kotQuery, setKotQuery] = useState('')
   const [tableFilter, setTableFilter] = useState(null)
   const [now, setNow] = useState(Date.now())
   const prevCount = useRef(-1)
@@ -320,12 +322,14 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const busyOf = wid => (busyAt[wid] ? [...new Set(busyAt[wid])].join(' ') : '')
 
   const splitOrders = new Set(kotMode ? kots.map(k => k.order_id) : [])
-  const filteredKots = !kotMode ? [] : kots.filter(k => {
+  const kotKey = v => { const d = String(v ?? '').match(/\d+/g); return d ? String(parseInt(d.join(''), 10)) : '' }
+  const kotQ = kotKey(kotQuery)
+  const filteredKots = !kotMode ? [] : kotQ ? kots.filter(k => kotKey(k.kot_no) === kotQ) : kots.filter(k => {
     const matchFilter = filter === 'active' ? k.status === 'open' : filter === 'delivered' ? k.status === 'delivered'
       : filter === 'cancelled' ? k.status === 'cancelled' : true
     return matchFilter && (!waiterFilter || k.waiter_id === waiterFilter) && (!tableFilter || k.table_number === tableFilter)
   })
-  const filteredOrders = orders.filter(o => !splitOrders.has(o.id)).filter(o => {
+  const filteredOrders = kotQ ? [] : orders.filter(o => !splitOrders.has(o.id)).filter(o => {
     const matchFilter = filter==='active'?!['delivered','cancelled'].includes(o.status):filter==='delivered'?o.status==='delivered':filter==='cancelled'?o.status==='cancelled':true
     const matchWaiter = !waiterFilter||o.waiter_id===waiterFilter
     const matchTable = !tableFilter||o.tables?.table_number===tableFilter
@@ -334,7 +338,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
 
   // Help requests follow the same tab rules as orders, so a supervisor can
   // look back at what was handled instead of only what is outstanding.
-  const filteredSOS = sosRequests.filter(r => {
+  const filteredSOS = kotQ ? [] : sosRequests.filter(r => {
     if (tableFilter && r.tables?.table_number !== tableFilter) return false
     if (filter === 'active')    return !['resolved','cancelled'].includes(r.status)
     if (filter === 'delivered') return r.status === 'resolved'
@@ -488,6 +492,23 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
         </div>
       )}
 
+      {kotMode && (
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:6, background:'#fff', border:'2px solid ' + (kotQ ? '#0F172A' : '#CBD5E1'),
+            borderRadius:12, padding:'4px 6px 4px 12px', boxShadow:'var(--shadow)' }}>
+            <span style={{ fontSize:13, fontWeight:900, color:'#0F172A' }}>KOT no.</span>
+            <input data-testid="kot-find" value={kotQuery} onChange={e => setKotQuery(e.target.value)} inputMode="numeric"
+              onKeyDown={e => { if (e.key === 'Escape') setKotQuery('') }}
+              placeholder="e.g. 22" style={{ width:90, border:'none', outline:'none', fontSize:20, fontWeight:900,
+                fontVariantNumeric:'tabular-nums', padding:'4px 2px', background:'transparent' }} />
+            {kotQuery && <button onClick={() => setKotQuery('')} title="Show all again"
+              style={{ border:'none', background:'#F1F5F9', borderRadius:999, width:30, height:30, fontSize:14, cursor:'pointer' }}>✕</button>}
+          </div>
+          {kotQ && <span style={{ fontSize:13, fontWeight:700, color: filteredKots.length ? '#15803D' : '#B91C1C' }}>
+            {filteredKots.length ? 'Showing KOT ' + kotQ + ' (any status). Tap Delivered on it.' : 'No KOT with number ' + kotQ + '.'}</span>}
+        </div>
+      )}
+
       {(waiterFilter||tableFilter) && (
         <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:10, padding:'8px 14px', marginBottom:10, display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:13 }}>
           <span style={{ fontWeight:700, color:'#92400E' }}>🔍 {waiterFilter&&<>Waiter: {waiters.find(w=>w.id===waiterFilter)?.name}</>}{waiterFilter&&tableFilter&&' · '}{tableFilter&&<>Table: {tableFilter}</>}</span>
@@ -542,6 +563,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
             @media (prefers-reduced-motion: reduce) { .kt-band.b-new, .kt-band.b-delay { animation:none; } }
             .kt-body { padding:9px 11px 6px; cursor:pointer; }
             .kt-head { display:flex; align-items:center; gap:8px; }
+            .kt-no { font-size:24px; font-weight:900; color:#fff; background:#0F172A; border-radius:8px; padding:1px 9px; letter-spacing:.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+            .kt-cat { display:inline-block; margin-top:6px; font-size:12px; font-weight:800; color:#3730A3; background:#EEF2FF; border-radius:999px; padding:2px 9px; text-transform:uppercase; letter-spacing:.02em; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
             .kt-t { font-size:22px; font-weight:900; color:#0F172A; border-radius:7px; padding:0 4px; margin-left:-4px; }
             .kt-t.on { background:#1E293B; color:#fff; }
             .kt-lbl { font-size:11px; font-weight:800; color:#475569; background:#F1F5F9; border-radius:999px; padding:2px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46%; }
@@ -640,16 +663,18 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
                 <div className={'kt-band b-' + st}>{band}</div>
                 <div className="kt-body" onClick={() => setExpandedRow(open ? null : id)}>
                   <div className="kt-head">
+                    {isKot && rec.kot_no && <span className="kt-no" title={'KOT ' + rec.kot_no}>{rec.kot_no}</span>}
                     <span className={'kt-t' + (tOn ? ' on' : '')} title={tn != null ? 'Show only table ' + tn : ''}
                       onClick={e => { e.stopPropagation(); if (tn != null) setTableFilter(tOn ? null : tn) }}>T{tn ?? '?'}</span>
-                    <span className={'kt-lbl' + (isSos ? ' help' : isKot ? ' cat' : '')} title={isKot ? rec.kot_no : ''}>
-                      {isSos ? '🔔 Help' : isKot ? (rec.category_name || 'KOT') + ' · ' + count : count + (count === 1 ? ' item' : ' items')}</span>
+                    {!isKot && <span className={'kt-lbl' + (isSos ? ' help' : '')}>
+                      {isSos ? '🔔 Help' : count + (count === 1 ? ' item' : ' items')}</span>}
                     <span className={'kt-w' + (waiterLabel ? '' : ' none')} title={waiterName ? 'Waiter ' + waiterName : 'No waiter yet'}>{waiterLabel || '–'}</span>
                   </div>
+                  {isKot && <div className="kt-cat">{(rec.category_name || 'KOT') + ' · ' + count}</div>}
                   <div className="kt-meta">
                     <span>{timeStr}</span><span className="clk">⏱ {clock}{endTs ? ' ✓' : ''}</span>
                     {captainName && <span className="cap">🧑 {captainName}</span>}
-                    {isKot && <span className={'prn' + (rec.print_status === 'failed' ? ' bad' : '')}>{rec.kot_no} · {prnText}</span>}
+                    {isKot && <span className={'prn' + (rec.print_status === 'failed' ? ' bad' : '')}>{prnText}</span>}
                   </div>
                   <ul className="kt-items">
                     {shown.map((li, k) => <li key={k}><b>{li.quantity || 1}×</b><span>{nameOf(li)}</span></li>)}
