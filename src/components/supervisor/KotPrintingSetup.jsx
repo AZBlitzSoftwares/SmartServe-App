@@ -21,6 +21,7 @@ const STALE_MS = 2 * 60 * 1000
 export default function KotPrintingSetup({ eventData, onEventChange }) {
   const ev = eventData
   const on = !!ev.kot_per_category
+  const byCourse = !!ev.kot_per_course
   const [printers, setPrinters] = useState(null)
   const [cats, setCats] = useState([])
   const [busy, setBusy] = useState(false)
@@ -53,6 +54,19 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
     setBusy(false)
     if (error || !data) {
       setMsg(/kot_per_category/.test(error?.message || '') ? 'The database needs the update first: run 2026-10-22_kot_per_category.sql in Supabase.' : 'Not saved: ' + (error?.message || 'try again'))
+      return
+    }
+    onEventChange?.(data)
+  }
+
+  // One KOT per category, or one per course (Beverages + Shakes + Fresh Shots = one Beverages KOT)
+  async function setByCourse(v) {
+    if (v === byCourse) return
+    setBusy(true); setMsg('')
+    const { data, error } = await supabase.from('events').update({ kot_per_course: v }).eq('id', ev.id).select().single()
+    setBusy(false)
+    if (error || !data) {
+      setMsg(/kot_per_course/.test(error?.message || '') ? 'The database needs the update first: run 2026-10-24_kot_per_course.sql in Supabase.' : 'Not saved: ' + (error?.message || 'try again'))
       return
     }
     onEventChange?.(data)
@@ -118,9 +132,24 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
             <div style={{ fontWeight:900, fontSize:15 }}>One KOT per category</div>
             <div style={{ fontSize:12.5, color:'var(--ink2)', marginTop:3, lineHeight:1.5 }}>
               {on
-                ? 'On: every order is split into one KOT per category (Starters, Mains, Desserts…). Each KOT has its own card on Live Orders, its own waiter and its own Delivered, and prints when you assign the waiter.'
+                ? (byCourse
+                  ? 'On, by course: every order is split into one KOT per course (Beverages, Soups, Desserts…), with the dishes listed counter by counter. Each KOT has its own card on Live Orders, its own waiter and its own Delivered, and prints when you assign the waiter.'
+                  : 'On: every order is split into one KOT per category (Starters, Mains, Desserts…). Each KOT has its own card on Live Orders, its own waiter and its own Delivered, and prints when you assign the waiter.')
                 : 'Off: one KOT per order, printed at the desk when you assign the waiter (as before).'}
             </div>
+            {on && (
+              <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:9, flexWrap:'wrap' }} data-testid="kot-split">
+                <span style={{ fontSize:12.5, fontWeight:800, color:'var(--ink)' }}>One KOT for each</span>
+                {[[false, 'Category (counter)'], [true, 'Course']].map(([v, label]) => (
+                  <button key={label} onClick={() => setByCourse(v)} disabled={busy} data-testid={v ? 'kot-by-course' : 'kot-by-category'}
+                    style={{ border:'1.5px solid ' + (byCourse === v ? 'var(--ink)' : 'var(--line)'), borderRadius:999, padding:'5px 12px',
+                      fontSize:12.5, fontWeight:800, cursor:'pointer', background: byCourse === v ? 'var(--ink)' : '#fff', color: byCourse === v ? '#fff' : 'var(--ink)' }}>
+                    {label}
+                  </button>
+                ))}
+                <span style={{ fontSize:12, color:'var(--ink2)' }}>applies to new orders</span>
+              </div>
+            )}
           </div>
           <button onClick={toggle} disabled={busy} data-testid="kpc-toggle"
             style={{ border:'none', borderRadius:999, padding:'9px 18px', fontSize:13.5, fontWeight:800, cursor:'pointer',

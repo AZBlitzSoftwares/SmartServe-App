@@ -9,6 +9,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import zlib from 'node:zlib'
 import pg from 'pg'
 import {
   P, HERE, IS_MAC, IS_WIN, IS_KIT, LAUNCHER, UserError, loadConfig, loadLocal, saveLocal, readJson, writeJson, isPrepared, serverRunning,
@@ -100,6 +101,37 @@ const CORS = {
   'access-control-expose-headers': 'content-range, content-location, location, preference-applied, range-unit',
   'access-control-max-age': '600',
 }
+// Text answers are sent gzip-compressed when the device accepts it: JSON
+// shrinks 5-10 times, which is what keeps a busy event Wi-Fi free. The app's
+// own files are compressed once and kept in memory.
+const COMPRESSIBLE = /^(application\/(json|javascript|manifest\+json|vnd\.pgrst[^;]*)|text\/|image\/svg)/i
+const acceptsGzip = (req) => /\bgzip\b/i.test(String(req.headers['accept-encoding'] || ''))
+const gzCache = new Map() // file -> { mtimeMs, buf }
+function gzipped(file, st) {
+  const hit = gzCache.get(file)
+  if (hit && hit.mtimeMs === st.mtimeMs) return hit.buf
+  const buf = zlib.gzipSync(fs.readFileSync(file), { level: 6 })
+  gzCache.set(file, { mtimeMs: st.mtimeMs, buf })
+  return buf
+}
+
+// Change notifications for /__ss/rev: a row trigger on this laptop's database
+// (never the cloud). Row-level, so a statement that changes nothing (the Print
+// Hub asking for queued KOTs) sends nothing; pg_notify folds repeats within a
+// transaction into one.
+const REV_TABLES = ['orders', 'order_items', 'kots', 'sos_requests', 'sos_request_items']
+const REV_TRIGGERS_SQL = `
+create or replace function public.ss_local_rev() returns trigger language plpgsql as $f$
+begin perform pg_notify('ss_rev', tg_table_name); return null; end $f$;
+do $d$ declare t text; begin
+  foreach t in array array[${REV_TABLES.map((t) => `'${t}'`).join(', ')}] loop
+    if to_regclass('public.' || t) is not null then
+      execute format('drop trigger if exists ss_local_rev on public.%I', t);
+      execute format('create trigger ss_local_rev after insert or update or delete on public.%I for each row execute function public.ss_local_rev()', t);
+    end if;
+  end loop;
+end $d$;`
+
 // An address the cloud may hand to tablets: a private network address (10.x,
 // 172.16-31.x, 192.168.x, 100.64-127.x). 169.254.x.x means no router gave this
 // laptop an address; a public one is never published.
@@ -145,6 +177,14 @@ function serveFile(req, res, file, cache) {
       if (start > end || start >= st.size) { res.writeHead(416, { 'content-range': `bytes */${st.size}` }); return res.end() }
       status = 206
       headers['content-range'] = `bytes ${start}-${end}/${st.size}`
+    }
+    if (status === 200 && st.size > 1024 && st.size < 20 * 1024 * 1024 && COMPRESSIBLE.test(headers['content-type']) && acceptsGzip(req)) {
+      let buf = null
+      try { buf = gzipped(file, st) } catch { /* send it plain */ }
+      if (buf) {
+        res.writeHead(200, { ...headers, 'content-encoding': 'gzip', 'content-length': buf.length, vary: 'accept-encoding' })
+        return res.end(req.method === 'HEAD' ? undefined : buf)
+      }
     }
     headers['content-length'] = st.size === 0 ? 0 : end - start + 1
     res.writeHead(status, headers)
@@ -236,15 +276,60 @@ export async function startCommand({ kotJump = null } = {}) {
 
   // ---------------------------------------------------------- web server
   const indexHtml = injectLocal(fs.readFileSync(path.join(P.app, 'index.html'), 'utf8'), local.anonKey)
+  // Change counter. Every write that goes through this server (an order, a
+  // Delivered, an assignment, a print status) moves it on; desks ask for it
+  // every 2 s (a few bytes, from memory) and reload their lists only when it
+  // moved, instead of downloading every list every few seconds.
+  const revBase = Date.now().toString(36)
+  let rev = 0
+  let revFromDb = false
+  function bumpRev() { rev++ }
+  const REV_PATHS = /^\/(orders|order_items|kots|sos_requests|sos_request_items|rpc\/(ss_|mk_|ms_))/
+  // The counter moves when the DATABASE says a row of orders / dishes / KOTs /
+  // help requests changed (a trigger on this laptop's database only, listened
+  // to here), so it moves exactly when something on Live Orders changed - not
+  // on the Print Hub's or the tablets' routine checks - and also for a write
+  // whose device gave up waiting for the answer.
+  async function listenForChanges() {
+    if (state.stopping) return
+    const client = new pg.Client(localDbOptions(local))
+    client.on('error', () => {})
+    client.on('end', () => { revFromDb = false; if (!state.stopping) setTimeout(listenForChanges, 3000) })
+    try {
+      await client.connect()
+      await client.query(REV_TRIGGERS_SQL)
+      client.on('notification', () => bumpRev())
+      await client.query('listen ss_rev')
+      revFromDb = true
+      bumpRev()
+    } catch (e) {
+      revFromDb = false
+      logLine('server', `change notifications off (${e.message}) - counting writes instead`)
+      try { await client.end() } catch { /* gone */ }
+    }
+  }
   const agent = new http.Agent({ keepAlive: true, maxSockets: 64 })
 
   function proxy(req, res, upstreamPath) {
     const headers = {}
     for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k)) headers[k] = v
     headers.host = `127.0.0.1:${state.apiPort}`
+    const write = req.method !== 'GET' && req.method !== 'HEAD'
+    const gz = acceptsGzip(req)
+    delete headers['accept-encoding'] // compression is done here, not by the API
     const up = http.request({ host: '127.0.0.1', port: state.apiPort, method: req.method, path: upstreamPath, headers, agent }, (ur) => {
       const h = {}
       for (const [k, v] of Object.entries(ur.headers)) if (!HOP.has(k) && !k.startsWith('access-control-')) h[k] = v
+      // Fallback only (database notifications not available): a write to the
+      // tables Live Orders shows moves the counter
+      if (write && !revFromDb && ur.statusCode < 400 && REV_PATHS.test(upstreamPath)) ur.on('end', bumpRev)
+      const len = Number(ur.headers['content-length'] || 0)
+      if (gz && COMPRESSIBLE.test(String(ur.headers['content-type'] || '')) && (!ur.headers['content-length'] || len > 512) && !ur.headers['content-encoding']) {
+        delete h['content-length']
+        res.writeHead(ur.statusCode, { ...h, ...CORS, 'content-encoding': 'gzip', vary: 'accept-encoding' })
+        ur.pipe(zlib.createGzip({ level: 4 })).pipe(res)
+        return
+      }
       res.writeHead(ur.statusCode, { ...h, ...CORS })
       ur.pipe(res)
     })
@@ -272,6 +357,8 @@ export async function startCommand({ kotJump = null } = {}) {
         return proxy(req, res, rest.startsWith('/') ? rest : '/' + rest)
       }
       if (/^\/(realtime|auth|storage|functions|graphql)(\/|$)/.test(p)) return sendJson(res, 404, { message: 'Not available on the local server.' })
+      if (p === '/__ss/rev') return sendJson(res, 200, { rev: `${revBase}.${rev}` })
+      if (p === '/__ss/ping') return sendJson(res, 200, { ok: true, app: 'smartserve-local' })
       if (p === '/__ss/health') return sendJson(res, 200, health())
       // For the app's "use the laptop server" check: is this a Smart Serve local server, and with which events?
       if (p === '/ss-local.json') {
@@ -317,6 +404,7 @@ export async function startCommand({ kotJump = null } = {}) {
   server.on('clientError', (err, socket) => { try { socket.destroy() } catch { /* gone */ } })
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(cfg.port, '0.0.0.0', resolve) }).catch(failStart)
   writeRun()
+  listenForChanges()
 
   const ph = updatePrinthubConfig(local, cfg.port)
   const phNote = ph.status === 'missing'

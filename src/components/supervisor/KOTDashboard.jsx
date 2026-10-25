@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { armOrderBeep, playOrderBeep, orderSoundOn, setOrderSound } from '../../lib/orderBeep'
 import { printKotWindow, kotAsOrder, helpAsOrder } from '../../lib/kotSlip'
 import { AutoAssignBadge } from './AutoAssign'
+import { watchChanges } from '../../lib/liveRev'
 
 // A waiter who has had an order this long without delivering it shows DELAY
 const DELAY_MIN = 5
@@ -15,6 +16,8 @@ function waiterNo(w) {
   return m ? m[1] : String(w.name || '')
 }
 const normNo = v => String(v ?? '').trim().replace(/^0+(?=\d)/, '').toLowerCase()
+// A KOT's number as people say it: "22", "k22", "K-022", "P1-022" -> "22" (the last number in it)
+const kotKey = v => { const m = String(v ?? '').match(/(\d+)\D*$/); return m ? String(parseInt(m[1], 10)) : '' }
 // 1, 2, 3 ... 10, 11 in number order, then any names
 function byWaiterNo(a, b) {
   const x = parseInt(waiterNo(a), 10), y = parseInt(waiterNo(b), 10)
@@ -70,7 +73,7 @@ function WaiterPicker({ waiters, busyOf, title, sub, current, allowNone, onPick,
   )
 }
 
-const BUILD_VERSION = 'v2.8 \u00B7 2026-10-24'
+const BUILD_VERSION = 'v2.9 \u00B7 2026-10-26'
 
 const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
@@ -105,8 +108,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   // Find a KOT by its number (runners and counters work by KOT number): "22", "k22", "K-022"
   const [kotQuery, setKotQuery] = useState('')
   const [tableFilter, setTableFilter] = useState(null)
-  const [now, setNow] = useState(Date.now())
   const prevCount = useRef(-1)
+  const splitRef = useRef(new Set()) // orders split into KOTs: their KOT cards stand for them
 
   /* The order list gets a measured height so it scrolls inside itself and
      the controls above it stay put.
@@ -149,14 +152,50 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     }
   }, [waiters.length, waiterFilter, tableFilter, filter, loading])
 
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
+  /* What Live Orders downloads.
+
+     It used to download EVERY order and KOT of the evening, with all their
+     dishes, every 4 seconds: about 1.3 MB per refresh by the end of a 500-order
+     evening, on every desk, over the event Wi-Fi. A desk that is not the
+     laptop itself (an iPad, a second laptop) then fell behind: taps waited
+     behind those downloads and Delivered took 20-30 seconds.
+
+     Now: the Active tab downloads only what is still open (orders not yet
+     delivered, open KOTs, open help requests) - a few KB. Delivered /
+     Cancelled / All download the latest 100 when that tab is opened. On the
+     laptop the lists reload only when something changed (lib/liveRev). */
+  const ACTIVE_ORDER = ['pending', 'placed', 'in_progress']
+  const HISTORY_LIMIT = 100
+  const filterRef = useRef(filter)
+  filterRef.current = filter
+  const lastSig = useRef({})
+  const kotQRef = useRef('')
+  const [foundKots, setFoundKots] = useState(null) // KOT finder results (any status), from the server
+  // Records tapped Delivered / Done here: off the Active list at once, while the server saves it
+  const [doneLocal, setDoneLocal] = useState(() => new Set())
+  const inflight = useRef(new Set())
+  // Every load is numbered; an answer older than one already shown is dropped
+  const seq = useRef({ orders: 0, ordersShown: 0, sos: 0, sosShown: 0 })
+  const [actionErr, setActionErr] = useState('')
+
+  // set state only when the answer differs from the last one (no needless redraw)
+  const changed = (key, data) => {
+    const sig = JSON.stringify(data)
+    if (lastSig.current[key] === sig) return false
+    lastSig.current[key] = sig
+    return true
+  }
 
   useEffect(() => {
     if (!eventData) return
+    lastSig.current = {}
     loadWaiters(); loadOrders(true); loadSOS()
-    const interval = setInterval(() => { loadOrders(false); loadSOS() }, 4000)
-    return () => clearInterval(interval)
+    const stop = watchChanges(() => Promise.all([loadOrders(false), loadSOS()]), { cloudMs: 4000 })
+    return stop
   }, [eventData])
+
+  // a history tab reloads its list when it is opened
+  useEffect(() => { if (eventData) { loadOrders(false); loadSOS() } }, [filter])
 
   async function loadWaiters() {
     const { data } = await supabase.from('waiters').select('*').eq('event_id', eventData.id).eq('is_active', true)
@@ -165,14 +204,25 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
 
   async function loadSOS() {
     if (!eventData) return
-    const { data } = await supabase.from('sos_requests')
-      .select('*, tables(table_number), sos_request_items(item_name, quantity), captains(name)').eq('event_id', eventData.id)
-      // No filters at all. Every request of every type and status belongs
-      // here - the tabs below decide what is shown. Filtering at the query
-      // is what made resolved and cancelled requests invisible.
-
-      .order('created_at', { ascending: false })
-    setSosRequests(data || [])
+    const sel = '*, tables(table_number), sos_request_items(item_name, quantity), captains(name)'
+    const f = filterRef.current
+    const my = ++seq.current.sos
+    const active = supabase.from('sos_requests').select(sel).eq('event_id', eventData.id)
+      .not('status', 'in', '(resolved,cancelled)').order('created_at', { ascending: false })
+    const hist = f === 'active' ? null : (() => {
+      let q = supabase.from('sos_requests').select(sel).eq('event_id', eventData.id)
+      if (f === 'delivered') q = q.eq('status', 'resolved')
+      else if (f === 'cancelled') q = q.eq('status', 'cancelled')
+      return q.order('created_at', { ascending: false }).limit(HISTORY_LIMIT)
+    })()
+    const [a, h] = await Promise.all([active, hist || Promise.resolve({ data: [] })])
+    if (a.error || h.error) return
+    if (my < seq.current.sosShown) return // a newer answer is already on screen
+    seq.current.sosShown = my
+    const byId = new Map()
+    for (const r of [...(a.data || []), ...(h.data || [])]) byId.set(r.id, r)
+    const list = [...byId.values()].sort((x, y) => new Date(y.created_at) - new Date(x.created_at))
+    if (changed('sos', list)) setSosRequests(list)
   }
 
   function formatTimer(assignedAt) {
@@ -182,30 +232,132 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     return { str: m + ':' + String(s).padStart(2,'0'), mins: m }
   }
 
+  // Which of these orders were split into KOTs (their cards are the KOTs)
+  async function kotOrderIds(ids) {
+    const out = new Set()
+    for (let i = 0; i < ids.length; i += 60) {
+      const { data, error } = await supabase.from('kots').select('order_id').eq('kind', 'order').in('order_id', ids.slice(i, i + 60))
+      if (error) return null
+      for (const r of data || []) out.add(r.order_id)
+    }
+    return out
+  }
+
   async function loadOrders(showSpinner = false) {
     if (!eventData) return
     if (showSpinner) setLoading(true)
-    const { data } = await supabase.from('orders')
-      .select('*, tables(table_number), order_items(quantity, menu_items(name, is_live_counter)), waiters(name), captains(name), assigned_at')
-      .eq('event_id', eventData.id).order('created_at', { ascending: false })
-    const all = data || []
+    const f = filterRef.current
+    const my = ++seq.current.orders
+    const OSEL = '*, tables(table_number), order_items(quantity, menu_items(name, is_live_counter)), waiters(name), captains(name), assigned_at'
+    const KSEL = 'id,order_id,kitchen_id,kot_no,table_number,captain_name,category_name,items,status,print_status,last_error,waiter_id,waiter_label,assigned_at,delivered_at,cancelled_at,created_at,printed_at'
+    const histStatus = f === 'delivered' ? 'delivered' : f === 'cancelled' ? 'cancelled' : null
+    const qs = [
+      supabase.from('orders').select(OSEL).eq('event_id', eventData.id).in('status', ACTIVE_ORDER).order('created_at', { ascending: false }),
+      f === 'active' ? null : (() => {
+        let q = supabase.from('orders').select(OSEL).eq('event_id', eventData.id)
+        if (histStatus) q = q.eq('status', histStatus)
+        return q.order('created_at', { ascending: false }).limit(HISTORY_LIMIT)
+      })(),
+    ]
     if (eventData.kot_per_category) {
-      const [k, ks] = await Promise.all([
-        supabase.from('kots').select('id,order_id,kitchen_id,kot_no,table_number,captain_name,category_name,items,status,print_status,last_error,waiter_id,waiter_label,assigned_at,delivered_at,cancelled_at,created_at,printed_at')
-          .eq('event_id', eventData.id).eq('kind', 'order').order('created_at', { ascending:false }),
-        supabase.from('kitchens').select('id,name,printer_ip,printer_status,is_active').eq('event_id', eventData.id),
-      ])
-      if (!k.error) setKots(k.data || [])
-      if (!ks.error) setPrinters(ks.data || [])
+      qs.push(supabase.from('kots').select(KSEL).eq('event_id', eventData.id).eq('kind', 'order').eq('status', 'open').order('created_at', { ascending: false }))
+      qs.push(f === 'active' ? null : (() => {
+        let q = supabase.from('kots').select(KSEL).eq('event_id', eventData.id).eq('kind', 'order')
+        if (histStatus) q = q.eq('status', histStatus)
+        return q.order('created_at', { ascending: false }).limit(HISTORY_LIMIT * 2)
+      })())
+      qs.push(supabase.from('kitchens').select('id,name,printer_ip,printer_status,is_active').eq('event_id', eventData.id))
     }
-    const activeCount = all.filter(o => !['delivered','cancelled'].includes(o.status)).length
+    const res = await Promise.all(qs.map(q => q || Promise.resolve({ data: [] })))
+    if (res.some(r => r.error)) { if (showSpinner) setLoading(false); return } // keep what is on screen
+    const [ao, ho, ak, hk, ks] = res
+    const fresh = () => my >= seq.current.ordersShown
+    const oById = new Map()
+    for (const o of [...(ao.data || []), ...(ho.data || [])]) oById.set(o.id, o)
+    const all = [...oById.values()].sort((x, y) => new Date(y.created_at) - new Date(x.created_at))
+    if (eventData.kot_per_category) {
+      const kById = new Map()
+      for (const k of [...(ak.data || []), ...(hk.data || [])]) kById.set(k.id, k)
+      const kl = [...kById.values()].sort((x, y) => new Date(y.created_at) - new Date(x.created_at))
+      // orders whose KOTs are not in the lists above (older KOTs of a history order)
+      const known = new Set(kl.map(k => k.order_id))
+      const ask = all.filter(o => !known.has(o.id)).map(o => o.id)
+      const split = ask.length ? await kotOrderIds(ask) : new Set()
+      if (!fresh()) { if (showSpinner) setLoading(false); return } // a newer answer is already on screen
+      seq.current.ordersShown = my
+      if (split) for (const id of split) known.add(id)
+      splitRef.current = known
+      // the KOT finder's cards follow the same reloads
+      if (kotQRef.current) searchKots(kotQRef.current)
+      if (changed('kots', kl)) setKots(kl)
+      if (!ks.error && changed('printers', ks.data || [])) setPrinters(ks.data || [])
+    }
+    if (!eventData.kot_per_category) {
+      if (!fresh()) { if (showSpinner) setLoading(false); return }
+      seq.current.ordersShown = my
+    }
+    const activeList = ao.data || []
+    const activeCount = activeList.length
     if (prevCount.current >= 0 && activeCount > prevCount.current) {
       // a beep; the new card itself flashes NEW ORDER (no banner across the top)
-      if (onNewOrder) onNewOrder(all.find(o => o.status === 'placed'))
+      if (onNewOrder) onNewOrder(activeList.find(o => o.status === 'placed'))
       playOrderBeep()
     }
-    prevCount.current = activeCount; setOrders(all); onOrderCountChange(activeCount)
+    prevCount.current = activeCount
+    if (changed('orders', all)) setOrders(all)
+    onOrderCountChange(activeCount)
+    // records tapped here that the server now shows as finished: no longer needed
+    setDoneLocal(prev => {
+      if (!prev.size) return prev
+      const open = new Set([...activeList.map(o => 'ord-' + o.id), ...((ak && ak.data) || []).map(k => 'kot-' + k.id)])
+      const next = new Set([...prev].filter(k => k.startsWith('sos-') || open.has(k) || inflight.current.has(k)))
+      return next.size === prev.size ? prev : next
+    })
     if (showSpinner) setLoading(false)
+  }
+
+  // KOT finder: asks the server, any status, so it works on a long evening too
+  useEffect(() => {
+    const q = kotKey(kotQuery)
+    kotQRef.current = q
+    if (!q || !eventData?.kot_per_category) { setFoundKots(null); return }
+    const t = setTimeout(() => searchKots(q), 250)
+    return () => clearTimeout(t)
+  }, [kotQuery, eventData?.id, eventData?.kot_per_category])
+
+  async function searchKots(q) {
+    const { data, error } = await supabase.from('kots')
+      .select('id,order_id,kitchen_id,kot_no,table_number,captain_name,category_name,items,status,print_status,last_error,waiter_id,waiter_label,assigned_at,delivered_at,cancelled_at,created_at,printed_at')
+      .eq('event_id', eventData.id).eq('kind', 'order').ilike('kot_no', '%-' + q.padStart(3, '0')).order('created_at', { ascending: false }).limit(40)
+    if (kotQRef.current !== q) return
+    if (!error) setFoundKots(data || [])
+  }
+
+  /* Delivered / Done / Cancel KOT: the card leaves the Active list at once and
+     the save goes on in the background (tried again if the network drops).
+     A second tap on the same card does nothing - and the save itself is safe
+     to repeat. */
+  async function actNow(key, fn, label) {
+    if (inflight.current.has(key)) return
+    inflight.current.add(key)
+    setDoneLocal(prev => new Set(prev).add(key))
+    let ok = false, lastErr = null
+    // no code = no answer; SS503 / PGRST00x / 5xx-type codes = the server was busy: try again
+    const retryable = e => !e?.code || /^(SS503|PGRST00\d|57014|53300|40001|40P01)$/.test(e.code)
+    for (let n = 0; n < 4 && !ok; n++) {
+      try {
+        const r = await fn()
+        if (r && r.error) { lastErr = r.error; if (!retryable(r.error)) break } else ok = true
+      } catch (e) { lastErr = e }
+      if (!ok) await new Promise(r => setTimeout(r, 1000 * (n + 1)))
+    }
+    inflight.current.delete(key)
+    if (!ok) {
+      setDoneLocal(prev => { const next = new Set(prev); next.delete(key); return next })
+      // a banner, not a pop-up: a pop-up would stop this desk's auto-assign and printing until someone taps OK
+      setActionErr('Not saved: ' + label + '. The card is back - tap it again.' + (lastErr?.message ? ' (' + lastErr.message + ')' : ''))
+    } else setActionErr('')
+    await Promise.all([loadOrders(false), loadSOS()])
   }
 
   function toggleSound() {
@@ -272,16 +424,17 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     setWaiterFilter(null); setTableFilter(null); setFilter('active')
   }
 
-  async function markDelivered(order) {
-    await supabase.from('orders').update({ status:'delivered', delivered_at:new Date().toISOString() }).eq('id', order.id)
-    loadOrders(false)
+  function markDelivered(order) {
     // timeline still holds the record just actioned, hence the minus one
     clearFiltersIfEmpty(timelineRef.current - 1)
+    return actNow('ord-' + order.id, () => supabase.from('orders')
+      .update({ status:'delivered', delivered_at:new Date().toISOString() }).eq('id', order.id).in('status', ACTIVE_ORDER), 'Delivered')
   }
 
-  async function resolveSOSRequest(sosId) {
-    await supabase.from('sos_requests').update({ status:'resolved', resolved_at:new Date().toISOString() }).eq('id', sosId)
-    loadSOS(); clearFiltersIfEmpty(timelineRef.current - 1)
+  function resolveSOSRequest(sosId) {
+    clearFiltersIfEmpty(timelineRef.current - 1)
+    return actNow('sos-' + sosId, () => supabase.from('sos_requests')
+      .update({ status:'resolved', resolved_at:new Date().toISOString() }).eq('id', sosId).not('status', 'in', '(resolved,cancelled)'), 'Done')
   }
 
   async function cancelOrder(id) {
@@ -321,15 +474,16 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const busyWaiterIds = Object.keys(busyAt)
   const busyOf = wid => (busyAt[wid] ? [...new Set(busyAt[wid])].join(' ') : '')
 
-  const splitOrders = new Set(kotMode ? kots.map(k => k.order_id) : [])
-  const kotKey = v => { const d = String(v ?? '').match(/\d+/g); return d ? String(parseInt(d.join(''), 10)) : '' }
+  const splitOrders = kotMode ? new Set([...kots.map(k => k.order_id), ...splitRef.current]) : new Set()
   const kotQ = kotKey(kotQuery)
-  const filteredKots = !kotMode ? [] : kotQ ? kots.filter(k => kotKey(k.kot_no) === kotQ) : kots.filter(k => {
+  const hiddenNow = key => filter === 'active' && doneLocal.has(key)
+  const filteredKots = !kotMode ? [] : kotQ ? (foundKots || kots).filter(k => kotKey(k.kot_no) === kotQ && !inflight.current.has('kot-' + k.id)) : kots.filter(k => {
+    if (hiddenNow('kot-' + k.id)) return false
     const matchFilter = filter === 'active' ? k.status === 'open' : filter === 'delivered' ? k.status === 'delivered'
       : filter === 'cancelled' ? k.status === 'cancelled' : true
     return matchFilter && (!waiterFilter || k.waiter_id === waiterFilter) && (!tableFilter || k.table_number === tableFilter)
   })
-  const filteredOrders = kotQ ? [] : orders.filter(o => !splitOrders.has(o.id)).filter(o => {
+  const filteredOrders = kotQ ? [] : orders.filter(o => !splitOrders.has(o.id) && !hiddenNow('ord-' + o.id)).filter(o => {
     const matchFilter = filter==='active'?!['delivered','cancelled'].includes(o.status):filter==='delivered'?o.status==='delivered':filter==='cancelled'?o.status==='cancelled':true
     const matchWaiter = !waiterFilter||o.waiter_id===waiterFilter
     const matchTable = !tableFilter||o.tables?.table_number===tableFilter
@@ -339,6 +493,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   // Help requests follow the same tab rules as orders, so a supervisor can
   // look back at what was handled instead of only what is outstanding.
   const filteredSOS = kotQ ? [] : sosRequests.filter(r => {
+    if (hiddenNow('sos-' + r.id)) return false
     if (tableFilter && r.tables?.table_number !== tableFilter) return false
     if (filter === 'active')    return !['resolved','cancelled'].includes(r.status)
     if (filter === 'delivered') return r.status === 'resolved'
@@ -399,9 +554,9 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     // no kitchen printer for this category: printed here, as the desk always did
     if (data?.print === 'desk' && autoPrint) setTimeout(() => printKotSlip(k, data.waiter), 300)
   }
-  async function deliverKot(k) {
-    await supabase.rpc('ss_kot_deliver', { p_kot_id: k.id })
-    loadOrders(false); clearFiltersIfEmpty(timelineRef.current - 1)
+  function deliverKot(k) {
+    clearFiltersIfEmpty(timelineRef.current - 1)
+    return actNow('kot-' + k.id, () => supabase.rpc('ss_kot_deliver', { p_kot_id: k.id }), 'Delivered for KOT ' + (k.kot_no || ''))
   }
   async function cancelKot(k) {
     if (!window.confirm('Cancel KOT ' + (k.kot_no || '') + ' (' + (k.category_name || '') + ') for table ' + (k.table_number ?? '?') + '?' +
@@ -506,6 +661,14 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
           </div>
           {kotQ && <span style={{ fontSize:13, fontWeight:700, color: filteredKots.length ? '#15803D' : '#B91C1C' }}>
             {filteredKots.length ? 'Showing KOT ' + kotQ + ' (any status). Tap Delivered on it.' : 'No KOT with number ' + kotQ + '.'}</span>}
+        </div>
+      )}
+
+      {actionErr && (
+        <div role="alert" data-testid="action-error" style={{ background:'#FEF2F2', border:'1.5px solid #FCA5A5', borderRadius:10, padding:'8px 12px', marginBottom:10,
+          display:'flex', justifyContent:'space-between', alignItems:'center', gap:10, fontSize:13, fontWeight:700, color:'#B91C1C' }}>
+          <span>{actionErr}</span>
+          <button onClick={() => setActionErr('')} style={{ background:'none', border:'none', color:'#B91C1C', fontWeight:900, cursor:'pointer' }}>✕</button>
         </div>
       )}
 

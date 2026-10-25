@@ -1,6 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { queueOrder } from '../../lib/offlineQueue'
+import { queueOrder, flushOrderQueue } from '../../lib/offlineQueue'
+import { newOrderId, sendOrderWithRetry } from '../../lib/placeOrder'
+
+function quickSignal(ms) {
+  try { if (AbortSignal.timeout) return AbortSignal.timeout(ms) } catch { /* older browser */ }
+  const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal
+}
 import { NoteChips } from './mkShared'
 
 export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrderPlaced, onRemove, onAdd, cartOpen, onCartOpenChange, captain, captainTable, onShowStatus, onOpenMenu, showTrack, onOpenChairs, onNote }) {
@@ -12,6 +18,16 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
   }, [cartOpen])
   const [placing, setPlacing] = useState(false)
   const [showWait, setShowWait] = useState(false)
+  // Place Order runs once at a time. Set synchronously on the first tap (a
+  // state update is not seen by a second tap in the same moment), so tapping
+  // again while the network is slow can never send a second copy.
+  const busyRef = useRef(false)
+  // The order's id, made once per cart and sent with every retry of it
+  const orderIdRef = useRef(null)
+  // a different cart, or the same cart for another table, is a different order
+  const cartKey = (tableData?.id || 'cap-' + captainTable) + '|' + cart.map(i => i.id + 'x' + i.quantity + (i.note ? ':' + i.note : '')).join(',')
+  useEffect(() => { if (!busyRef.current) orderIdRef.current = null }, [cartKey])
+  const [slow, setSlow] = useState(false)
 
   // A captain now arrives here with a table already chosen - it is picked
   // before the menu opens, not after the cart is built. The old "which
@@ -36,8 +52,9 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
   const [activeOrderCount, setActiveOrderCount] = useState(0)
   const total = cart.reduce((s, i) => s + i.quantity, 0)
 
-  const maxOrders = eventData?.max_orders_per_table || 1
-  const orderLimitHit = !multi && activeOrderCount >= maxOrders
+  // 0 = "No limit" (Control › Order limit); empty = the old default of 1
+  const maxOrders = eventData?.max_orders_per_table ?? 1
+  const orderLimitHit = !multi && maxOrders > 0 && activeOrderCount >= maxOrders
 
   // Multi-kitchen: Place Order opens the chair picker instead of sending.
   function openChairs() {
@@ -68,40 +85,57 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
     return () => { supabase.removeChannel(sub); clearInterval(poll) }
   }, [tableData?.id, eventData?.id, captainTable, captainMode, multi])
 
-  async function checkActiveOrders() {
-    if (!eventData?.id) return
+  // Returns the count it saw, so a caller never acts on a stale screen value.
+  // quickMs: give up after that long and use the screen's count (the database
+  // checks the limit again when the order is saved).
+  async function checkActiveOrders(quickMs) {
+    if (!eventData?.id) return activeOrderCount
+    const lim = q => quickMs ? q.abortSignal(quickSignal(quickMs)) : q
     if (tableData?.id) {
-      const { data } = await supabase.from('orders')
+      const { data, error } = await lim(supabase.from('orders')
         .select('id').eq('table_id', tableData.id)
-        .in('status', ['pending', 'placed', 'in_progress'])
+        .in('status', ['pending', 'placed', 'in_progress']))
+      if (error) return activeOrderCount
       setActiveOrderCount(data?.length || 0)
-      return
+      return data?.length || 0
     }
     if (captainMode && captainTable != null) {
-      const { data } = await supabase.from('orders')
+      const { data, error } = await lim(supabase.from('orders')
         .select('id, tables!inner(table_number)')
         .eq('event_id', eventData.id)
         .eq('tables.table_number', captainTable)
-        .in('status', ['pending', 'placed', 'in_progress'])
+        .in('status', ['pending', 'placed', 'in_progress']))
+      if (error) return activeOrderCount
       setActiveOrderCount(data?.length || 0)
+      return data?.length || 0
+    }
+    return activeOrderCount
+  }
+
+  const orderOf = (tableId) => {
+    if (!orderIdRef.current) orderIdRef.current = newOrderId()
+    return {
+      id: orderIdRef.current, event_id: eventData.id, table_id: tableId,
+      items: cart.map(i => ({ id: i.id, quantity: i.quantity, ...(i.note ? { note: i.note } : {}) })),
+      captain_id: captainMode ? captain?.id : null,
     }
   }
 
   /* Captain path.
 
-     Finds or creates the table row, re-checks the limit against the
-     database, then writes the order. The re-check matters: the grid said
-     green when this captain walked over, and with five captains on the
-     floor another one may have filled it since. */
+     Finds or creates the table row, then sends the order. The order limit is
+     checked by the database in the same step that saves the order, so two
+     captains at one table at the same moment cannot both pass it. */
   async function placeCaptainOrder() {
     const tableNum = captainTable
     if (tableNum == null) { setError('No table selected. Go back and pick one.'); return }
     if (!eventData?.id) { setError('No event loaded. Sign in again.'); return }
 
-    setPlacing(true); setError('')
     try {
-      const { data: existing } = await supabase.from('tables')
-        .select('*').eq('event_id', eventData.id).eq('table_number', tableNum).limit(1)
+      const { data: existing, error: findErr } = await supabase.from('tables')
+        .select('*').eq('event_id', eventData.id).eq('table_number', tableNum).order('created_at').limit(1)
+      // never create the table again just because the look-up did not answer
+      if (findErr) throw new Error('The network is slow - table ' + tableNum + ' could not be checked. Tap Place Order again.')
       let tableRecord = existing?.[0]
       if (!tableRecord) {
         const { data: made, error: mkErr } = await supabase.from('tables')
@@ -115,75 +149,74 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
       // on that table, and claiming it would put a phantom device on the
       // supervisor's Tables screen.
 
-      const limit = eventData?.max_orders_per_table || 0
-      if (limit > 0) {
-        const { data: live } = await supabase.from('orders')
-          .select('id').eq('table_id', tableRecord.id)
-          .in('status', ['pending', 'placed', 'in_progress'])
-        if ((live?.length || 0) >= limit) {
-          setActiveOrderCount(live?.length || 0)
-          throw new Error('Table ' + tableNum + ' has reached its limit of ' + limit +
-            ' order' + (limit === 1 ? '' : 's') + '. Your items are safe - send them once the current order is delivered.')
-        }
+      let r
+      try {
+        r = await sendOrderWithRetry(orderOf(tableRecord.id), { onSlow: () => setSlow(true) })
+      } catch {
+        throw new Error('The network is slow and the order did not go through yet. Tap Place Order again - it will not be sent twice.')
       }
+      if (!r?.ok && r?.reason === 'LIMIT') {
+        setActiveOrderCount(r.live ?? r.limit ?? activeOrderCount)
+        throw new Error('Table ' + tableNum + ' has reached its limit of ' + r.limit +
+          ' order' + (r.limit === 1 ? '' : 's') + '. Your items are safe - send them once the current order is delivered.')
+      }
+      if (!r?.ok) throw new Error('Order failed (' + (r?.reason || 'error') + '). Please try again.')
 
-      const { data: order, error: orderError } = await supabase.from('orders').insert({
-        event_id: eventData.id,
-        table_id: tableRecord.id,
-        status: 'pending',
-        captain_id: captain.id
-      }).select().single()
-      if (orderError || !order) throw new Error('Order failed. Please try again.')
-
-      const { error: itemsError } = await supabase.from('order_items')
-        .insert(cart.map(i => ({ order_id: order.id, menu_item_id: i.id, quantity: i.quantity })))
-      if (itemsError) throw new Error('The order was created but its items did not save. Tell the supervisor before re-sending.')
-
+      const id = r.order_id || orderIdRef.current
+      orderIdRef.current = null
       setOpen(false)
       onCartOpenChange?.(false)
-      onOrderPlaced(order.id, tableNum)
+      onOrderPlaced(id, tableNum)
     } catch (e) {
       setError(e?.message || 'Order failed. Please try again.')
-    } finally {
-      setPlacing(false)
     }
   }
 
   async function placeOrder() {
     if (multi) { openChairs(); return }
-    setError('')
-    if (placing) return
-
-    await checkActiveOrders()
-    if (orderLimitHit) { setShowWait(true); return }
-
-    if (captainMode) { placeCaptainOrder(); return }
-
-    if (isOnline === false) {
-      if (eventData && tableData) await queueOrder({ event_id: eventData.id, table_id: tableData.id, items: cart })
-      onOrderPlaced('offline-' + Date.now()); setOpen(false); return
-    }
-
-    if (!tableData || !eventData) {
-      setError('Table setup in progress... please try again in a moment'); return
-    }
-
-    setPlacing(true)
+    // first thing, before any wait: a second tap now does nothing
+    if (busyRef.current) return
+    busyRef.current = true
+    setPlacing(true); setSlow(false); setError('')
     try {
-      const { data: order, error: orderError } = await supabase
-        .from('orders').insert({ event_id: eventData.id, table_id: tableData.id, status: 'pending' }).select().single()
-      if (orderError) throw orderError
-      const { error: itemsError } = await supabase.from('order_items')
-        .insert(cart.map(i => ({ order_id: order.id, menu_item_id: i.id, quantity: i.quantity })))
-      if (itemsError) throw itemsError
-      await checkActiveOrders()
-      onOrderPlaced(order.id); setOpen(false)
-    } catch(e) {
+      if (captainMode) { await placeCaptainOrder(); return }
+
+      if (!tableData || !eventData) {
+        setError('Table setup in progress... please try again in a moment'); return
+      }
+      const order = orderOf(tableData.id)
+      if (isOnline === false) {
+        await queueOrder(order)
+        orderIdRef.current = null
+        onOrderPlaced('offline-' + order.id); setOpen(false); return
+      }
+      // the screen's count can be a few seconds old: ask again, briefly (the database checks too)
+      const live = await checkActiveOrders(3000)
+      if (!multi && maxOrders > 0 && live >= maxOrders) { setShowWait(true); return }
+
+      let r
       try {
-        await queueOrder({ event_id: eventData.id, table_id: tableData.id, items: cart })
-        onOrderPlaced('offline-' + Date.now()); setOpen(false)
-      } catch(e2) { setError('Order failed. Please call a waiter.') }
-    } finally { setPlacing(false) }
+        r = await sendOrderWithRetry(order, { onSlow: () => setSlow(true) })
+      } catch {
+        // No answer at all: kept on this tablet and sent by itself, with the
+        // same id, as soon as the server answers - never twice.
+        try {
+          await queueOrder(order)
+          orderIdRef.current = null
+          flushOrderQueue()
+          onOrderPlaced('offline-' + order.id); setOpen(false)
+        } catch { setError('Order failed. Please call a waiter.') }
+        return
+      }
+      if (!r?.ok && r?.reason === 'LIMIT') { setActiveOrderCount(r.live ?? maxOrders); setShowWait(true); return }
+      if (!r?.ok) { setError('Order failed. Please try again or call a waiter.'); return }
+      orderIdRef.current = null
+      checkActiveOrders()
+      onOrderPlaced(r.order_id || order.id); setOpen(false)
+    } finally {
+      busyRef.current = false
+      setPlacing(false); setSlow(false)
+    }
   }
 
   return (
@@ -268,7 +301,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             border:'none', borderRadius:13, padding:'13px 22px',
             fontWeight:900, fontSize:16, whiteSpace:'nowrap',
             cursor: placing ? 'wait' : 'pointer' }}>
-          {placing ? 'Placing...' : orderLimitHit ? '🔒 Table busy' : 'Place Order \u2192'}
+          {placing ? (slow ? 'Still sending…' : 'Sending…') : orderLimitHit ? '🔒 Table busy' : 'Place Order \u2192'}
         </button>
       </div>
 
@@ -382,7 +415,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
               className={!placing && !orderLimitHit ? 'ss-order-now' : ''}
               style={{ width:'100%', background: placing ? '#999' : orderLimitHit ? '#E5E7EB' : '#E8890C', color: orderLimitHit ? '#9CA3AF' : '#fff', border:'none', borderRadius:14, padding:'18px', fontSize:17, fontWeight:900, cursor: placing || orderLimitHit ? 'not-allowed' : 'pointer', transition:'all 0.2s', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
               {placing
-                ? '⏳ Placing Order...'
+                ? (slow ? '⏳ Still sending… please wait' : '⏳ Sending order…')
                 : orderLimitHit
                   ? '🔒 Please Wait'
                   : captainMode

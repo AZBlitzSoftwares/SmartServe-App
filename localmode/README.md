@@ -83,7 +83,7 @@ You need a Mac (Apple Silicon or Intel) or a Windows 10/11 laptop, with its char
    click **Install**, then **Yes**. Then run Prepare Event again.
 7. **Give the laptop a fixed address on the event router**, so the links never change.
    In the router's admin page (often `http://192.168.1.1`, password on the router label) find
-   **DHCP reservation** / **Address reservation**, choose this laptop (connected by Wi-Fi) and give it
+   **DHCP reservation** / **Address reservation**, choose this laptop (connected by **cable**) and give it
    e.g. **192.168.1.10**. Write the links on a card for the team:
    - Captain and guest tablets: `http://192.168.1.10:8080/`
    - Waiter phones: `http://192.168.1.10:8080/waiter`
@@ -94,6 +94,32 @@ You need a Mac (Apple Silicon or Intel) or a Windows 10/11 laptop, with its char
 9. Do one test run (next section), so the **firewall question** is answered at the office, not at the venue:
    - Windows: *Windows Defender Firewall has blocked some features* -> tick **Private networks** -> **Allow access**.
    - Mac: *Do you want the application "node" to accept incoming network connections?* -> **Allow**.
+
+---
+
+## The venue network (read before every event)
+
+The laptop serves every device in the hall. What slows an event down is almost always the network,
+not the laptop. Set it up like this:
+
+1. **The laptop is on a cable** to the main router (LAN port), never on Wi-Fi. On Wi-Fi the laptop
+   shares the air with every tablet and every answer goes through the air twice.
+2. **A second router for a big hall = an Access Point**, joined to the main router by a LAN cable
+   (up to about 100 m with Cat6). In the second router's settings choose **Access Point mode**
+   (sometimes "AP mode" or "Bridge"), or switch its **DHCP off** and plug the cable into one of its
+   **LAN** ports (not WAN). Then every device, on either router, is on the same network as the laptop.
+   Two routers each in normal router mode do **not** work: tablets on the second one cannot reach the laptop.
+3. **Same Wi-Fi name and password** on both routers is fine (devices join the nearest one).
+   Put one router at each end of the hall. Plan for **about 25 devices per router**.
+4. **5 GHz** for the tablets wherever the router offers it (a separate "-5G" name, or one name with
+   band steering). Turn off any "guest network" / "client isolation" / "AP isolation" setting: it stops
+   tablets reaching the laptop.
+5. **No phone hotspot or laptop hotspot** as the event network (they allow only 5-10 devices).
+6. **Windows laptop**: the network must be **Private** (Settings -> Network -> the connection ->
+   Private), and the firewall question answered with **Allow** on Private networks. Set the laptop to
+   never sleep, plugged in, lid open.
+7. Keep the **welcome video short and small** (a 720p clip of 10-20 MB). Each tablet downloads it from
+   the laptop **once** and keeps it; a 200 MB video is 200 MB per tablet at the start of the event.
 
 ---
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import janusLogo from '../../assets/janus_logo.jpg'
+import { isLaptopMedia, localMediaUrl } from '../../lib/mediaCache'
 
 
 // ─── Event Status Helper ───────────────────────────────────────────────────
@@ -67,9 +68,23 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
      none. So the first attempt is made with sound; if the browser refuses,
      it falls back to muted and arms a one-time listener, and the speaker
      button gives anyone an obvious way to turn it on deliberately.       */
+  // On the laptop the video plays from this tablet's own copy (lib/mediaCache)
+  const rawVideo = eventData?.video_url || null
+  const [videoSrc, setVideoSrc] = useState(() => (isLaptopMedia(rawVideo) ? null : rawVideo))
+  useEffect(() => {
+    let live = true
+    if (!isLaptopMedia(rawVideo)) { setVideoSrc(rawVideo); return }
+    setVideoSrc(null)
+    // First time on this tablet the file is still downloading: after 8 s play it
+    // from the laptop meanwhile; the next welcome screen plays the tablet's copy.
+    const t = setTimeout(() => { if (live) setVideoSrc(v => v || rawVideo) }, 8000)
+    localMediaUrl(rawVideo).then(u => { if (live) setVideoSrc(v => v || u) }, () => { if (live) setVideoSrc(v => v || rawVideo) })
+    return () => { live = false; clearTimeout(t) }
+  }, [rawVideo])
+
   useEffect(() => {
     const v = videoRef.current
-    if (!v || !eventData?.video_url) return
+    if (!v || !videoSrc) return
     const wantSound = eventData?.video_sound_enabled !== false
     v.load()
     v.muted = !wantSound
@@ -109,7 +124,7 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
       })
     }
     return disarm
-  }, [eventData?.video_url, eventData?.video_sound_enabled])
+  }, [videoSrc, eventData?.video_sound_enabled])
 
   /* The tap on this button IS the user gesture the browser was waiting
      for, which is why it works when nothing else does. */
@@ -183,7 +198,7 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
         <div style={{ width:'100%', flex:1, minHeight:0, position:'relative', overflow:'hidden' }}>
           {/* ss-welcome-sound-74-el. No muted attribute: the effect above
               owns it, so the event's sound setting is what decides. */}
-          <video ref={videoRef} src={eventData.video_url} autoPlay loop playsInline
+          <video ref={videoRef} src={videoSrc || undefined} autoPlay loop playsInline
             style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
 
           {/* ss-sound-words-76. A word, not a symbol. The speaker icon that

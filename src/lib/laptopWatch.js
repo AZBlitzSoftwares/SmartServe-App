@@ -7,7 +7,7 @@ import { askLaptop, cloudLaptopsFor, netOf, searchWifi } from './laptopFinder'
    The address comes from the router: a router restart, the laptop waking
    up or rejoining the Wi-Fi can give it a new one in the middle of the
    event. Then every device still points at the old address. This watch
-   asks the laptop every 5 seconds; after 20 seconds without an answer it
+   asks the laptop every 5 seconds; after about a minute without an answer it
    looks for the laptop carrying the same events:
      1. through the cloud, when the venue has any internet (the laptop tells
         the cloud its address every minute);
@@ -20,7 +20,11 @@ import { askLaptop, cloudLaptopsFor, netOf, searchWifi } from './laptopFinder'
    while the screen is hidden. Plain DOM, outside React.                 */
 
 const POLL_MS = 5000
-const MISSES_BEFORE_SEARCH = 4
+// A busy laptop is not a lost laptop: wait 8 s for each answer, and only
+// after 6 misses in a row (over a minute) start looking elsewhere. Looking
+// means asking up to 254 addresses, which only adds load to a busy Wi-Fi.
+const ASK_TIMEOUT_MS = 8000
+const MISSES_BEFORE_SEARCH = 6
 const BACKOFF_MS = [30000, 60000, 120000, 300000]
 
 export function startLaptopWatch() {
@@ -84,7 +88,7 @@ export function startLaptopWatch() {
       const net = netOf(own, { loopback: true })
       if (!elsewhere && !back && net) {
         const r = await searchWifi({
-          nets: [net], port, wantEvents: events, isStopped: () => back, concurrency: 12, jitterMs: 400,
+          nets: [net], port, wantEvents: events, isStopped: () => back, concurrency: 6, jitterMs: 400,
           onProgress: ({ checked }) => show(`The laptop server is not answering. Looking for it on ${net}.x (${checked} of 254)…`),
         })
         if ((r.found || []).some(f => f.base === own)) back = true
@@ -108,7 +112,7 @@ export function startLaptopWatch() {
 
   async function tick() {
     if (searching) return
-    const j = await askLaptop(own, 3000)
+    const j = await askLaptop(own, ASK_TIMEOUT_MS)
     if (j) {
       misses = 0; rounds = 0; nextSearchAt = 0
       if (Array.isArray(j.events)) events = j.events.map(e => e && e.id).filter(Boolean)
@@ -123,6 +127,10 @@ export function startLaptopWatch() {
     search()
   }
 
-  tick()
-  setInterval(tick, POLL_MS)
+  // the next check is planned after this one answered: checks never overlap
+  async function loop() {
+    try { await tick() } catch { /* next round */ }
+    setTimeout(loop, POLL_MS)
+  }
+  loop()
 }

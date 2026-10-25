@@ -216,7 +216,7 @@ export function AutoAssignSetting({ eventData, onEventChange }) {
         <div style={{ flex:1, minWidth:220 }}>
           <div style={{ fontWeight:900, fontSize:15 }}>Assign waiters automatically</div>
           <div style={{ fontSize:12.5, color:'var(--ink2)', marginTop:3, lineHeight:1.5 }}>
-            {here && 'On, on this desk. Every new KOT' + (eventData?.kot_per_category ? ' (one per category, so each category goes to its own runner)' : '') + ' and every help request goes to the least busy waiter and prints here at once. Keep this desk signed in (any tab). You can still change a waiter by hand.'}
+            {here && 'On, on this desk. Every new KOT' + (eventData?.kot_per_category ? (eventData?.kot_per_course ? ' (one per course, so each course goes to its own runner)' : ' (one per category, so each category goes to its own runner)') : '') + ' and every help request goes to the least busy waiter and prints here at once. Keep this desk signed in (any tab). You can still change a waiter by hand.'}
             {elsewhere && 'On, running on another desk: that desk assigns the waiters and prints the KOTs.'}
             {!st.on && 'Off: the desk picks the waiter for each KOT (as before). On: every new KOT and help request gets the least busy waiter by itself and prints on this desk.'}
           </div>

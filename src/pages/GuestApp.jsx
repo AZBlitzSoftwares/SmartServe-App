@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { supabase } from '../lib/supabase'
-import { getPendingOrders, clearOrder } from '../lib/offlineQueue'
+import { flushOrderQueue } from '../lib/offlineQueue'
 import SetupScreen from '../components/guest/SetupScreen'
 import CaptainLogin, { EntryChooser } from '../components/guest/CaptainLogin'
 import CaptainOrders from '../components/guest/CaptainOrders'
@@ -890,10 +890,15 @@ export default function GuestApp() {
   }
 
   useEffect(() => {
-    const on = () => { setIsOnline(true); syncOfflineOrders() }
+    const on = () => { setIsOnline(true); flushOrderQueue() }
     const off = () => setIsOnline(false)
     window.addEventListener('online', on); window.addEventListener('offline', off)
-    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+    // Orders kept on this tablet go as soon as the server answers again - not
+    // only when the browser reports "back online" (on a busy Wi-Fi it never
+    // went offline, the server was just slow). One run at a time, same ids.
+    flushOrderQueue()
+    const t = setInterval(() => { flushOrderQueue() }, 15000)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); clearInterval(t) }
   }, [])
 
 
@@ -1028,22 +1033,6 @@ export default function GuestApp() {
     // on browsing. The smiley on the genie screen still goes to Welcome,
     // because that guest has just finished ordering.
     goTo('menu')
-  }
-
-  async function syncOfflineOrders() {
-    const pending = await getPendingOrders()
-    for (const order of pending) {
-      try {
-        const { data: o } = await supabase.from('orders')
-          .insert({ event_id:order.event_id, table_id:order.table_id, status:'pending' }).select().single()
-        if (o) {
-          await supabase.from('order_items').insert(
-            order.items.map(i => ({ order_id:o.id, menu_item_id:i.id, quantity:i.quantity }))
-          )
-          await clearOrder(order.id)
-        }
-      } catch(e) { console.error(e) }
-    }
   }
 
   if (appState === 'loading') return (
