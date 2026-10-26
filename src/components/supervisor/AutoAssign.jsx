@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { getDeviceId } from '../../lib/deviceId'
 import { serviceDates } from '../guest/deviceEntry'
 import { printKotWindow, kotAsOrder, helpAsOrder } from '../../lib/kotSlip'
+import { watchChanges, onLaptop } from '../../lib/liveRev'
 
 /* Assign waiters automatically (event switch, Control › Waiters).
 
@@ -19,8 +20,26 @@ import { printKotWindow, kotAsOrder, helpAsOrder } from '../../lib/kotSlip'
    exactly as if the operator had assigned it by hand. The desk can still change a
    waiter by hand at any time. */
 
+// Cloud: every 4 s. On the event laptop the runner reacts to the server's change
+// counter instead (checked every 0.3 s - a few bytes from the laptop's memory),
+// so a new KOT is assigned and printed well within a second of the guest's order.
 const EVERY_MS = 4000
-const PRINT_GAP_MS = 1500
+const LAPTOP_CHECK_MS = 300
+// between two slips printed at this desk (one order can make several KOTs):
+// each slip prints within ~50 ms of its window opening, so 0.25 s keeps them apart
+const PRINT_GAP_MS = 250
+// On the laptop the list of events this desk runs is asked again every 5 s, not on
+// every change; on the cloud on every check, as before. The switch itself tells the
+// runner at once (AUTO_CHANGED), it is always flipped on the desk that runs it.
+const EVENTS_EVERY_MS = onLaptop ? 5000 : 0
+// a desk that runs no event checks the laptop's counter only now and then
+const IDLE_CHECK_MS = 2000
+const AUTO_CHANGED = 'ss-auto-assign-changed'
+const AUTO_CHANGED_KEY = 'ss_auto_changed'
+function tellRunner() {
+  try { localStorage.setItem(AUTO_CHANGED_KEY, String(Date.now())) } catch { /* private mode */ }
+  try { window.dispatchEvent(new Event(AUTO_CHANGED)) } catch { /* old browser */ }
+}
 // several desk tabs on one laptop share the device id: a visible tab does the work,
 // a hidden one only steps in when no visible tab has run for this long
 const VISIBLE_KEY = 'ss_auto_visible_at'
@@ -33,6 +52,7 @@ export function AutoAssignRunner() {
   const [events, setEvents] = useState([])
   const [blocked, setBlocked] = useState(false)
   const busy = useRef(false)
+  const evCache = useRef(null)
   const queue = useRef([])
   const printing = useRef(false)
 
@@ -94,8 +114,9 @@ export function AutoAssignRunner() {
 
   useEffect(() => {
     let stopped = false
+    let again = false
     async function tick() {
-      if (busy.current) return
+      if (busy.current) { again = true; return }
       if (isVisible()) {
         try { localStorage.setItem(VISIBLE_KEY, String(Date.now())) } catch { /* private mode */ }
       } else {
@@ -105,21 +126,34 @@ export function AutoAssignRunner() {
       }
       busy.current = true
       try {
-        const { data, error } = await supabase.from('events')
-          .select('id,name,date,kot_per_category,multi_kitchen,maestro')
-          .eq('auto_assign_waiter', true).eq('auto_assign_device', getDeviceId())
-          .in('date', serviceDates())
-        if (!error) {
-          const list = (data || []).filter(e => !e.multi_kitchen && !e.maestro)
-          if (!stopped) setEvents(list)
-          for (const ev of list) await runEvent(ev)
+        // which events this desk runs: asked again every few seconds, not on every
+        // change (one trip less between a new order and its slip)
+        if (!evCache.current || Date.now() - evCache.current.at > EVENTS_EVERY_MS) {
+          const { data, error } = await supabase.from('events')
+            .select('id,name,date,kot_per_category,multi_kitchen,maestro')
+            .eq('auto_assign_waiter', true).eq('auto_assign_device', getDeviceId())
+            .in('date', serviceDates())
+          if (!error) {
+            evCache.current = { at: Date.now(), list: (data || []).filter(e => !e.multi_kitchen && !e.maestro) }
+            if (!stopped) setEvents(evCache.current.list)
+          }
         }
+        for (const ev of evCache.current?.list || []) await runEvent(ev)
       } catch { /* the next tick tries again */ }
       busy.current = false
+      // something asked for a run while this one was busy (a new order, the switch)
+      if (again && !stopped) { again = false; tick() }
     }
     tick()
-    const t = setInterval(tick, EVERY_MS)
-    return () => { stopped = true; clearInterval(t) }
+    const every = () => (evCache.current?.list?.length ? LAPTOP_CHECK_MS : IDLE_CHECK_MS)
+    // a minimised or covered desk window keeps the same pace: it may be the one printing
+    const stop = watchChanges(() => tick(), { cloudMs: EVERY_MS, hiddenCloudMs: EVERY_MS, everyMs: every, hiddenEveryMs: every, safetyMs: 8000 })
+    // the switch was turned on or off on this desk (this tab or another): look again now
+    const changed = () => { evCache.current = null; tick() }
+    const onStorage = e => { if (e.key === AUTO_CHANGED_KEY) changed() }
+    window.addEventListener(AUTO_CHANGED, changed)
+    window.addEventListener('storage', onStorage)
+    return () => { stopped = true; stop(); window.removeEventListener(AUTO_CHANGED, changed); window.removeEventListener('storage', onStorage) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -190,6 +224,7 @@ export function AutoAssignSetting({ eventData, onEventChange }) {
     setBusy(false)
     if (error) { setMsg('Could not save' + (/auto_assign/.test(error.message || '') ? ': the database update for this switch has not been run yet.' : '. Check the connection and try again.')); return }
     setSt(s => ({ on, device: on ? me : s.device }))
+    tellRunner()
     const { data } = await supabase.from('events').select('*').eq('id', eventData.id).single()
     if (data && onEventChange) onEventChange(data)
   }

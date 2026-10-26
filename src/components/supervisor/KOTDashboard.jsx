@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, memo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { armOrderBeep, playOrderBeep, orderSoundOn, setOrderSound } from '../../lib/orderBeep'
 import { printKotWindow, kotAsOrder, helpAsOrder } from '../../lib/kotSlip'
@@ -7,6 +7,32 @@ import { watchChanges } from '../../lib/liveRev'
 
 // A waiter who has had an order this long without delivering it shows DELAY
 const DELAY_MIN = 5
+
+/* The running clock on each card. Only these little clocks change every
+   second; the rest of the screen is redrawn when an order changes (and every
+   15 s for the DELAY minutes). Redrawing every card each second cost a slow
+   tablet about 0.3 s a time, so taps waited behind it. One shared timer. */
+const tickers = new Set()
+let tickTimer = null
+function useNowEverySecond() {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const f = t => setNow(t)
+    tickers.add(f)
+    if (!tickTimer) tickTimer = setInterval(() => { const t = Date.now(); tickers.forEach(g => g(t)) }, 1000)
+    return () => { tickers.delete(f); if (!tickers.size) { clearInterval(tickTimer); tickTimer = null } }
+  }, [])
+  return now
+}
+const clockText = sec => Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')
+const secsBetween = (a, b) => Math.max(0, Math.floor((b - new Date(a).getTime()) / 1000))
+function RunningClock({ from }) {
+  return clockText(secsBetween(from, useNowEverySecond()))
+}
+// Frozen once delivered / resolved: what the guest waited
+function CardClock({ from, to }) {
+  return to ? clockText(secsBetween(from, new Date(to).getTime())) + ' ✓' : <RunningClock from={from} />
+}
 
 // The number called across the hall: waiter_number, else the "(07)" in "Raju (07)", else the name
 function waiterNo(w) {
@@ -73,7 +99,89 @@ function WaiterPicker({ waiters, busyOf, title, sub, current, allowNone, onPick,
   )
 }
 
-const BUILD_VERSION = 'v2.9 \u00B7 2026-10-26'
+/* One card on Live Orders. Drawn again only when its own record, state or
+   waiter changes (memo): with 150+ cards on a slow tablet, redrawing them all
+   for every tap or new order is what made Delivered take seconds. The buttons
+   call the screen's handlers through act (always the current ones). */
+const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, withMin, act }) {
+  const isSos  = kind === 'sos'
+  const isKot  = kind === 'kot'
+  // a KOT keeps its dishes as [{ name, qty, note }]
+  const lines_ = isSos ? (rec.sos_request_items || []) : isKot
+    ? (Array.isArray(rec.items) ? rec.items : []).map(i => ({ quantity: i.qty || i.quantity || 1, note: i.note || '', menu_items: { name: i.name } }))
+    : (rec.order_items || [])
+  const count  = isSos ? lines_.length : lines_.reduce((n, li) => n + (li.quantity || 1), 0)
+  const waiterName = rec.waiters?.name || w?.name || (isKot ? rec.waiter_label || '' : '')
+  const waiterLabel = w ? waiterNo(w) : (isKot && rec.waiter_label ? rec.waiter_label : waiterName ? waiterNo({ name: waiterName }) : '')
+  // Only ever set on a captain event
+  const captainName = (isKot ? rec.captain_name : rec.captains?.name) || ''
+  const tn = rec.tables?.table_number ?? rec.table_number ?? null
+  const prnText = !isKot ? '' : !rec.waiter_id ? (prn ? '🖨 ' + prn.name : '🖨 desk')
+    : rec.print_status === 'printed' ? '🖨 ' + (prn ? prn.name : 'desk') + ' ✓'
+    : rec.print_status === 'desk' ? '🖨 printed at the desk'
+    : rec.print_status === 'failed' ? '🖨 not printed - ' + (prn ? prn.name : 'printer')
+    : ['queued', 'printing'].includes(rec.print_status) ? '🖨 printing on ' + (prn ? prn.name : 'printer') + '…' : ''
+  const timeStr = new Date(rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
+  // Since the order came in (frozen once finished) - what the guest has waited
+  const endTs = rec.delivered_at || rec.resolved_at
+  const band = st === 'new' ? (isSos ? 'New help request' : 'New order')
+             : st === 'delay' ? 'Delay · ' + withMin + ' min with waiter ' + (waiterLabel || '')
+             : st === 'progress' ? (waiterLabel ? 'Waiter ' + waiterLabel + ' · ' + withMin + ' min' : 'In progress')
+             : st === 'done' ? (isSos ? 'Done ✓' : 'Delivered ✓')
+             : 'Cancelled'
+  const shown = lines_.slice(0, 4)
+  const nameOf = li => isSos ? li.item_name : (li.menu_items?.name || 'Item')
+  return (
+    <div className={'kt st-' + st} data-card={id}>
+      <div className={'kt-band b-' + st}>{band}</div>
+      <div className="kt-body" onClick={() => act.current.toggle(id)}>
+        <div className="kt-head">
+          {isKot && rec.kot_no && <span className="kt-no" title={'KOT ' + rec.kot_no}>{rec.kot_no}</span>}
+          <span className={'kt-t' + (tOn ? ' on' : '')} title={tn != null ? 'Show only table ' + tn : ''}
+            onClick={e => { e.stopPropagation(); if (tn != null) act.current.table(tOn ? null : tn) }}>T{tn ?? '?'}</span>
+          {!isKot && <span className={'kt-lbl' + (isSos ? ' help' : '')}>
+            {isSos ? '🔔 Help' : count + (count === 1 ? ' item' : ' items')}</span>}
+          <span className={'kt-w' + (waiterLabel ? '' : ' none')} title={waiterName ? 'Waiter ' + waiterName : 'No waiter yet'}>{waiterLabel || '–'}</span>
+        </div>
+        {isKot && <div className="kt-cat">{(rec.category_name || 'KOT') + ' · ' + count}</div>}
+        <div className="kt-meta">
+          <span>{timeStr}</span><span className="clk">⏱ <CardClock from={rec.created_at} to={endTs} /></span>
+          {captainName && <span className="cap">🧑 {captainName}</span>}
+          {isKot && <span className={'prn' + (rec.print_status === 'failed' ? ' bad' : '')}>{prnText}</span>}
+        </div>
+        <ul className="kt-items">
+          {shown.map((li, k) => <li key={k}><b>{li.quantity || 1}×</b><span>{nameOf(li)}</span></li>)}
+          {lines_.length > shown.length && <li className="more">+ {lines_.length - shown.length} more</li>}
+        </ul>
+      </div>
+      <div className="kt-act">
+        {st === 'new' && <button className="kt-assign" disabled={busy} onClick={() => act.current.openPicker(isSos ? 'sos' : isKot ? 'kot' : 'order', rec)}>Assign waiter</button>}
+        {(st === 'progress' || st === 'delay') && (
+          <button className="kt-deliver" onClick={() => isSos ? act.current.resolveSOSRequest(rec.id) : isKot ? act.current.deliverKot(rec) : act.current.markDelivered(rec)}>✓ {isSos ? 'Done' : 'Delivered'}</button>
+        )}
+        <button className="kt-more" onClick={() => act.current.toggle(id)} title="Details, print, cancel">{open ? '▲' : '⋯'}</button>
+      </div>
+      {open && (
+        <div className="kt-detail">
+          {captainName && <div style={{ color:'#2563EB', fontWeight:700, marginBottom:6 }}>Order taken by captain {captainName}</div>}
+          {waiterName && <div style={{ color:'#475569', fontWeight:700, marginBottom:6 }}>Waiter {waiterName}</div>}
+          {lines_.map((li, k) => (
+            <div className="ln" key={k}><span style={{ fontWeight:600 }}>{nameOf(li)}{li.note ? <em style={{ marginLeft:6, fontStyle:'normal', background:'#0F172A', color:'#fff', borderRadius:4, padding:'0 5px', fontSize:11 }}>{li.note}</em> : null}</span><span style={{ color:'#64748B' }}>x{li.quantity || 1}</span></div>
+          ))}
+          <div className="btns">
+            <button onClick={() => isSos ? act.current.printHelpKOT(rec) : isKot ? act.current.reprintKot(rec) : act.current.printKOT(rec)}>🖨 {isSos ? 'Print help slip' : 'Print KOT'}</button>
+            {(st === 'progress' || st === 'delay') && <button onClick={() => act.current.openPicker(isSos ? 'sos' : isKot ? 'kot' : 'order', rec)}>Change waiter</button>}
+            {!['delivered','cancelled','resolved'].includes(rec.status) && (
+              <button className="red" onClick={() => isSos ? act.current.cancelSOSRequest(rec.id) : isKot ? act.current.cancelKot(rec) : act.current.cancelOrder(rec.id)}>✕ {isKot ? 'Cancel this KOT' : 'Cancel'}</button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+})
+
+const BUILD_VERSION = 'v2.9.1 \u00B7 2026-10-26'
 
 const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
@@ -90,7 +198,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   // Handlers run before the reload lands, so they read the count from here
   const timelineRef = useRef(0)
   const [nowTs, setNowTs] = useState(Date.now())
-  useEffect(() => { const t = setInterval(() => setNowTs(Date.now()), 1000); return () => clearInterval(t) }, [])
+  // DELAY and "n min with waiter" are whole minutes: 15 s is plenty (the clocks tick on their own)
+  useEffect(() => { const t = setInterval(() => setNowTs(Date.now()), 15000); return () => clearInterval(t) }, [])
   // Remembered, so a supervisor away from the printer stays silenced
   const [autoPrint, setAutoPrint] = useState(() => localStorage.getItem('ss_autoprint') !== 'off')
   // the waiter pick list: { kind: 'order' | 'sos' | 'kot', rec }
@@ -178,19 +287,31 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const seq = useRef({ orders: 0, ordersShown: 0, sos: 0, sosShown: 0 })
   const [actionErr, setActionErr] = useState('')
 
-  // set state only when the answer differs from the last one (no needless redraw)
-  const changed = (key, data) => {
-    const sig = JSON.stringify(data)
-    if (lastSig.current[key] === sig) return false
-    lastSig.current[key] = sig
-    return true
+  /* The list to show, or null when nothing in it changed (no redraw at all).
+     A record that is exactly as before keeps its old object, so its card is
+     not redrawn either: a new order redraws one card, not the whole board. */
+  const settle = (key, list) => {
+    const last = lastSig.current[key] || { byId: new Map(), list: null }
+    const byId = new Map()
+    const out = list.map(x => {
+      const sig = JSON.stringify(x)
+      const id = x?.id ?? sig
+      const had = last.byId.get(id)
+      const keep = had && had[0] === sig ? had[1] : x
+      byId.set(id, [sig, keep])
+      return keep
+    })
+    const same = last.list && last.list.length === out.length && last.list.every((x, i) => x === out[i])
+    lastSig.current[key] = { byId, list: same ? last.list : out }
+    return same ? null : out
   }
 
   useEffect(() => {
     if (!eventData) return
     lastSig.current = {}
     loadWaiters(); loadOrders(true); loadSOS()
-    const stop = watchChanges(() => Promise.all([loadOrders(false), loadSOS()]), { cloudMs: 4000 })
+    // on the laptop: the change counter is checked every second, so a new order shows within about a second
+    const stop = watchChanges(() => Promise.all([loadOrders(false), loadSOS()]), { cloudMs: 4000, everyMs: 1000 })
     return stop
   }, [eventData])
 
@@ -222,7 +343,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     const byId = new Map()
     for (const r of [...(a.data || []), ...(h.data || [])]) byId.set(r.id, r)
     const list = [...byId.values()].sort((x, y) => new Date(y.created_at) - new Date(x.created_at))
-    if (changed('sos', list)) setSosRequests(list)
+    const sl = settle('sos', list)
+    if (sl) setSosRequests(sl)
   }
 
   function formatTimer(assignedAt) {
@@ -289,8 +411,10 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
       splitRef.current = known
       // the KOT finder's cards follow the same reloads
       if (kotQRef.current) searchKots(kotQRef.current)
-      if (changed('kots', kl)) setKots(kl)
-      if (!ks.error && changed('printers', ks.data || [])) setPrinters(ks.data || [])
+      const kNew = settle('kots', kl)
+      if (kNew) setKots(kNew)
+      const pNew = ks.error ? null : settle('printers', ks.data || [])
+      if (pNew) setPrinters(pNew)
     }
     if (!eventData.kot_per_category) {
       if (!fresh()) { if (showSpinner) setLoading(false); return }
@@ -304,7 +428,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
       playOrderBeep()
     }
     prevCount.current = activeCount
-    if (changed('orders', all)) setOrders(all)
+    const oNew = settle('orders', all)
+    if (oNew) setOrders(oNew)
     onOrderCountChange(activeCount)
     // records tapped here that the server now shows as finished: no longer needed
     setDoneLocal(prev => {
@@ -366,22 +491,35 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     if (v) setTimeout(playOrderBeep, 50)
   }
 
+  /* Save the waiter and get the saved row back in the same request. If that
+     answer is lost (Wi-Fi), ask once more: the row is returned only if it now
+     has this waiter (then the slip still prints); null = not confirmed. */
+  async function saveAndRead(table, id, patch, sel, waiterId) {
+    try {
+      const { data, error } = await supabase.from(table).update(patch).eq('id', id).select(sel)
+      const row = !error && (Array.isArray(data) ? data[0] : data)
+      if (row) return row
+    } catch { /* asked again below */ }
+    if (!waiterId) return null
+    try {
+      const { data } = await supabase.from(table).select(sel).eq('id', id).maybeSingle()
+      return data && data.waiter_id === waiterId ? data : null
+    } catch { return null }
+  }
+
   async function assignWaiter(orderId, waiterId) {
     setAssigning(orderId)
-    await supabase.from('orders').update({ status:'in_progress', waiter_id:waiterId||null, assigned_at:waiterId?new Date().toISOString():null }).eq('id', orderId)
-    setAssigning(null); loadOrders(false)
-
-    // Auto-print the KOT the moment a waiter is assigned. The manual
-    // "Print KOT" button stays available for reprints, printer outages,
+    // Auto-print the KOT the moment a waiter is assigned. The saved order comes
+    // back in the same answer (one trip to the server, not two) and prints at
+    // once. The manual "Print KOT" button stays for reprints, printer outages,
     // network drops or power cuts - nothing about it changes.
-    if (waiterId) {
-      try {
-        const { data: fresh } = await supabase.from('orders')
-          .select('*, tables(table_number), waiters(name), captains(name), order_items(quantity, menu_items(name, is_veg))')
-          .eq('id', orderId).single()
-        if (fresh && autoPrint) setTimeout(() => printKOT(fresh), 300)
-      } catch (e) { /* never block assignment if printing fails */ }
-    }
+    const SEL = '*, tables(table_number), waiters(name), captains(name), order_items(quantity, menu_items(name, is_veg))'
+    const fresh = await saveAndRead('orders', orderId,
+      { status:'in_progress', waiter_id:waiterId||null, assigned_at:waiterId?new Date().toISOString():null }, SEL, waiterId)
+    setAssigning(null)
+    if (waiterId && fresh && autoPrint) { try { printKOT(fresh) } catch { /* never block assignment if printing fails */ } }
+    if (waiterId && !fresh) setActionErr('Waiter not confirmed for table ' + (orders.find(o => o.id === orderId)?.tables?.table_number ?? '?') + ' (no answer from the server). Check the card: assign again, or tap Print KOT once it shows the waiter.')
+    loadOrders(false)
   }
 
   // Cancelling and resolving are different outcomes and must not share a
@@ -394,19 +532,15 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
 
   async function assignSOSWaiter(sosId, waiterId) {
     setAssigning('sos-'+sosId)
-    await supabase.from('sos_requests').update({ status:'in_progress', waiter_id:waiterId||null, assigned_at:waiterId?new Date().toISOString():null }).eq('id', sosId)
-    setAssigning(null); loadSOS()
-
     // Help requests auto-print exactly like orders do, so the waiter
-    // walks over already knowing what to carry.
-    if (waiterId) {
-      try {
-        const { data: fresh } = await supabase.from('sos_requests')
-          .select('*, tables(table_number), waiters(name), captains(name), sos_request_items(item_name, quantity)')
-          .eq('id', sosId).single()
-        if (fresh && autoPrint) setTimeout(() => printHelpKOT(fresh), 300)
-      } catch (e) { /* never block assignment if printing fails */ }
-    }
+    // walks over already knowing what to carry. Same single trip as orders.
+    const SEL = '*, tables(table_number), waiters(name), captains(name), sos_request_items(item_name, quantity)'
+    const fresh = await saveAndRead('sos_requests', sosId,
+      { status:'in_progress', waiter_id:waiterId||null, assigned_at:waiterId?new Date().toISOString():null }, SEL, waiterId)
+    setAssigning(null)
+    if (waiterId && fresh && autoPrint) { try { printHelpKOT(fresh) } catch { /* never block assignment if printing fails */ } }
+    if (waiterId && !fresh) setActionErr('Waiter not confirmed for the help request at table ' + (sosRequests.find(r => r.id === sosId)?.tables?.table_number ?? '?') + ' (no answer from the server). Check the card: assign again, or tap Print help slip once it shows the waiter.')
+    loadSOS()
   }
 
   // Reshape a help request into the object printKOT already understands,
@@ -549,10 +683,10 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     setAssigning('kot-' + k.id)
     const { data, error } = await supabase.rpc('ss_kot_assign', { p_kot_id: k.id, p_waiter_id: waiterId })
     setAssigning(null)
-    if (error) { alert('Could not assign: ' + (error.message || 'try again')); loadOrders(false); return }
+    if (error) { setActionErr('Not assigned: KOT ' + (k.kot_no || '') + ' - tap it again.' + (error.message ? ' (' + error.message + ')' : '')); loadOrders(false); return }
+    // no kitchen printer for this category: printed here, at once, as the desk always did
+    if (data?.print === 'desk' && autoPrint) { try { printKotSlip(k, data.waiter) } catch { /* the reprint button stays */ } }
     loadOrders(false)
-    // no kitchen printer for this category: printed here, as the desk always did
-    if (data?.print === 'desk' && autoPrint) setTimeout(() => printKotSlip(k, data.waiter), 300)
   }
   function deliverKot(k) {
     clearFiltersIfEmpty(timelineRef.current - 1)
@@ -572,6 +706,16 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
 
   // Open the pick list for an order, a help request or a KOT
   const openPicker = (kind, rec) => setPicker({ kind, rec })
+
+  // what the cards' buttons call: refreshed on every draw, so a card that was not redrawn still calls the current handlers
+  const actRef = useRef(null)
+  actRef.current = {
+    toggle: id => setExpandedRow(cur => cur === id ? null : id),
+    table: tn => setTableFilter(tn),
+    openPicker, resolveSOSRequest, deliverKot, markDelivered, printHelpKOT, reprintKot, printKOT, cancelSOSRequest, cancelKot,
+    cancelOrder: oid => setShowCancelDialog(oid),
+  }
+
   async function pickWaiter(w) {
     const p = picker; setPicker(null)
     if (!p || !w) return
@@ -711,7 +855,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
             @media (min-width: 600px)  { .kt-grid { grid-template-columns:repeat(2, minmax(0,1fr)); } }
             @media (min-width: 900px)  { .kt-grid { grid-template-columns:repeat(3, minmax(0,1fr)); } }
             @media (min-width: 1280px) { .kt-grid { grid-template-columns:repeat(4, minmax(0,1fr)); } }
-            .kt { background:#fff; border:1px solid #E5E7EB; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 1px 2px rgba(15,23,42,.05); }
+            .kt { background:#fff; border:1px solid #E5E7EB; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 1px 2px rgba(15,23,42,.05);
+                  content-visibility:auto; contain-intrinsic-size:auto 190px; }
             .kt.st-new { border-color:#93C5FD; }
             .kt.st-delay { border-color:#FCA5A5; }
             .kt.st-done, .kt.st-void { opacity:.78; }
@@ -783,91 +928,18 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
           `}</style>
           <div className="kt-grid">
           {timeline.map(row => {
-            const isSos  = row.kind === 'sos'
-            const isKot  = row.kind === 'kot'
-            const rec    = isSos ? row.sos : isKot ? row.kot : row.order
-            const id     = (isSos ? 'sos-' : isKot ? 'kot-' : 'ord-') + rec.id
-            const open   = expandedRow === id
-            const st     = row.st
-            // a KOT keeps its dishes as [{ name, qty, note }]
-            const lines_ = isSos ? (rec.sos_request_items || []) : isKot
-              ? (Array.isArray(rec.items) ? rec.items : []).map(i => ({ quantity: i.qty || i.quantity || 1, note: i.note || '', menu_items: { name: i.name } }))
-              : (rec.order_items || [])
-            const count  = isSos ? lines_.length : lines_.reduce((n, li) => n + (li.quantity || 1), 0)
-            const w      = waiters.find(x => x.id === rec.waiter_id)
-            const waiterName = rec.waiters?.name || w?.name || (isKot ? rec.waiter_label || '' : '')
-            const waiterLabel = w ? waiterNo(w) : (isKot && rec.waiter_label ? rec.waiter_label : waiterName ? waiterNo({ name: waiterName }) : '')
-            // Only ever set on a captain event
-            const captainName = (isKot ? rec.captain_name : rec.captains?.name) || ''
-            const tn = rec.tables?.table_number ?? rec.table_number ?? null
-            const prn = isKot ? printerOf(rec) : null
-            const prnText = !isKot ? '' : !rec.waiter_id ? (prn ? '🖨 ' + prn.name : '🖨 desk')
-              : rec.print_status === 'printed' ? '🖨 ' + (prn ? prn.name : 'desk') + ' ✓'
-              : rec.print_status === 'desk' ? '🖨 printed at the desk'
-              : rec.print_status === 'failed' ? '🖨 not printed - ' + (prn ? prn.name : 'printer')
-              : ['queued', 'printing'].includes(rec.print_status) ? '🖨 printing on ' + (prn ? prn.name : 'printer') + '…' : ''
-            const tOn = tn != null && tableFilter === tn
-            const timeStr = new Date(rec.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
-            // Since the order came in (frozen once finished) - what the guest has waited
-            const endTs = rec.delivered_at || rec.resolved_at
-            const elapsedSec = Math.max(0, Math.floor(((endTs ? new Date(endTs).getTime() : nowTs) - new Date(rec.created_at).getTime()) / 1000))
-            const clock = Math.floor(elapsedSec / 60) + ':' + String(elapsedSec % 60).padStart(2, '0')
-            // Since the waiter got it - what DELAY is measured on
-            const withMin = rec.assigned_at ? Math.max(0, Math.floor((nowTs - new Date(rec.assigned_at).getTime()) / 60000)) : 0
-            const band = st === 'new' ? (isSos ? 'New help request' : 'New order')
-                       : st === 'delay' ? 'Delay · ' + withMin + ' min with waiter ' + (waiterLabel || '')
-                       : st === 'progress' ? (waiterLabel ? 'Waiter ' + waiterLabel + ' · ' + withMin + ' min' : 'In progress')
-                       : st === 'done' ? (isSos ? 'Done ✓' : 'Delivered ✓')
-                       : 'Cancelled'
-            const shown = lines_.slice(0, 4)
-            const nameOf = li => isSos ? li.item_name : (li.menu_items?.name || 'Item')
+            const rec = row.kind === 'sos' ? row.sos : row.kind === 'kot' ? row.kot : row.order
+            const id  = (row.kind === 'sos' ? 'sos-' : row.kind === 'kot' ? 'kot-' : 'ord-') + rec.id
+            const tn  = rec.tables?.table_number ?? rec.table_number ?? null
             return (
-              <div key={id} className={'kt st-' + st} data-card={id}>
-                <div className={'kt-band b-' + st}>{band}</div>
-                <div className="kt-body" onClick={() => setExpandedRow(open ? null : id)}>
-                  <div className="kt-head">
-                    {isKot && rec.kot_no && <span className="kt-no" title={'KOT ' + rec.kot_no}>{rec.kot_no}</span>}
-                    <span className={'kt-t' + (tOn ? ' on' : '')} title={tn != null ? 'Show only table ' + tn : ''}
-                      onClick={e => { e.stopPropagation(); if (tn != null) setTableFilter(tOn ? null : tn) }}>T{tn ?? '?'}</span>
-                    {!isKot && <span className={'kt-lbl' + (isSos ? ' help' : '')}>
-                      {isSos ? '🔔 Help' : count + (count === 1 ? ' item' : ' items')}</span>}
-                    <span className={'kt-w' + (waiterLabel ? '' : ' none')} title={waiterName ? 'Waiter ' + waiterName : 'No waiter yet'}>{waiterLabel || '–'}</span>
-                  </div>
-                  {isKot && <div className="kt-cat">{(rec.category_name || 'KOT') + ' · ' + count}</div>}
-                  <div className="kt-meta">
-                    <span>{timeStr}</span><span className="clk">⏱ {clock}{endTs ? ' ✓' : ''}</span>
-                    {captainName && <span className="cap">🧑 {captainName}</span>}
-                    {isKot && <span className={'prn' + (rec.print_status === 'failed' ? ' bad' : '')}>{prnText}</span>}
-                  </div>
-                  <ul className="kt-items">
-                    {shown.map((li, k) => <li key={k}><b>{li.quantity || 1}×</b><span>{nameOf(li)}</span></li>)}
-                    {lines_.length > shown.length && <li className="more">+ {lines_.length - shown.length} more</li>}
-                  </ul>
-                </div>
-                <div className="kt-act">
-                  {st === 'new' && <button className="kt-assign" disabled={assigning === (isSos ? 'sos-' : isKot ? 'kot-' : '') + rec.id} onClick={() => openPicker(isSos ? 'sos' : isKot ? 'kot' : 'order', rec)}>Assign waiter</button>}
-                  {(st === 'progress' || st === 'delay') && (
-                    <button className="kt-deliver" onClick={() => isSos ? resolveSOSRequest(rec.id) : isKot ? deliverKot(rec) : markDelivered(rec)}>✓ {isSos ? 'Done' : 'Delivered'}</button>
-                  )}
-                  <button className="kt-more" onClick={() => setExpandedRow(open ? null : id)} title="Details, print, cancel">{open ? '▲' : '⋯'}</button>
-                </div>
-                {open && (
-                  <div className="kt-detail">
-                    {captainName && <div style={{ color:'#2563EB', fontWeight:700, marginBottom:6 }}>Order taken by captain {captainName}</div>}
-                    {waiterName && <div style={{ color:'#475569', fontWeight:700, marginBottom:6 }}>Waiter {waiterName}</div>}
-                    {lines_.map((li, k) => (
-                      <div className="ln" key={k}><span style={{ fontWeight:600 }}>{nameOf(li)}{li.note ? <em style={{ marginLeft:6, fontStyle:'normal', background:'#0F172A', color:'#fff', borderRadius:4, padding:'0 5px', fontSize:11 }}>{li.note}</em> : null}</span><span style={{ color:'#64748B' }}>x{li.quantity || 1}</span></div>
-                    ))}
-                    <div className="btns">
-                      <button onClick={() => isSos ? printHelpKOT(rec) : isKot ? reprintKot(rec) : printKOT(rec)}>🖨 {isSos ? 'Print help slip' : 'Print KOT'}</button>
-                      {(st === 'progress' || st === 'delay') && <button onClick={() => openPicker(isSos ? 'sos' : isKot ? 'kot' : 'order', rec)}>Change waiter</button>}
-                      {!['delivered','cancelled','resolved'].includes(rec.status) && (
-                        <button className="red" onClick={() => isSos ? cancelSOSRequest(rec.id) : isKot ? cancelKot(rec) : setShowCancelDialog(rec.id)}>✕ {isKot ? 'Cancel this KOT' : 'Cancel'}</button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <Card key={id} id={id} kind={row.kind} rec={rec} st={row.st}
+                open={expandedRow === id}
+                w={waiters.find(x => x.id === rec.waiter_id) || null}
+                tOn={tn != null && tableFilter === tn}
+                busy={assigning === (row.kind === 'sos' ? 'sos-' : row.kind === 'kot' ? 'kot-' : '') + rec.id}
+                prn={row.kind === 'kot' ? printerOf(rec) : null}
+                withMin={rec.assigned_at ? Math.max(0, Math.floor((nowTs - new Date(rec.assigned_at).getTime()) / 60000)) : 0}
+                act={actRef} />
             )
           })}
           </div>

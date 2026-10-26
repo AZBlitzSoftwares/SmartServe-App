@@ -120,6 +120,13 @@ not the laptop. Set it up like this:
    never sleep, plugged in, lid open.
 7. Keep the **welcome video short and small** (a 720p clip of 10-20 MB). Each tablet downloads it from
    the laptop **once** and keeps it; a 200 MB video is 200 MB per tablet at the start of the event.
+8. **Only the server laptop needs the cable.** Other desks (a second laptop, an iPad, spare tablets
+   used to mark Delivered) can be on the Wi-Fi.
+9. **Printers.** Network printers (LAN cable or Wi-Fi) are printed by the **Print Hub on the server
+   laptop** ("Start Print Hub (Local)"). With one KOT per course, choose each course's printer in
+   **Control > KOT printing > Courses**. A **USB printer** prints from the desk it is plugged into:
+   plug it into the **server laptop**, and turn **auto-assign** on from that same laptop (the switch
+   runs on the desk where it was turned on).
 
 ---
 

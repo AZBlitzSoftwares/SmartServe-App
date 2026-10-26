@@ -280,7 +280,22 @@ ${(order.order_items||[]).map(i => `
 </html>`)
   w.document.close()
   w.focus()
-  setTimeout(() => { w.print(); w.close() }, 500)
+  // Print as soon as the slip is laid out (it has no pictures or web fonts, so
+  // that is a few milliseconds), not after a fixed half second. 500 ms stays
+  // as the latest it can be, as before. Closing straight after print() is safe:
+  // with --kiosk-printing print() returns once the slip is sent to the printer.
+  let printed = false
+  const go = () => {
+    if (printed) return
+    printed = true
+    try { w.print() } catch { /* window already closed */ }
+    try { w.close() } catch { /* already closed */ }
+  }
+  try {
+    if (w.document.readyState === 'complete') setTimeout(go, 30)
+    else w.addEventListener('load', () => setTimeout(go, 30))
+  } catch { /* fall back to the timer below */ }
+  setTimeout(go, 500)
   return true
 }
 

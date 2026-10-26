@@ -24,6 +24,7 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
   const byCourse = !!ev.kot_per_course
   const [printers, setPrinters] = useState(null)
   const [cats, setCats] = useState([])
+  const [dishCourses, setDishCourses] = useState([]) // [{ category_id, course }] for the course view
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [tests, setTests] = useState({})     // printer id -> { phase, error }
@@ -38,6 +39,10 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
     if (!alive.current) return
     if (!k.error) setPrinters(k.data || [])
     if (!c.error) setCats(c.data || [])
+    if (!c.error && (c.data || []).length) {
+      const { data: d, error: de } = await supabase.from('menu_items').select('category_id,course').in('category_id', c.data.map(x => x.id))
+      if (!de && alive.current) setDishCourses(d || [])
+    }
   }
   useEffect(() => {
     alive.current = true
@@ -101,6 +106,30 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
     if (error) { setMsg('Not saved: ' + error.message); load() }
   }
 
+  /* One KOT per course: the course's printer. Kept on the printer itself
+     (kitchens.courses), so a course KOT prints there whatever categories its
+     dishes come from (db/2026-10-26_course_printers.sql). The course's
+     categories are set to the same printer too: before that SQL is run the
+     KOT follows its first category, and dishes without a course follow theirs. */
+  async function setCourse(course, courseCats, kitchenId) {
+    const key = String(course).trim().toLowerCase()
+    const without = p => (Array.isArray(p.courses) ? p.courses : []).filter(c => String(c).trim().toLowerCase() !== key)
+    const changes = (printers || []).map(p => {
+      const next = p.id === kitchenId ? [...without(p), course] : without(p)
+      const before = Array.isArray(p.courses) ? p.courses : []
+      return next.length === before.length && next.every((c, i) => c === before[i]) ? null : { id: p.id, courses: next.length ? next : null }
+    }).filter(Boolean)
+    const ids = courseCats.map(c => c.id)
+    setPrinters(list => (list || []).map(p => { const c = changes.find(x => x.id === p.id); return c ? { ...p, courses: c.courses } : p }))
+    setCats(list => list.map(x => (ids.includes(x.id) ? { ...x, kitchen_id: kitchenId || null } : x)))
+    const results = await Promise.all([
+      ...changes.map(c => supabase.from('kitchens').update({ courses: c.courses }).eq('id', c.id)),
+      ids.length ? supabase.from('menu_categories').update({ kitchen_id: kitchenId || null }).in('id', ids) : Promise.resolve({}),
+    ])
+    const bad = results.find(r => r && r.error)
+    if (bad) { setMsg('Not saved: ' + bad.error.message); load() }
+  }
+
   async function testPrint(p) {
     setTests(t => ({ ...t, [p.id]: { phase: 'sending' } }))
     const { data, error } = await supabase.from('kots').insert({ event_id: ev.id, kitchen_id: p.id, kind: 'test',
@@ -121,6 +150,31 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
   const def = list.find(p => p.is_default && p.is_active) || list.find(p => p.is_active) || null
   const dupIp = ip => ip && list.filter(p => String(p.printer_ip || '').trim() === String(ip).trim()).length > 1
   const shown = [...cats].sort((a, b) => (b.is_visible !== false) - (a.is_visible !== false) || (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  // Courses for the course view: each category under the course most of its dishes belong to
+  const courseOfCat = (() => {
+    const tally = new Map()
+    for (const d of dishCourses) {
+      const c = String(d.course || '').trim()
+      if (!c) continue
+      const m = tally.get(d.category_id) || new Map()
+      m.set(c, (m.get(c) || 0) + 1)
+      tally.set(d.category_id, m)
+    }
+    const out = new Map()
+    for (const [cat, m] of tally) out.set(cat, [...m.entries()].sort((a, b) => b[1] - a[1])[0][0])
+    return out
+  })()
+  // every course a dish has (the event's course order first); per course: the categories
+  // it is the main course of (set with it) and every category it has dishes in (shown)
+  const order = (Array.isArray(ev.courses) ? ev.courses : []).map(String)
+  const dishCourseNames = [...new Set(dishCourses.map(d => String(d.course || '').trim()).filter(Boolean))]
+  const courseNames = [...new Set([...order.filter(c => dishCourseNames.includes(c)), ...dishCourseNames])]
+  const courseGroups = courseNames.map(name => ({
+    name,
+    cats: shown.filter(c => courseOfCat.get(c.id) === name),
+    any: shown.filter(c => dishCourses.some(d => d.category_id === c.id && String(d.course || '').trim() === name)),
+  }))
+  const noCourse = shown.filter(c => !courseOfCat.has(c.id))
   const box = { background:'#fff', borderRadius:14, padding:'14px 16px', marginBottom:12, boxShadow:'var(--shadow)' }
   const fld = { border:'1.5px solid var(--line)', borderRadius:9, padding:'7px 10px', fontSize:13.5, minWidth:0 }
 
@@ -201,6 +255,38 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
           <button onClick={addPrinter} data-testid="add-printer"
             style={{ marginTop:8, border:'1.5px dashed var(--line)', background:'var(--bg)', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:800, cursor:'pointer' }}>+ Add printer</button>
         </div>
+
+        {byCourse && (
+        <div style={box} data-testid="course-printers">
+          <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:8, flexWrap:'wrap' }}>
+            <span style={{ fontWeight:900, fontSize:15 }}>Courses</span>
+            <span style={{ fontSize:12.5, color:'var(--ink2)' }}>Each course is its own KOT; choose the printer it prints on. Its categories follow.</span>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:8 }}>
+            {courseGroups.map(g => {
+              // the printer the course is set on; else (set before this box existed) its categories' printer
+              const onPrinter = list.find(p => p.is_active && (Array.isArray(p.courses) ? p.courses : []).some(c => String(c).trim().toLowerCase() === g.name.trim().toLowerCase()))
+              const ks = [...new Set((g.cats.length ? g.cats : g.any).map(c => c.kitchen_id || ''))]
+              const value = onPrinter ? onPrinter.id : ks.length <= 1 ? (ks[0] || '') : '__mixed'
+              return (
+                <div key={g.name} data-course={g.name} style={{ background:'#fff', border:'1px solid var(--line)', borderRadius:10, padding:'8px 10px' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <span style={{ flex:1, minWidth:0, fontWeight:900, fontSize:13.5 }}>{g.name}</span>
+                    <select value={value} onChange={e => e.target.value !== '__mixed' && setCourse(g.name, g.cats, e.target.value)} style={{ ...fld, padding:'5px 8px', fontSize:12.5 }}>
+                      {value === '__mixed' && <option value="__mixed">Mixed - choose one</option>}
+                      <option value="">{def ? 'Default · ' + def.name : 'Desk printer'}</option>
+                      {list.filter(p => p.is_active).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:4, lineHeight:1.4 }}>{g.any.map(c => catLabel(c.name)).join(' · ')}</div>
+                </div>
+              )
+            })}
+            {!courseGroups.length && <div style={{ fontSize:12.5, color:'var(--ink2)' }}>No dishes have a course yet: set the course on the dishes (Menu tab), or use one KOT per category.</div>}
+          </div>
+          {noCourse.length > 0 && <div style={{ fontSize:12, color:'var(--ink2)', marginTop:8 }}>Categories whose dishes have no course still print by category, below.</div>}
+        </div>
+        )}
 
         <div style={box}>
           <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:8, flexWrap:'wrap' }}>

@@ -21,6 +21,9 @@ import { findPrinters, readArp, scanHosts } from './discover.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
+// how often we ask the event laptop's own server for new KOTs (see loadConfig)
+const LOCAL_POLL_MS = 250;
+
 export const DEFAULTS = {
   pollMs: 1500, // how often we ask for new KOTs
   claimLimit: 20, // KOTs per request
@@ -1265,7 +1268,12 @@ export function loadConfig({ dir = HERE, argv = [], embedded = null } = {}) {
       anonKey: key,
       eventId,
       hubName: String(args.hub || cfg.hubName || os.hostname()).slice(0, 60),
-      pollMs: Math.min(10_000, Math.max(500, Number(cfg.pollMs) || DEFAULTS.pollMs)),
+      // On the event laptop's own server (no internet in between) a KOT is picked
+      // up within a quarter of a second, even when config.json still says 1500 (the old
+      // example file did); "localPollMs" changes it. The cloud keeps pollMs.
+      pollMs: server === 'local' || isLocalServerUrl(s.url)
+        ? Math.min(10_000, Math.max(200, Number(cfg.localPollMs) || Math.min(LOCAL_POLL_MS, Number(cfg.pollMs) || LOCAL_POLL_MS)))
+        : Math.min(10_000, Math.max(500, Number(cfg.pollMs) || DEFAULTS.pollMs)),
       findPrinters: cfg.findPrinters !== false,
       scanSubnets: cfg.scanSubnets !== false,
       scanTargets: Array.isArray(cfg.scanTargets) ? cfg.scanTargets.map(String) : [],
@@ -1377,3 +1385,13 @@ const isMain = (() => {
 })();
 // the one-file program imports this file and calls main() itself (printhub/app-flag.mjs)
 if (isMain && !globalThis.__SS_APP) main();
+
+// The event laptop's own server: localhost or an address on the event network
+function isLocalServerUrl(url) {
+  try {
+    const h = new URL(url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    return h === 'localhost' || h === '::1' || /^127\./.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(h)
+      || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h) || /^f[cd]|^fe80:/.test(h)
+      || !h.includes('.') || /\.(local|lan|home|internal)$/.test(h);
+  } catch { return false; }
+}

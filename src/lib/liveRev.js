@@ -10,11 +10,14 @@
    onChange may return a promise: no new reload starts while one is running
    (a slow device must not pile reloads on top of each other).
 
-   watchChanges(onChange, { cloudMs }) returns a stop function.          */
+   watchChanges(onChange, { cloudMs }) returns a stop function.
+   everyMs may be a function (asked before each wait). A hidden tab waits
+   hiddenCloudMs / hiddenEveryMs (by default longer: 10 s / 6 s).        */
 
 const local = typeof window !== 'undefined' ? window.__SS_LOCAL__ : null
 
-export function watchChanges(onChange, { cloudMs = 4000, everyMs = 2000, safetyMs = 15000 } = {}) {
+export function watchChanges(onChange, { cloudMs = 4000, everyMs = 2000, safetyMs = 15000, hiddenCloudMs = null, hiddenEveryMs = 6000 } = {}) {
+  const ms = v => (typeof v === 'function' ? v() : v)
   let stopped = false
   let last = null
   let lastRun = Date.now()
@@ -64,10 +67,10 @@ export function watchChanges(onChange, { cloudMs = 4000, everyMs = 2000, safetyM
     }
     if (!stopped) {
       const hidden = typeof document !== 'undefined' && document.hidden
-      timer = setTimeout(tick, noCounter ? (hidden ? Math.max(cloudMs, 10000) : cloudMs) : (hidden ? 6000 : everyMs))
+      timer = setTimeout(tick, noCounter ? (hidden ? (hiddenCloudMs ?? Math.max(cloudMs, 10000)) : cloudMs) : ms(hidden ? hiddenEveryMs : everyMs))
     }
   }
-  timer = setTimeout(tick, noCounter ? cloudMs : everyMs)
+  timer = setTimeout(tick, noCounter ? cloudMs : ms(everyMs))
   return () => { stopped = true; clearTimeout(timer) }
 }
 
