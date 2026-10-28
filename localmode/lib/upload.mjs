@@ -25,6 +25,7 @@ export const UPLOAD_TABLES = [
   ['sos_request_items', 'sos_request_id in (select id from public.sos_requests where event_id::text = any($1::text[]))'],
   ['chat_messages', EVENT],
   ['feedback', EVENT],
+  ['contact_requests', EVENT],
   ['table_carts', EVENT],
 ]
 
@@ -304,6 +305,16 @@ export async function uploadAll(db, cloud, events, { all = false } = {}) {
           }
         }
       }
+    }
+
+    // Contact us details (guest tablets): last, and never a reason to stop the
+    // upload - a cloud that has not had db/2026-10-29_contact_requests.sql yet
+    // answers 404 for the table. They stay on the laptop and go next time.
+    try {
+      await send('contact_requests', await rowsOf('contact_requests'))
+    } catch (e) {
+      if (e.offline) throw e
+      logLine('upload', `contact_requests: not sent this time (${e.message})`)
     }
 
     if (has('kots') && info.get('kots').hasPrintStatus) {

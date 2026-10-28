@@ -17,6 +17,8 @@ import { getDeviceId } from '../lib/deviceId'
 import OrderStatus from '../components/guest/OrderStatus'
 import SOSPanel from '../components/guest/SOSPanel'
 import OrderHistory from '../components/guest/OrderHistory'
+import ContactUs from '../components/guest/ContactUs'
+import { flushContactOutbox } from '../lib/contactOutbox'
 import FeedbackModal from '../components/guest/FeedbackModal'
 import ExitGate from '../components/guest/ExitGate'
 import NoEventScreen from '../components/guest/NoEventScreen'
@@ -69,9 +71,12 @@ export default function GuestApp() {
   const [chatToast, setChatToast] = useState(null)
   const [cart, setCart] = useState([])
   const [activeOrders, setActiveOrders] = useState([])
+  // Delivered / cancelled in the last hour: Track keeps showing them (with their times)
+  const [doneOrders, setDoneOrders] = useState([])
   const [activeHelp, setActiveHelp] = useState([])
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [showSOS, setShowSOS] = useState(false)
+  const [showContact, setShowContact] = useState(false)   // Contact us (guest tablets only)
   const [showHistory, setShowHistory] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [feedbackOrderId, setFeedbackOrderId] = useState(null)
@@ -102,6 +107,7 @@ export default function GuestApp() {
   const appStateRef      = useRef('loading')
   const cartOpenRef      = useRef(false)
   const showSOSRef       = useRef(false)
+  const showContactRef   = useRef(false)
   const showHistoryRef   = useRef(false)
   const showFeedbackRef  = useRef(false)
   const menuSheetRef     = useRef(false)
@@ -129,6 +135,7 @@ export default function GuestApp() {
   useEffect(() => { appStateRef.current = appState },         [appState])
   useEffect(() => { cartOpenRef.current = cartOpen },         [cartOpen])
   useEffect(() => { showSOSRef.current = showSOS },           [showSOS])
+  useEffect(() => { showContactRef.current = showContact },   [showContact])
   useEffect(() => { showHistoryRef.current = showHistory },   [showHistory])
   useEffect(() => { showFeedbackRef.current = showFeedback }, [showFeedback])
   useEffect(() => { menuSheetRef.current = menuSheetOpen },   [menuSheetOpen])
@@ -150,6 +157,9 @@ export default function GuestApp() {
   function goTo(screen) {
     appStateRef.current = screen
     setAppState(screen)
+    // Contact us belongs to the menu: a tablet sent back to Welcome (idle,
+    // session check) must not open the next guest's menu on it
+    if (screen !== 'menu') setShowContact(false)
     lastBackAtRef.current = 0   // leaving a screen resets the double-press counter
   }
 
@@ -185,6 +195,7 @@ export default function GuestApp() {
     if (menuSheetRef.current)    { setMenuSheetOpen(false); menuSheetRef.current = false; return }
     if (cartOpenRef.current)     { setCartOpen(false); return }
     if (showSOSRef.current)      { setShowSOS(false); return }
+    if (showContactRef.current)  { setShowContact(false); return }
     if (showHistoryRef.current)  { setShowHistory(false); return }
     if (showCaptainOrdersRef.current) { setShowCaptainOrders(false); return }
     // The chat panel is an overlay like any other: back shrinks it to the
@@ -395,7 +406,7 @@ export default function GuestApp() {
         if (r.status === 'gone' || (r.status === 'ok' && !sessionStillCurrent(r.data.date))) {
           clearGuestKeys()
           setEventData(null); setTableData(null); setTableNumber(null)
-          setCart([]); setActiveOrders([])
+          setCart([]); setActiveOrders([]); setDoneOrders([])
           decideEntry()
         }
       })
@@ -458,7 +469,7 @@ export default function GuestApp() {
     localStorage.setItem('ss_captain_event', JSON.stringify(ev))
     setCaptain(cap); setEventData(ev)
     setTableData(null); setTableNumber(null)
-    setCart([]); setActiveOrders([]); setCaptainTable(null); setHeldCarts({})
+    setCart([]); setActiveOrders([]); setDoneOrders([]); setCaptainTable(null); setHeldCarts({})
     // ss-multi-kitchen: both rows were read moments ago by the sign-in
     // screen, so a linked captain can go straight to their table.
     setMkLand(true); setMkEvChecked(true); setMkCapSynced(true)
@@ -867,14 +878,27 @@ export default function GuestApp() {
     return () => { supabase.removeChannel(sub); clearInterval(poll) }
   }, [tableData?.id, eventData?.id])
 
+  // Track shows the latest at once (not up to 8 s old: a waiter may just have been assigned)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (appState === 'status' && tableData?.id && eventData?.id) loadActiveOrders() }, [appState])
+
   async function loadActiveOrders() {
     if (!tableData?.id) return
-    const { data } = await supabase.from('orders')
+    // One request: the open orders, plus anything ordered in the last 3 hours
+    // (Track keeps a delivered / cancelled order for an hour, with its times)
+    const since = new Date(Date.now() - 3 * 3600e3).toISOString()
+    const { data, error } = await supabase.from('orders')
       .select('*, order_items(quantity, menu_items(name, is_veg))')
       .eq('table_id', tableData.id).eq('event_id', eventData.id)
-      .in('status', ['pending','placed','in_progress'])
+      .or('status.in.(pending,placed,in_progress),created_at.gte.' + since)
       .order('created_at', { ascending: true })
-    setActiveOrders(data || [])
+    if (error) return   // keep what is on screen; the next check tries again
+    const rows = data || []
+    const OPEN = ['pending', 'placed', 'in_progress']
+    const hourAgo = Date.now() - 3600e3
+    setActiveOrders(rows.filter(o => OPEN.includes(o.status)))
+    setDoneOrders(rows.filter(o => !OPEN.includes(o.status) &&
+      new Date(o.delivered_at || o.created_at).getTime() >= hourAgo).reverse().slice(0, 6))
   }
 
   function handleSetupComplete(ev, td) {
@@ -886,7 +910,7 @@ export default function GuestApp() {
   function triggerReSetup() {
     clearGuestKeys()
     setEventData(null); setTableData(null); setTableNumber(null)
-    setCart([]); setActiveOrders([]); goTo('setup')
+    setCart([]); setActiveOrders([]); setDoneOrders([]); goTo('setup')
   }
 
   useEffect(() => {
@@ -896,8 +920,9 @@ export default function GuestApp() {
     // Orders kept on this tablet go as soon as the server answers again - not
     // only when the browser reports "back online" (on a busy Wi-Fi it never
     // went offline, the server was just slow). One run at a time, same ids.
-    flushOrderQueue()
-    const t = setInterval(() => { flushOrderQueue() }, 15000)
+    flushOrderQueue(); flushContactOutbox()
+    let n = 0
+    const t = setInterval(() => { flushOrderQueue(); if (++n % 2 === 0) flushContactOutbox() }, 15000)
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); clearInterval(t) }
   }, [])
 
@@ -953,12 +978,14 @@ export default function GuestApp() {
     return () => clearInterval(t)
   }, [tableData?.id])
 
+  const closeContact = useCallback(() => setShowContact(false), [])
+
   const IDLE_MS = 5 * 60 * 1000
   const idleTimerRef = useRef(null)
 
   useEffect(() => {
     const overlayOpen = showSOS || showHistory || showFeedback || showExitGate ||
-                        cartOpen || menuSheetOpen
+                        cartOpen || menuSheetOpen || showContact
     const shouldRun = appState === 'menu' && !overlayOpen
 
     function clear() {
@@ -982,7 +1009,7 @@ export default function GuestApp() {
       clear()
       events.forEach(e => window.removeEventListener(e, arm))
     }
-  }, [appState, showSOS, showHistory, showFeedback, showExitGate, cartOpen, menuSheetOpen])
+  }, [appState, showSOS, showHistory, showFeedback, showExitGate, cartOpen, menuSheetOpen, showContact])
 
   function addToCart(item) {
     setCart(prev => {
@@ -1106,8 +1133,9 @@ export default function GuestApp() {
     </>
   )
 
-  // Track turns on for a live order OR a live help request
-  const hasActiveOrders = activeOrders.length > 0 || activeHelp.length > 0
+  // Track turns on for a live order OR a live help request, and stays for an
+  // hour after an order is delivered (it shows when the order came)
+  const hasActiveOrders = activeOrders.length > 0 || activeHelp.length > 0 || doneOrders.length > 0
 
   return (
     <div style={{minHeight:'100vh',background:'var(--bg)',position:'relative'}}>
@@ -1130,7 +1158,8 @@ export default function GuestApp() {
           hasActiveOrders={hasActiveOrders}
           menuSheetOpen={menuSheetOpen} setMenuSheetOpen={setMenuSheetOpen}
           showFeedbackBubble={false} onFeedbackBubbleClick={() => {}}
-          onShowFeedback={() => setShowFeedback(true)} />
+          onShowFeedback={() => setShowFeedback(true)}
+          onShowContact={captain ? undefined : () => setShowContact(true)} />
       )}
       {appState === 'genie' && (
         <GenieScreen tableData={tableData} eventData={eventData} orderId={lastOrderId}
@@ -1143,7 +1172,7 @@ export default function GuestApp() {
       )}
       {appState === 'status' && (
         <OrderStatus tableData={tableData} eventData={eventData}
-          tableNumber={tableNumber} activeOrders={activeOrders} activeHelp={activeHelp}
+          tableNumber={tableNumber} activeOrders={activeOrders} doneOrders={doneOrders} activeHelp={activeHelp}
           onBack={() => goTo('menu')} />
       )}
       {cartCount > 0 && appState === 'menu' && (
@@ -1175,6 +1204,10 @@ export default function GuestApp() {
 
       {showSOS && <SOSPanel tableData={tableData} eventData={eventData} captain={captain}
         onClose={() => { setShowSOS(false); goTo('menu') }} />}
+      {showContact && !captain && appState === 'menu' && (
+        <ContactUs eventData={eventData} tableData={tableData} tableNumber={tableNumber}
+          onClose={closeContact} />
+      )}
       {showHistory && <OrderHistory tableData={tableData} eventData={eventData}
         addToCart={addToCart}
         onReordered={() => { setShowHistory(false); goTo('menu'); setCartOpen(true) }}

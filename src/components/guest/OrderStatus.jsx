@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 
 function mapStatus(raw) {
@@ -19,6 +19,45 @@ const STATUS_CONFIG = {
   cancelled:  { label:'Cancelled',         icon:'✕',  color:'#DC2626', bg:'#FEF2F2' },
 }
 
+// "8:15 PM" - the time on the guest's own tablet clock
+const clock = ts => ts ? new Date(ts).toLocaleTimeString('en-IN', { hour:'numeric', minute:'2-digit', hour12:true }).toUpperCase() : ''
+const mmss = sec => Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')
+const secsSince = (from, to) => Math.max(0, Math.floor(((to || Date.now()) - new Date(from).getTime()) / 1000))
+
+// One shared 1 s tick for every running clock on the screen
+function useNow(on) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!on) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [on])
+  return now
+}
+
+/* The order's times on one small line: when it was ordered, a clock that runs
+   while the guest waits, and once delivered the delivered time with the clock
+   stopped at what they waited. */
+function TimeLine({ order, now }) {
+  const st = mapStatus(order?.status)
+  const from = order?.created_at
+  if (!from) return null
+  const doneAt = st === 'delivered' ? order.delivered_at : null
+  const base = { fontSize:12, fontWeight:700, color:'#555', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }
+  if (st === 'cancelled') return <span data-testid="order-time" style={base}>Ordered {clock(from)}</span>
+  if (st === 'delivered') return (
+    <span data-testid="order-time" style={base}>
+      Ordered {clock(from)} · <b style={{ color:'#15803D' }}>Delivered {clock(doneAt) || '✓'}</b>
+      {doneAt && <> · ⏱ {mmss(secsSince(from, new Date(doneAt).getTime()))}</>}
+    </span>
+  )
+  return (
+    <span data-testid="order-time" style={base}>
+      Ordered {clock(from)} · <b style={{ color:'#1A0A0A' }}>⏱ {mmss(secsSince(from, now))}</b>
+    </span>
+  )
+}
+
 function Modal({ children }) {
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.72)', zIndex:200,
@@ -31,7 +70,7 @@ function Modal({ children }) {
   )
 }
 
-function OrderCard({ order, onCancel }) {
+function OrderCard({ order, onCancel, now }) {
   const status = mapStatus(order?.status)
   const cfg    = STATUS_CONFIG[status] || STATUS_CONFIG.placed
   const statuses = status === 'cancelled'
@@ -45,8 +84,12 @@ function OrderCard({ order, onCancel }) {
     <div style={{ background:'#fff', borderRadius:20, padding:'20px 18px 20px', marginBottom:14,
       boxShadow:'0 4px 16px rgba(0,0,0,0.08)', border:'2px solid ' + cfg.color + '33' }}>
 
-      {/* Order reference */}
-      <div style={{ fontSize:13, fontWeight:700, color:'#888', marginBottom:14 }}>{orderId}</div>
+      {/* Order reference and its times, one row */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:10,
+        flexWrap:'wrap', marginBottom:14 }}>
+        <span style={{ fontSize:13, fontWeight:700, color:'#888' }}>{orderId}</span>
+        <TimeLine order={order} now={now} />
+      </div>
 
       {/* ── Status headline — matches the SOS Request Received styling ── */}
       <div style={{ textAlign:'center', marginBottom:18 }}>
@@ -93,7 +136,7 @@ function OrderCard({ order, onCancel }) {
 
       {items.length > 0 && (
         <div style={{ borderTop:'1px solid #F0F0F0', paddingTop:10,
-          marginBottom: !order?.waiter_id && status === 'placed' ? 10 : 0 }}>
+          marginBottom: status === 'placed' || status === 'on_the_way' ? 10 : 0 }}>
           {items.map((oi, i) => (
             <div key={i} style={{ display:'flex', justifyContent:'space-between',
               padding:'5px 0', fontSize:13 }}>
@@ -104,15 +147,40 @@ function OrderCard({ order, onCancel }) {
         </div>
       )}
 
-      {!order?.waiter_id && status === 'placed' && (
-        <button
-          onClick={() => onCancel(order.id)}
+      {/* Until it is delivered. Once a waiter is on the way the guest is told
+          it may still arrive (see the confirm box). */}
+      {(status === 'placed' || status === 'on_the_way') && (
+        <button data-testid="cancel-order"
+          onClick={() => onCancel(order)}
           style={{ width:'100%', marginTop:8, background:'transparent',
             border:'1.5px solid #FECACA', borderRadius:10, padding:'10px',
             fontSize:13, fontWeight:700, color:'#DC2626', cursor:'pointer' }}>
           ✕ Cancel Order
         </button>
       )}
+    </div>
+  )
+}
+
+/* A delivered or cancelled order: kept on Track for an hour as one small card,
+   so the guest can still see when it came. */
+function DoneCard({ order }) {
+  const status = mapStatus(order?.status)
+  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.delivered
+  const orderId = order?.id ? '#' + String(order.id).slice(-6).toUpperCase() : ''
+  const items = Array.isArray(order?.order_items) ? order.order_items : []
+  const names = items.map(oi => (oi?.menu_items?.name || 'Item') + ' ×' + (oi?.quantity ?? 1)).join(', ')
+  return (
+    <div data-testid="done-order" style={{ background:'#fff', borderRadius:14, padding:'10px 14px', marginBottom:10,
+      borderLeft:'4px solid ' + cfg.color, boxShadow:'0 2px 8px rgba(0,0,0,0.05)' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:10, flexWrap:'wrap' }}>
+        <span style={{ fontSize:13, fontWeight:800, color:cfg.color }}>
+          {status === 'cancelled' ? '✕ Cancelled' : '✓ Delivered'} <span style={{ color:'#999', fontWeight:700 }}>{orderId}</span>
+        </span>
+        <TimeLine order={order} now={0} />
+      </div>
+      {names && <div style={{ fontSize:12, color:'#777', marginTop:3, overflow:'hidden', textOverflow:'ellipsis',
+        whiteSpace:'nowrap' }}>{names}</div>}
     </div>
   )
 }
@@ -132,37 +200,71 @@ function Header({ tableNumber, onBack }) {
   )
 }
 
-export default function OrderStatus({ activeOrders, activeHelp, tableNumber, onBack }) {
+export default function OrderStatus({ activeOrders, doneOrders, activeHelp, tableNumber, onBack }) {
   const orders = Array.isArray(activeOrders) ? activeOrders.filter(Boolean) : []
+  const done   = Array.isArray(doneOrders)   ? doneOrders.filter(Boolean)   : []
   const help   = Array.isArray(activeHelp)   ? activeHelp.filter(Boolean)   : []
-  const [confirmId, setConfirmId] = useState(null)   // Yes/No cancel modal
-  const [notice, setNotice] = useState('')           // styled replacement for alert()
+  const [confirm, setConfirm] = useState(null)       // the order in the Yes/No cancel box
+  const [notice, setNotice] = useState(null)         // { title, text } - styled replacement for alert()
   const [busy, setBusy] = useState(false)
+  const now = useNow(orders.length > 0)
 
-  async function reallyCancel(orderId) {
+  // A waiter already has it: the guest may still cancel, and is told it may arrive anyway
+  const onWay = o => !!o?.waiter_id || mapStatus(o?.status) === 'on_the_way'
+
+  async function reallyCancel(order) {
     setBusy(true)
     try {
-      const { data } = await supabase.from('orders')
-        .select('waiter_id, status').eq('id', orderId).single()
-      if (data?.waiter_id || (data?.status !== 'pending' && data?.status !== 'placed')) {
-        setConfirmId(null)
-        setNotice('A waiter has already been assigned, so this order can no longer be cancelled.')
+      // One KOT per category: once part of the order has reached the table the
+      // rest is the waiter's / desk's call (Cancel this KOT), not the guest's.
+      // Asked every time: the screen can be a few seconds behind the desk.
+      const { data: ks, error: kErr } = await supabase.from('kots')
+        .select('status').eq('order_id', order.id).eq('kind', 'order')
+      if (!kErr && (ks || []).some(k => k.status === 'delivered')) {
+        setConfirm(null)
+        setNotice({ title:'Part already served', text:'Part of this order has already reached your table. Please ask your waiter.' })
         return
       }
-      await supabase.from('orders')
-        .update({ status: 'cancelled', cancel_reason: 'Cancelled by guest' })
-        .eq('id', orderId)
-      setConfirmId(null)
+      const { data, error } = await supabase.from('orders')
+        .update({ status: 'cancelled', cancel_reason: onWay(order) ? 'Cancelled by guest (waiter was on the way)' : 'Cancelled by guest' })
+        .eq('id', order.id).in('status', ['pending', 'placed', 'in_progress'])
+        .select('id')
+      if (error) throw error
+      setConfirm(null)
+      // nothing changed: it was delivered (or cancelled) in the meantime
+      if (!data?.length) {
+        const { data: now } = await supabase.from('orders').select('status').eq('id', order.id).maybeSingle()
+        setNotice(now?.status === 'cancelled'
+          ? { title:'Already cancelled', text:'This order has already been cancelled.' }
+          : { title:'Already delivered', text:'This order has already reached your table.' })
+        return
+      }
       if (onBack) onBack()
     } catch (e) {
-      setConfirmId(null)
-      setNotice('Could not cancel right now. Please ask your waiter.')
+      setConfirm(null)
+      setNotice({ title:'Could not cancel', text:'Please try again, or ask your waiter.' })
     } finally {
       setBusy(false)
     }
   }
 
+  const doneList = done.length > 0 && (
+    <div style={{ marginTop: orders.length ? 4 : 0 }}>
+      {done.map(o => <DoneCard key={o.id} order={o} />)}
+    </div>
+  )
+
   const body = orders.length === 0 ? (
+    done.length > 0 ? (
+      <div style={{ flex:1, padding:'16px 14px 40px' }}>
+        {doneList}
+        <button onClick={onBack} style={{ width:'100%', marginTop:6, background:'#1A0A0A',
+          color:'#fff', border:'none', borderRadius:14, padding:'16px', fontSize:16,
+          fontWeight:800, cursor:'pointer' }}>
+          ← Back to Menu
+        </button>
+      </div>
+    ) : (
     <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center',
       justifyContent:'center', padding:24, textAlign:'center' }}>
       <div style={{ fontSize:48, marginBottom:12 }}>🍽️</div>
@@ -175,14 +277,15 @@ export default function OrderStatus({ activeOrders, activeHelp, tableNumber, onB
         ← Back to Menu
       </button>
     </div>
-  ) : (
+  )) : (
     <div style={{ flex:1, padding:'16px 14px 40px' }}>
       <div style={{ fontSize:13, fontWeight:700, color:'#888', marginBottom:12, paddingLeft:4 }}>
         {orders.length} active {orders.length === 1 ? 'order' : 'orders'}
       </div>
       {orders.map(o => (
-        <OrderCard key={o.id} order={o} onCancel={id => setConfirmId(id)} />
+        <OrderCard key={o.id} order={o} now={now} onCancel={o => setConfirm(o)} />
       ))}
+      {doneList}
       <button onClick={onBack} style={{ width:'100%', marginTop:6, background:'#1A0A0A',
         color:'#fff', border:'none', borderRadius:14, padding:'16px', fontSize:16,
         fontWeight:800, cursor:'pointer' }}>
@@ -225,19 +328,24 @@ export default function OrderStatus({ activeOrders, activeHelp, tableNumber, onB
       )}
       {body}
 
-      {confirmId && (
+      {confirm && (
         <Modal>
-          <div style={{ fontSize:44, marginBottom:12 }}>🗑️</div>
-          <div style={{ fontSize:20, fontWeight:800, color:'#1A0A0A', marginBottom:24 }}>
+          <div style={{ fontSize:44, marginBottom:12 }}>{onWay(confirm) ? '🏃' : '🗑️'}</div>
+          <div style={{ fontSize:20, fontWeight:800, color:'#1A0A0A', marginBottom: onWay(confirm) ? 8 : 24 }}>
             Cancel this order?
           </div>
+          {onWay(confirm) && (
+            <div data-testid="on-way-note" style={{ fontSize:14, color:'#666', lineHeight:1.5, marginBottom:22 }}>
+              Waiter is already on the way.<br />If it still reaches you, please ignore it.
+            </div>
+          )}
           <div style={{ display:'flex', gap:12 }}>
-            <button onClick={() => setConfirmId(null)} disabled={busy}
+            <button onClick={() => setConfirm(null)} disabled={busy}
               style={{ flex:1, background:'#F3F4F6', color:'#374151', border:'none',
                 borderRadius:14, padding:'16px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
               No
             </button>
-            <button onClick={() => reallyCancel(confirmId)} disabled={busy}
+            <button data-testid="cancel-yes" onClick={() => reallyCancel(confirm)} disabled={busy}
               style={{ flex:1, background: busy ? '#999' : '#DC2626', color:'#fff', border:'none',
                 borderRadius:14, padding:'16px', fontSize:16, fontWeight:800,
                 cursor: busy ? 'wait' : 'pointer' }}>
@@ -249,12 +357,11 @@ export default function OrderStatus({ activeOrders, activeHelp, tableNumber, onB
 
       {notice && (
         <Modal>
-          <div style={{ fontSize:44, marginBottom:12 }}>🏃</div>
           <div style={{ fontSize:19, fontWeight:800, color:'#1A0A0A', marginBottom:10 }}>
-            Order already on the way
+            {notice.title}
           </div>
-          <div style={{ fontSize:14, color:'#888', lineHeight:1.6, marginBottom:22 }}>{notice}</div>
-          <button onClick={() => setNotice('')}
+          <div style={{ fontSize:14, color:'#888', lineHeight:1.6, marginBottom:22 }}>{notice.text}</div>
+          <button onClick={() => setNotice(null)}
             style={{ width:'100%', background:'#1A0A0A', color:'#fff', border:'none',
               borderRadius:14, padding:'16px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
             OK

@@ -204,6 +204,8 @@ export function describeSlip(decoded) {
       if (started) break;
       continue;
     }
+    // the white-on-black KOT NO. box above it
+    if (!started && l.reverse) continue;
     if (l.w >= 2 && l.align === 'center' && !l.reverse && !/^KOT\b/.test(t)) {
       started = true;
       if (t !== 'TEST PRINT') head.push(t);

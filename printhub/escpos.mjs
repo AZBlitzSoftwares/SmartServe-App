@@ -247,8 +247,9 @@ function chairsText(chairs) {
 }
 
 // Kitchen name big and centred, then optional backup warning, then a dashed line.
-function kitchenHeader(r, job, backup) {
+function kitchenHeader(r, job, backup, withKotNo = false) {
   r.init();
+  if (withKotNo) kotNoBox(r, job);
   r.align('center').bold(true).size(2);
   for (const l of wrap(String(job.kitchen_name || 'KITCHEN').toUpperCase(), WIDTH / 2)) r.line(l);
   r.size(1).bold(false);
@@ -302,10 +303,28 @@ function footer(r, job, now) {
   r.feed(2).cut();
 }
 
+// The KOT number first and biggest, white on black across the paper - the same
+// as the slip the desk prints, because runners and counters work by KOT number.
+function kotNoBox(r, job) {
+  const no = sanitize(job.kot_no == null ? '' : String(job.kot_no)).trim();
+  if (!no) return;
+  const fill = (t, cols) => {
+    const pad = Math.max(0, cols - t.length);
+    return ' '.repeat(Math.floor(pad / 2)) + t + ' '.repeat(Math.ceil(pad / 2));
+  };
+  r.align('center').bold(true).reverse(true);
+  r.size(1).line(fill('KOT NO.', WIDTH));
+  const mult = no.length <= WIDTH / 4 ? 4 : no.length <= WIDTH / 3 ? 3 : 2;
+  const cols = Math.floor(WIDTH / mult);
+  r.size(mult);
+  for (const l of wrap(no, cols)) r.line(fill(l, cols));
+  r.size(1).reverse(false).bold(false).align('left');
+}
+
 function buildOrder(job, { backup, now }) {
   const r = new Receipt();
   const items = parseItems(job.items);
-  kitchenHeader(r, job, backup);
+  kitchenHeader(r, job, backup, true);
   tableBlock(r, job, toDate(job.created_at, now));
   itemLines(r, items, { big: true });
   r.dashes();
@@ -332,7 +351,7 @@ function buildCancel(job, { backup, now }) {
   const r = new Receipt();
   const items = parseItems(job.items);
   const banner = () => r.align('center').bold(true).size(2).reverse(true).line('*** CANCELLED ***').reverse(false);
-  kitchenHeader(r, job, backup);
+  kitchenHeader(r, job, backup, true);
   tableBlock(r, job, toDate(job.created_at, now));
   banner();
   r.line('DO NOT PREPARE / DELIVER').size(1).bold(false).align('left');

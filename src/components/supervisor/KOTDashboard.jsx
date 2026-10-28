@@ -181,7 +181,9 @@ const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, wi
   )
 })
 
-const BUILD_VERSION = 'v2.9.1 \u00B7 2026-10-26'
+const BUILD_VERSION = 'v2.10 \u00B7 2026-10-29'
+// this device's Live Orders tab (new / assigned)
+const LIVE_TAB_KEY = 'ss_live_tab'
 
 const STATUS_LABELS = { pending:'Order Received', placed:'Order Received', in_progress:'Waiter On The Way', delivered:'Delivered', cancelled:'Cancelled' }
 const STATUS_COLORS = { pending:'#D97706', placed:'#D97706', in_progress:'#2563EB', delivered:'#16A34A', cancelled:'#DC2626' }
@@ -190,7 +192,22 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   const [orders, setOrders] = useState([])
   const [sosRequests, setSosRequests] = useState([])
   const [waiters, setWaiters] = useState([])
-  const [filter, setFilter] = useState('active')
+  /* Tabs. "Active" is split in two, so one person can work only the new orders
+     (assign a waiter) and another only the assigned ones (mark Delivered):
+       new       - nobody on it yet
+       assigned  - a waiter has it (incl. DELAY)
+     Both load the same open orders; the split is on screen only. Each device
+     remembers its own tab (new / assigned), so the helper's tablet always
+     opens on "To deliver". filter is what is downloaded: active = both. */
+  const [tab, setTabState] = useState(() => {
+    try { const v = localStorage.getItem(LIVE_TAB_KEY); return v === 'assigned' ? 'assigned' : 'new' } catch { return 'new' }
+  })
+  const setTab = v => {
+    setTabState(v)
+    if (v === 'new' || v === 'assigned') { try { localStorage.setItem(LIVE_TAB_KEY, v) } catch { /* private mode */ } }
+  }
+  const openTab = () => { try { return localStorage.getItem(LIVE_TAB_KEY) === 'assigned' ? 'assigned' : 'new' } catch { return 'new' } }
+  const filter = tab === 'new' || tab === 'assigned' ? 'active' : tab
   const [loading, setLoading] = useState(true)
   const [assigning, setAssigning] = useState(null)
   // Only one row open at a time, so the list cannot grow unmanageable
@@ -217,6 +234,9 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   // Find a KOT by its number (runners and counters work by KOT number): "22", "k22", "K-022"
   const [kotQuery, setKotQuery] = useState('')
   const [tableFilter, setTableFilter] = useState(null)
+  // the Table box shows the table filter, also when it was set by tapping T7 on a card
+  const [tableText, setTableText] = useState('')
+  const tableShown = tableFilter == null ? '' : tableText !== '' && parseInt(tableText, 10) === tableFilter ? tableText : String(tableFilter)
   const prevCount = useRef(-1)
   const splitRef = useRef(new Set()) // orders split into KOTs: their KOT cards stand for them
 
@@ -494,16 +514,22 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   /* Save the waiter and get the saved row back in the same request. If that
      answer is lost (Wi-Fi), ask once more: the row is returned only if it now
      has this waiter (then the slip still prints); null = not confirmed. */
-  async function saveAndRead(table, id, patch, sel, waiterId) {
+  // openOnly: save only while the order is still open. A guest can now cancel an
+  // order a waiter already has, so a late "Change waiter" must not bring a
+  // cancelled order back. Returns 'closed' when it was no longer open.
+  async function saveAndRead(table, id, patch, sel, waiterId, openOnly) {
     try {
-      const { data, error } = await supabase.from(table).update(patch).eq('id', id).select(sel)
+      let q = supabase.from(table).update(patch).eq('id', id)
+      if (openOnly) q = q.in('status', ACTIVE_ORDER)
+      const { data, error } = await q.select(sel)
       const row = !error && (Array.isArray(data) ? data[0] : data)
       if (row) return row
+      if (!error && openOnly && Array.isArray(data) && !data.length) return 'closed'
     } catch { /* asked again below */ }
     if (!waiterId) return null
     try {
       const { data } = await supabase.from(table).select(sel).eq('id', id).maybeSingle()
-      return data && data.waiter_id === waiterId ? data : null
+      return data && data.waiter_id === waiterId && (!openOnly || ACTIVE_ORDER.includes(data.status)) ? data : null
     } catch { return null }
   }
 
@@ -515,8 +541,13 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     // network drops or power cuts - nothing about it changes.
     const SEL = '*, tables(table_number), waiters(name), captains(name), order_items(quantity, menu_items(name, is_veg))'
     const fresh = await saveAndRead('orders', orderId,
-      { status:'in_progress', waiter_id:waiterId||null, assigned_at:waiterId?new Date().toISOString():null }, SEL, waiterId)
+      { status:'in_progress', waiter_id:waiterId||null, assigned_at:waiterId?new Date().toISOString():null }, SEL, waiterId, true)
     setAssigning(null)
+    if (fresh === 'closed') {
+      setActionErr('Table ' + (orders.find(o => o.id === orderId)?.tables?.table_number ?? '?') + ': this order was already cancelled or delivered, so no waiter was assigned.')
+      loadOrders(false)
+      return
+    }
     if (waiterId && fresh && autoPrint) { try { printKOT(fresh) } catch { /* never block assignment if printing fails */ } }
     if (waiterId && !fresh) setActionErr('Waiter not confirmed for table ' + (orders.find(o => o.id === orderId)?.tables?.table_number ?? '?') + ' (no answer from the server). Check the card: assign again, or tap Print KOT once it shows the waiter.')
     loadOrders(false)
@@ -555,7 +586,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   function clearFiltersIfEmpty(remaining) {
     if (!waiterFilter && !tableFilter) return
     if (remaining > 0) return
-    setWaiterFilter(null); setTableFilter(null); setFilter('active')
+    setWaiterFilter(null); setTableFilter(null)
+    setTabState(openTab())
   }
 
   function markDelivered(order) {
@@ -584,7 +616,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     await supabase.from('orders').update({
       status: 'cancelled',
       cancel_reason: reason
-    }).eq('id', showCancelDialog)
+    }).eq('id', showCancelDialog).in('status', ACTIVE_ORDER)
     setShowCancelDialog(null)
     setCancelReason('')
     setCancelCustomReason('')
@@ -658,14 +690,22 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     return since >= DELAY_MIN ? 'delay' : 'progress'
   }
   const RANK = { new: 0, delay: 1, progress: 2, done: 3, void: 4 }
-  const timeline = [
+  const timelineAll = [
     ...filteredSOS.map(r => ({ kind:'sos', at:r.created_at, sos:r, st:cardState(r, true) })),
     ...filteredOrders.map(o => ({ kind:'order', at:o.created_at, order:o, st:cardState(o, false) })),
     ...filteredKots.map(k => ({ kind:'kot', at:k.created_at, kot:k, st:cardState(k, false, true) })),
   ].sort((a, b) => filter === 'active'
     ? (RANK[a.st] - RANK[b.st]) || (new Date(a.at) - new Date(b.at))
     : new Date(b.at) - new Date(a.at))
-  timelineRef.current = timeline.length
+  // New / Assigned: the same open list, split (the KOT finder shows its KOT on any tab)
+  const isNewRow = r => r.st === 'new'
+  const isAssignedRow = r => r.st === 'progress' || r.st === 'delay'
+  const countNew = filter === 'active' && !kotQ ? timelineAll.filter(isNewRow).length : null
+  const countAssigned = filter === 'active' && !kotQ ? timelineAll.filter(isAssignedRow).length : null
+  const timeline = filter !== 'active' || kotQ ? timelineAll : timelineAll.filter(tab === 'new' ? isNewRow : isAssignedRow)
+  // what is left to act on under the filters: both New and Assigned (a table
+  // filter stays while that table still has a new order on the other tab)
+  timelineRef.current = timelineAll.length
 
   const CANCEL_REASONS = [
     'Item not available',
@@ -779,7 +819,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
               const busy = busyWaiterIds.includes(w.id)
               const sel = waiterFilter === w.id
               return (
-                <div key={w.id} onClick={()=>setWaiterFilter(sel?null:w.id)} title={w.name}
+                <div key={w.id} onClick={()=>{ setWaiterFilter(sel?null:w.id); if (!sel && tab === 'new') setTabState('assigned'); if (sel && filter === 'active') setTabState(openTab()) }} title={w.name}
                   style={{ background: sel ? '#1E293B' : busy ? '#EFF6FF' : '#F0FDF4', border:'1.5px solid',
                     borderColor: sel ? '#1E293B' : busy ? '#BFDBFE' : '#BBF7D0', borderRadius:9, padding:'4px 10px', fontSize:12, cursor:'pointer' }}>
                   <span style={{ fontWeight:800, color: sel ? '#fff' : busy ? '#1D4ED8' : '#15803D' }}>{waiterNo(w)}</span>
@@ -791,8 +831,20 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
         </div>
       )}
 
-      {kotMode && (
-        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10, flexWrap:'wrap' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10, flexWrap:'wrap' }}>
+          {/* Table: only that table's orders, on every tab ("where is my order?") */}
+          <div style={{ display:'flex', alignItems:'center', gap:6, background:'#fff', border:'2px solid ' + (tableFilter != null ? '#0F172A' : '#CBD5E1'),
+            borderRadius:12, padding:'4px 6px 4px 12px', boxShadow:'var(--shadow)' }}>
+            <span style={{ fontSize:13, fontWeight:900, color:'#0F172A' }}>Table</span>
+            <input data-testid="table-find" value={tableShown} inputMode="numeric" placeholder="e.g. 7"
+              onChange={e => { const v = e.target.value.replace(/[^\d]/g, '').slice(0, 4); setTableText(v); setTableFilter(v === '' ? null : parseInt(v, 10)) }}
+              onKeyDown={e => { if (e.key === 'Escape') setTableFilter(null) }}
+              style={{ width:64, border:'none', outline:'none', fontSize:20, fontWeight:900,
+                fontVariantNumeric:'tabular-nums', padding:'4px 2px', background:'transparent' }} />
+            {tableFilter != null && <button onClick={() => setTableFilter(null)} title="All tables again"
+              style={{ border:'none', background:'#F1F5F9', borderRadius:999, width:30, height:30, fontSize:14, cursor:'pointer' }}>✕</button>}
+          </div>
+        {kotMode && (
           <div style={{ display:'flex', alignItems:'center', gap:6, background:'#fff', border:'2px solid ' + (kotQ ? '#0F172A' : '#CBD5E1'),
             borderRadius:12, padding:'4px 6px 4px 12px', boxShadow:'var(--shadow)' }}>
             <span style={{ fontSize:13, fontWeight:900, color:'#0F172A' }}>KOT no.</span>
@@ -803,10 +855,10 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
             {kotQuery && <button onClick={() => setKotQuery('')} title="Show all again"
               style={{ border:'none', background:'#F1F5F9', borderRadius:999, width:30, height:30, fontSize:14, cursor:'pointer' }}>✕</button>}
           </div>
+        )}
           {kotQ && <span style={{ fontSize:13, fontWeight:700, color: filteredKots.length ? '#15803D' : '#B91C1C' }}>
             {filteredKots.length ? 'Showing KOT ' + kotQ + ' (any status). Tap Delivered on it.' : 'No KOT with number ' + kotQ + '.'}</span>}
-        </div>
-      )}
+      </div>
 
       {actionErr && (
         <div role="alert" data-testid="action-error" style={{ background:'#FEF2F2', border:'1.5px solid #FCA5A5', borderRadius:10, padding:'8px 12px', marginBottom:10,
@@ -823,10 +875,23 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
         </div>
       )}
 
-      <div style={{ display:'flex', gap:8, paddingBottom:14 }}>
-        {[['active','Active'],['delivered','Delivered'],['cancelled','Cancelled'],['all','All']].map(([val,label]) => (
-          <button key={val} onClick={()=>setFilter(val)} style={{ flex:1, padding:'8px 4px', background:filter===val?'var(--ink)':'#fff', color:filter===val?'#fff':'var(--ink)', border:'1.5px solid', borderColor:filter===val?'var(--ink)':'var(--line)', borderRadius:10, fontSize:13, fontWeight:700 }}>{label}</button>
-        ))}
+      <div className="lo-tabs" style={{ display:'flex', gap:8, paddingBottom:14 }}>
+        {[['new','🆕 New','to assign', countNew, '#1D4ED8'],
+          ['assigned','🚶 Assigned','to deliver', countAssigned, '#15803D'],
+          ['delivered','Delivered'],['cancelled','Cancelled'],['all','All']].map(([val, label, sub, n, col]) => {
+          const on = tab === val
+          return (
+            <button key={val} data-testid={'tab-' + val} onClick={() => setTab(val)}
+              style={{ flex: sub ? 1.6 : 1, padding:'7px 4px', minWidth:0,
+                background: on ? (col || 'var(--ink)') : '#fff', color: on ? '#fff' : (col || 'var(--ink)'),
+                border:'1.5px solid', borderColor: on ? (col || 'var(--ink)') : (col ? col + '66' : 'var(--line)'),
+                borderRadius:10, fontSize:13, fontWeight:800, lineHeight:1.15, display:'flex', flexDirection:'column', alignItems:'center' }}>
+              <span style={{ whiteSpace:'nowrap' }}>{label}{n != null && <span data-testid={'count-' + val} style={{ marginLeft:6, background: on ? 'rgba(255,255,255,0.25)' : col + '1A',
+                borderRadius:999, padding:'0 7px', fontSize:12.5 }}>{n}</span>}</span>
+              {sub && <span style={{ fontSize:10.5, fontWeight:700, opacity:0.8 }}>{sub}</span>}
+            </button>
+          )
+        })}
       </div>
       </div>
       {/* end frozen block */}
@@ -871,7 +936,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
             @media (prefers-reduced-motion: reduce) { .kt-band.b-new, .kt-band.b-delay { animation:none; } }
             .kt-body { padding:9px 11px 6px; cursor:pointer; }
             .kt-head { display:flex; align-items:center; gap:8px; }
-            .kt-no { font-size:24px; font-weight:900; color:#fff; background:#0F172A; border-radius:8px; padding:1px 9px; letter-spacing:.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+            .kt-no { font-size:28px; font-weight:900; color:#fff; background:#0F172A; border-radius:8px; padding:1px 9px; letter-spacing:.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
             .kt-cat { display:inline-block; margin-top:6px; font-size:12px; font-weight:800; color:#3730A3; background:#EEF2FF; border-radius:999px; padding:2px 9px; text-transform:uppercase; letter-spacing:.02em; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
             .kt-t { font-size:22px; font-weight:900; color:#0F172A; border-radius:7px; padding:0 4px; margin-left:-4px; }
             .kt-t.on { background:#1E293B; color:#fff; }
@@ -893,7 +958,8 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
             .kt-act { display:flex; gap:6px; padding:6px 11px 10px; margin-top:auto; }
             .kt-act button { border-radius:9px; padding:8px 10px; font-size:13px; font-weight:800; cursor:pointer; }
             .kt-assign { flex:1; background:#1E3A8A; color:#fff; border:none; }
-            .kt-deliver { flex:1; background:#fff; color:#15803D; border:1.5px solid #16A34A; }
+            .kt-deliver { flex:1; background:#16A34A; color:#fff; border:none; font-size:16px !important; padding:11px 10px !important; }
+            .kt-deliver:active { background:#15803D; }
             .kt-more { background:#fff; color:#475569; border:1px solid #E2E8F0; min-width:40px; }
             .kt-detail { border-top:1px solid #F1F5F9; background:#FAFAFA; padding:9px 11px 11px; font-size:13px; }
             .kt-detail .ln { display:flex; justify-content:space-between; padding:3px 0; border-bottom:1px solid #F0F0F0; }

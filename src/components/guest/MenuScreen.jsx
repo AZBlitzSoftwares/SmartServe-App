@@ -223,7 +223,7 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
   )
 }
 
-export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, menuSheetOpen, setMenuSheetOpen, onBack, captain, onSwitchCaptain, captainTable, onCaptainBack, onChat, chatUnread = 0 }) {
+export default function MenuScreen({ tableNumber, eventData, cart, addToCart, removeFromCart, cartCount, isOnline, onShowSOS, onShowHistory, onShowStatus, hasActiveOrders, showFeedbackBubble, onFeedbackBubbleClick, onShowFeedback, onShowContact, menuSheetOpen, setMenuSheetOpen, onBack, captain, onSwitchCaptain, captainTable, onCaptainBack, onChat, chatUnread = 0 }) {
   // ss-menu-cache. Start from the last menu this device saw for the event
   // (src/lib/cache.js), so the dishes show at once. The fresh fetch below
   // always runs on open and replaces it.
@@ -423,6 +423,13 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         <button onClick={onShowFeedback} className="ss-cta ss-cta-still"
           style={{ display: captain ? 'none' : 'inline-flex', flexShrink:0, borderRadius:999,
             padding:'8px 15px', fontSize:12, whiteSpace:'nowrap' }}>⭐ Feedback</button>
+
+        {/* Contact us - guest tablets only, never a captain's */}
+        {!captain && onShowContact && (
+          <button data-testid="contact-btn" onClick={onShowContact} style={{ flexShrink:0, background:'#1B2559', color:'#fff',
+            border:'1.5px solid #1B2559', borderRadius:999, padding:'8px 14px', fontSize:12,
+            fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>📞 Contact us</button>
+        )}
 
         {/* ss-menu-chat-button. Up here rather than in the bottom bar: that
             bar stands down the moment a dish is added, which is exactly when

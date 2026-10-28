@@ -55,6 +55,8 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
   // 0 = "No limit" (Control › Order limit); empty = the old default of 1
   const maxOrders = eventData?.max_orders_per_table ?? 1
   const orderLimitHit = !multi && maxOrders > 0 && activeOrderCount >= maxOrders
+  // A captain's tablet keeps the grey "Table busy" (staff know what it means)
+  const greyLimit = orderLimitHit && captainMode
 
   // Multi-kitchen: Place Order opens the chair picker instead of sending.
   function openChairs() {
@@ -292,21 +294,24 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
 
         <span style={{ flex:1 }} />
 
-        <button className={placing || orderLimitHit ? '' : 'ss-order-now'}
+        {/* At the order limit it still reads Place Order (with a lock) and can be
+            pressed: guests did not press a grey button, so never saw why. The
+            press shows the "Please wait" box. */}
+        <button data-testid="place-order-bar" className={placing || greyLimit ? '' : 'ss-order-now'}
           onClick={() => { if (orderLimitHit) { setShowWait(true) } else { placeOrder() } }}
           disabled={placing}
           style={{ flexShrink:0,
-            background: placing ? '#B0741C' : orderLimitHit ? '#E5E7EB' : '#E8890C',
-            color: orderLimitHit ? '#9CA3AF' : '#fff',
+            background: placing ? '#B0741C' : greyLimit ? '#E5E7EB' : '#E8890C',
+            color: greyLimit ? '#9CA3AF' : '#fff',
             border:'none', borderRadius:13, padding:'13px 22px',
             fontWeight:900, fontSize:16, whiteSpace:'nowrap',
             cursor: placing ? 'wait' : 'pointer' }}>
-          {placing ? (slow ? 'Still sending…' : 'Sending…') : orderLimitHit ? '🔒 Table busy' : 'Place Order \u2192'}
+          {placing ? (slow ? 'Still sending…' : 'Sending…') : orderLimitHit ? (captainMode ? '🔒 Table busy' : '🔒 Place Order') : 'Place Order \u2192'}
         </button>
       </div>
 
       {showWait && (
-        <div style={{ position:'fixed', inset:0, zIndex:120, background:'rgba(26,10,10,0.72)',
+        <div data-testid="limit-wait" style={{ position:'fixed', inset:0, zIndex:120, background:'rgba(26,10,10,0.72)',
           display:'flex', alignItems:'center', justifyContent:'center', padding:22 }}>
           <div style={{ background:'#FFF1F2', border:'3px solid #FDA4AF', borderRadius:24,
             padding:'32px 26px 28px', maxWidth:400, width:'100%', textAlign:'center',
@@ -411,13 +416,14 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
               </div>
             )}
 
-            <button onClick={placeOrder} disabled={placing || orderLimitHit}
-              className={!placing && !orderLimitHit ? 'ss-order-now' : ''}
-              style={{ width:'100%', background: placing ? '#999' : orderLimitHit ? '#E5E7EB' : '#E8890C', color: orderLimitHit ? '#9CA3AF' : '#fff', border:'none', borderRadius:14, padding:'18px', fontSize:17, fontWeight:900, cursor: placing || orderLimitHit ? 'not-allowed' : 'pointer', transition:'all 0.2s', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+            <button data-testid="place-order-sheet" onClick={() => { if (orderLimitHit) { setOpen(false); onCartOpenChange?.(false); setShowWait(true) } else { placeOrder() } }}
+              disabled={placing}
+              className={!placing && !greyLimit ? 'ss-order-now' : ''}
+              style={{ width:'100%', background: placing ? '#999' : greyLimit ? '#E5E7EB' : '#E8890C', color: greyLimit ? '#9CA3AF' : '#fff', border:'none', borderRadius:14, padding:'18px', fontSize:17, fontWeight:900, cursor: placing ? 'not-allowed' : 'pointer', transition:'all 0.2s', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
               {placing
                 ? (slow ? '⏳ Still sending… please wait' : '⏳ Sending order…')
                 : orderLimitHit
-                  ? '🔒 Please Wait'
+                  ? (captainMode ? '🔒 Please Wait' : '🔒 Place Order')
                   : captainMode
                     ? '✓ Place Order · Table ' + (captainTable ?? '')
                     : '✓ Place Order'}

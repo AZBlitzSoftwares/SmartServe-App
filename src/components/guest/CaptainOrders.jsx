@@ -39,6 +39,41 @@ function mapStatus(raw) {
   return 'placed'
 }
 
+/* How long the order has waited: the time it was ordered and a clock that runs
+   until it is delivered, then stops (with the delivered time). Amber from 5
+   minutes, red from 10 (red = late). Only the clocks tick every second - one
+   shared timer - not the whole list. */
+const tickers = new Set()
+let tickTimer = null
+function useTick() {
+  const [now, setNow] = useState(() => serverNow())
+  useEffect(() => {
+    tickers.add(setNow)
+    // the database's clock where this tablet has learned it (a fast tablet would add minutes)
+    if (!tickTimer) tickTimer = setInterval(() => { const t = serverNow(); tickers.forEach(f => f(t)) }, 1000)
+    return () => { tickers.delete(setNow); if (!tickers.size) { clearInterval(tickTimer); tickTimer = null } }
+  }, [])
+  return now
+}
+const hhmm = ts => new Date(ts).toLocaleTimeString('en-IN', { hour:'numeric', minute:'2-digit', hour12:true }).toUpperCase()
+const mmss = sec => Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')
+const waited = (from, to) => Math.max(0, Math.floor((to - Date.parse(from)) / 1000))
+function RunningWait({ from }) {
+  const sec = waited(from, useTick())
+  const col = sec >= 600 ? '#DC2626' : sec >= 300 ? '#B45309' : '#1A0A0A'
+  return <b data-testid="cap-wait" style={{ color:col }}>⏱ {mmss(sec)}</b>
+}
+function OrderClock({ o, s }) {
+  const base = { fontSize:12, color:'#888', fontWeight:600, flexShrink:0, whiteSpace:'nowrap', fontVariantNumeric:'tabular-nums' }
+  if (s === 'delivered') return (
+    <span data-testid="cap-time" style={base}>
+      {hhmm(o.created_at)}{o.delivered_at && <> → <b style={{ color:'#15803D' }}>{hhmm(o.delivered_at)} · {mmss(waited(o.created_at, Date.parse(o.delivered_at)))} ✓</b></>}
+    </span>
+  )
+  if (s === 'cancelled') return <span data-testid="cap-time" style={base}>{hhmm(o.created_at)}</span>
+  return <span data-testid="cap-time" style={base}>{hhmm(o.created_at)} · <RunningWait from={o.created_at} /></span>
+}
+
 export default function CaptainOrders({ eventData, captain, onClose }) {
   // ss-multi-kitchen: chairs, one KOT chip per kitchen, and a 2-minute
   // cancel window. Off for every other event, where this screen behaves
@@ -379,10 +414,7 @@ export default function CaptainOrders({ eventData, captain, onClose }) {
                       padding:'3px 9px', fontSize:13, fontWeight:900, flexShrink:0,
                       minWidth:34, textAlign:'center' }}>T{tNum}</span>
 
-                    <span style={{ fontSize:12, color:'#888', fontWeight:600, flexShrink:0,
-                      minWidth:40 }}>
-                      {new Date(o.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
-                    </span>
+                    <OrderClock o={o} s={s} />
 
                     <span style={{ fontSize:12, color:'#555', fontWeight:700, flexShrink:0 }}>
                       {count} {count === 1 ? 'item' : 'items'}

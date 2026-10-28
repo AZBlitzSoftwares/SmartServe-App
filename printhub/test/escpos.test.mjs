@@ -315,3 +315,23 @@ test('a KOT without a cover still prints the multi-kitchen layout', () => {
   assert.match(all, /CHAIRS 2, 3/);
   assert.doesNotMatch(all, /Barker/);
 });
+
+test('order and cancel KOTs start with the KOT number, big, white on black (same as the desk slip)', () => {
+  for (const kind of ['order', 'cancel']) {
+    const lines = decodeEscPos(buildKot({ ...orderJob, kind, kot_no: 'K-022' })).lines.filter((l) => l.text.trim());
+    assert.equal(lines[0].text.trim(), 'KOT NO.', kind + ': label first');
+    assert.equal(lines[0].reverse, true);
+    assert.equal(lines[0].text.length, WIDTH, kind + ': black bar across the paper');
+    assert.equal(lines[1].text.trim(), 'K-022');
+    assert.equal(lines[1].reverse, true);
+    assert.equal(lines[1].w, 4, kind + ': the biggest text on the slip');
+    assert.equal(lines[1].text.length * 4, WIDTH);
+    assert.equal(lines[2].text.trim(), 'ITALIAN KITCHEN', kind + ': then the counter name');
+  }
+  // no KOT number: no box
+  const plain = decodeEscPos(buildKot({ ...orderJob, kot_no: null })).lines.filter((l) => l.text.trim());
+  assert.equal(plain[0].text.trim(), 'ITALIAN KITCHEN');
+  // a long number still fits
+  const long = decodeEscPos(buildKot({ ...orderJob, kot_no: 'COUNTER1-0123' })).lines;
+  for (const l of long) assert.ok(l.text.length * l.w <= WIDTH, 'fits the paper: ' + l.text);
+});

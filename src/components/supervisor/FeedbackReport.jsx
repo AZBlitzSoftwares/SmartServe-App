@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import ContactRequests from './ContactRequests'
 
 function eventStatus(dateStr) {
   if (!dateStr) return 'planned'
@@ -125,6 +126,9 @@ export default function FeedbackReport() {
           )}
         </div>
       </div>
+
+      {/* WhatsApp numbers left on the guest tablets (Contact us) */}
+      <ContactRequests events={allEvents} eventId={selEvent} />
 
       {/* DB count banner */}
       <div style={{ background:'#FFF8EE',borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:'#C06A00',fontWeight:600,border:'1px solid #E8890C44' }}>

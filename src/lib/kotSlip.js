@@ -256,10 +256,7 @@ ${order.kotNo ? '' : `<div class="row"><span>${isHelp ? 'Help' : 'Order'}:</span
 <div class="big-label">TABLE</div>
 <div class="big-num">${tableNum}</div>
 </div>
-${captainName ? `<div class="big-box">
-<div class="big-label">CAPTAIN</div>
-<div class="big-text">${captainName}</div>
-</div>` : ''}
+${captainName ? `<div class="row"><span>Captain:</span><span>${captainName}</span></div>` : ''}
 <hr class="divider"/>
 ${(order.order_items||[]).map(i => `
 <div class="item-row">
