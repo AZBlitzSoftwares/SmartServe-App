@@ -24,7 +24,10 @@ function useNowEverySecond() {
   }, [])
   return now
 }
-const clockText = sec => Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')
+// m:ss, and h:mm:ss from an hour (an order left open overnight read "3170:27")
+const clockText = sec => sec >= 3600
+  ? Math.floor(sec / 3600) + ':' + String(Math.floor(sec / 60) % 60).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0')
+  : Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')
 const secsBetween = (a, b) => Math.max(0, Math.floor((b - new Date(a).getTime()) / 1000))
 function RunningClock({ from }) {
   return clockText(secsBetween(from, useNowEverySecond()))
@@ -137,6 +140,8 @@ const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, wi
       <div className="kt-body" onClick={() => act.current.toggle(id)}>
         <div className="kt-head">
           {isKot && rec.kot_no && <span className="kt-no" title={'KOT ' + rec.kot_no}>{rec.kot_no}</span>}
+          {/* one slip per order (no KOT numbers): the order number, as printed on the slip */}
+          {!isKot && !isSos && <span className="kt-no" title={'Order ' + String(rec.id).slice(-6).toUpperCase()}>{String(rec.id).slice(-6).toUpperCase()}</span>}
           <span className={'kt-t' + (tOn ? ' on' : '')} title={tn != null ? 'Show only table ' + tn : ''}
             onClick={e => { e.stopPropagation(); if (tn != null) act.current.table(tOn ? null : tn) }}>T{tn ?? '?'}</span>
           {!isKot && <span className={'kt-lbl' + (isSos ? ' help' : '')}>
@@ -181,7 +186,7 @@ const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, wi
   )
 })
 
-const BUILD_VERSION = 'v2.10 \u00B7 2026-10-29'
+const BUILD_VERSION = 'v2.10.1 \u00B7 2026-10-29'
 // this device's Live Orders tab (new / assigned)
 const LIVE_TAB_KEY = 'ss_live_tab'
 
@@ -859,6 +864,12 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
           {kotQ && <span style={{ fontSize:13, fontWeight:700, color: filteredKots.length ? '#15803D' : '#B91C1C' }}>
             {filteredKots.length ? 'Showing KOT ' + kotQ + ' (any status). Tap Delivered on it.' : 'No KOT with number ' + kotQ + '.'}</span>}
       </div>
+
+      {!kotMode && (
+        <div data-testid="no-kot-numbers" style={{ background:'#FFFBEB', border:'1.5px solid #FCD34D', borderRadius:10, padding:'7px 12px', marginBottom:10, fontSize:13, color:'#92400E', fontWeight:700 }}>
+          This event prints one slip per order, so there are no KOT numbers. For KOT numbers (by category or course, like the guest events): Control › KOT printing › One KOT per category.
+        </div>
+      )}
 
       {actionErr && (
         <div role="alert" data-testid="action-error" style={{ background:'#FEF2F2', border:'1.5px solid #FCA5A5', borderRadius:10, padding:'8px 12px', marginBottom:10,

@@ -56,7 +56,9 @@ function useTick() {
   return now
 }
 const hhmm = ts => new Date(ts).toLocaleTimeString('en-IN', { hour:'numeric', minute:'2-digit', hour12:true }).toUpperCase()
-const mmss = sec => Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')
+const mmss = sec => sec >= 3600
+  ? Math.floor(sec / 3600) + ':' + String(Math.floor(sec / 60) % 60).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0')
+  : Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')
 const waited = (from, to) => Math.max(0, Math.floor((to - Date.parse(from)) / 1000))
 function RunningWait({ from }) {
   const sec = waited(from, useTick())

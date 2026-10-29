@@ -21,7 +21,9 @@ const STATUS_CONFIG = {
 
 // "8:15 PM" - the time on the guest's own tablet clock
 const clock = ts => ts ? new Date(ts).toLocaleTimeString('en-IN', { hour:'numeric', minute:'2-digit', hour12:true }).toUpperCase() : ''
-const mmss = sec => Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')
+const mmss = sec => sec >= 3600
+  ? Math.floor(sec / 3600) + ':' + String(Math.floor(sec / 60) % 60).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0')
+  : Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')
 const secsSince = (from, to) => Math.max(0, Math.floor(((to || Date.now()) - new Date(from).getTime()) / 1000))
 
 // One shared 1 s tick for every running clock on the screen

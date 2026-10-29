@@ -25,6 +25,12 @@ export function printKotWindow(order, isHelp, eventName, opts = {}) {
   const wNum = wRaw.match(/\(([^)]+)\)\s*$/)
   const waiterLabel = wRaw ? (wNum ? wNum[1] : wRaw) : '--'
   const orderId = '#' + order.id.slice(-6).toUpperCase()
+  // The number the slip is found by - the KOT number, or on an event that prints
+  // one slip per order (no KOT numbers) the order number - big, white on black,
+  // at the top AND at the bottom of the slip. Help slips keep their layout.
+  const idLabel = order.kotNo ? 'KOT NO.' : isHelp ? '' : 'ORDER NO.'
+  const idNum = order.kotNo || (isHelp ? '' : orderId.slice(1))
+  const idBox = idLabel ? `<div class="kot-no-box"><div class="kot-no-label">${idLabel}</div><div class="kot-no-num">${idNum}</div></div>` : ''
   const d = new Date(order.created_at)
   const dateStr = d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
   const timeStr = d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})
@@ -245,12 +251,12 @@ body {
 <body>
 <div class="app-name">Janu's Smart Serve</div>
 <div class="event-name">${eventName}</div>
-${order.kotNo ? `<div class="kot-no-box"><div class="kot-no-label">KOT NO.</div><div class="kot-no-num">${order.kotNo}</div></div>` : ''}
+${idBox}
 ${order.kotTitle ? `<div class="kot-cat">${order.kotTitle}</div>` : ''}
 <hr class="divider"/>
 <div class="row"><span>Date:</span><span>${dateStr}</span></div>
 <div class="row"><span>Time:</span><span>${timeStr}</span></div>
-${order.kotNo ? '' : `<div class="row"><span>${isHelp ? 'Help' : 'Order'}:</span><span>${orderId}</span></div>`}
+${isHelp ? `<div class="row"><span>Help:</span><span>${orderId}</span></div>` : ''}
 <hr class="divider-dash"/>
 <div class="big-box">
 <div class="big-label">TABLE</div>
@@ -272,6 +278,7 @@ ${(order.order_items||[]).map(i => `
 <div class="big-label">WAITER</div>
 <div class="big-num">${waiterLabel}</div>
 </div>
+${idBox}
 <div class="footer">-- Janu's Smart Serve --</div>
 </body>
 </html>`)

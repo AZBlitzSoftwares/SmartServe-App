@@ -328,6 +328,11 @@ test('order and cancel KOTs start with the KOT number, big, white on black (same
     assert.equal(lines[1].text.length * 4, WIDTH);
     assert.equal(lines[2].text.trim(), 'ITALIAN KITCHEN', kind + ': then the counter name');
   }
+  // order KOT: the same box again at the bottom, after the waiter
+  const ol = decodeEscPos(buildKot({ ...orderJob, kot_no: 'K-022', waiter_label: '07' })).lines.filter((l) => l.text.trim());
+  const rev = ol.map((l, i) => [l, i]).filter(([l]) => l.reverse && l.text.trim() === 'K-022').map(([, i]) => i);
+  assert.equal(rev.length, 2, 'KOT number printed twice');
+  assert.ok(rev[1] > ol.findIndex((l) => l.text.trim() === 'WAITER'), 'second one below the waiter');
   // no KOT number: no box
   const plain = decodeEscPos(buildKot({ ...orderJob, kot_no: null })).lines.filter((l) => l.text.trim());
   assert.equal(plain[0].text.trim(), 'ITALIAN KITCHEN');

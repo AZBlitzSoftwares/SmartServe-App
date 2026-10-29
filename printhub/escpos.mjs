@@ -330,6 +330,8 @@ function buildOrder(job, { backup, now }) {
   r.dashes();
   r.bold(true).size(1, 2).line(`Total items: ${totalQty(items)}`).size(1).bold(false);
   waiterBox(r, job);
+  // and again at the bottom: the slip is found by its KOT number from either end
+  if (job.kot_no) { r.dashes(); kotNoBox(r, job); }
   footer(r, job, now);
   return r.toBuffer();
 }
