@@ -307,6 +307,37 @@ export async function uploadAll(db, cloud, events, { all = false } = {}) {
       }
     }
 
+    // KOT numbers of guest / captain events (kot_series: IN-041, CH-042): the cloud's
+    // next number must come after the laptop's, and codes made on the laptop are kept.
+    // Never a reason to stop the upload (a cloud without the table answers 404).
+    try {
+      if ((await db.query("select to_regclass('public.kot_series') as r")).rows[0].r) {
+        const local = (await db.query('select event_id::text as event_id, seq, codes from public.kot_series where event_id::text = any($1::text[])', [events])).rows
+        if (local.length) {
+          const remote = (await api.call('GET', `kot_series?select=event_id,seq,codes&event_id=in.(${events.join(',')})`)) || []
+          for (const l of local) {
+            const c = remote.find((x) => x.event_id === l.event_id)
+            if (!c) {
+              await api.call('POST', 'kot_series?on_conflict=event_id', JSON.stringify([{ event_id: l.event_id, seq: Number(l.seq), codes: l.codes || {} }]), 'resolution=merge-duplicates,return=minimal')
+              result.kotSeqRaised++
+              continue
+            }
+            const codes = { ...(c.codes || {}), ...(l.codes || {}) }
+            const patch = {}
+            if (Number(l.seq) > Number(c.seq)) patch.seq = Number(l.seq)
+            if (JSON.stringify(codes) !== JSON.stringify(c.codes || {})) patch.codes = codes
+            if (Object.keys(patch).length) {
+              await api.call('PATCH', `kot_series?event_id=eq.${l.event_id}`, JSON.stringify(patch), 'return=minimal')
+              result.kotSeqRaised++
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (e.offline) throw e
+      logLine('upload', `kot_series: not raised this time (${e.message})`)
+    }
+
     // Contact us details (guest tablets): last, and never a reason to stop the
     // upload - a cloud that has not had db/2026-10-29_contact_requests.sql yet
     // answers 404 for the table. They stay on the laptop and go next time.

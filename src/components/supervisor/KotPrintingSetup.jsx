@@ -13,7 +13,11 @@ import { supabase } from '../../lib/supabase'
        KOT at the desk, on the desk computer's own printer (USB), as before.
 
    The printers are rows of the kitchens table (the same rows the Print Hub, the
-   test print and the multi-kitchen events use). */
+   test print and the multi-kitchen events use).
+
+   KOT numbers read CODE-NNN (IN-041, CH-042): the course's or category's code and
+   the event's running number (db/2026-10-30_kot_codes.sql). Codes are made from
+   the names the first time and can be changed here. */
 
 const catLabel = name => { const s = String(name || ''); const i = s.indexOf(' - '); return i === -1 ? s : s.slice(i + 3).trim() }
 const STALE_MS = 2 * 60 * 1000
@@ -30,6 +34,30 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
   const [tests, setTests] = useState({})     // printer id -> { phase, error }
   const [now, setNow] = useState(Date.now())
   const alive = useRef(true)
+  // KOT number codes: lower(course or category name) -> code; null = not loaded / no database update
+  const [codes, setCodes] = useState(null)
+  const codeOf = name => codes ? (codes[String(name || '').trim().toLowerCase()] || '') : ''
+  useEffect(() => {
+    if (!on) return
+    let stop = false
+    supabase.rpc('ss_kot_codes', { p_event: ev.id }).then(({ data, error }) => { if (!stop && !error && data) setCodes(data) })
+    return () => { stop = true }
+  }, [ev.id, on, byCourse])
+  async function saveCode(name, value) {
+    const v = String(value || '').trim().toUpperCase()
+    if (!v || v === codeOf(name)) return
+    const { data, error } = await supabase.rpc('ss_kot_code_set', { p_event: ev.id, p_name: String(name).trim(), p_code: v })
+    if (error) { setMsg(/CODE_TAKEN/.test(error.message || '') ? v + ' is already used by another course or category.' : /BAD_CODE/.test(error.message || '') ? 'A code is 1 to 4 letters or digits.' : 'Not saved: ' + error.message); return }
+    setMsg(''); setCodes(data || codes)
+  }
+  // the small code box shown next to a course / category
+  const codeBox = name => codes ? (
+    <input defaultValue={codeOf(name)} key={'code' + name + codeOf(name)} maxLength={4} data-code={name}
+      title={'KOT numbers for ' + name + ' read ' + (codeOf(name) || '…') + '-041'} aria-label={'KOT code for ' + name}
+      onBlur={e => saveCode(name, e.target.value)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+      style={{ width:52, border:'1.5px solid #0F172A', borderRadius:8, padding:'4px 6px', fontSize:13, fontWeight:900, textAlign:'center',
+        textTransform:'uppercase', background:'#0F172A', color:'#fff', flexShrink:0 }} />
+  ) : null
 
   async function load() {
     const [k, c] = await Promise.all([
@@ -232,9 +260,10 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
               <div key={p.id} data-printer={p.name} style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', padding:'8px 0', borderTop:'1px solid var(--line)' }}>
                 <input defaultValue={p.name} key={'n' + p.id + p.name} onBlur={e => e.target.value.trim() && e.target.value.trim() !== p.name && save(p, { name: e.target.value.trim() })}
                   style={{ ...fld, width:170, fontWeight:800 }} aria-label="Printer name" />
-                <input defaultValue={p.prefix || ''} key={'x' + p.id + p.prefix} maxLength={4} title="KOT letters: KOT numbers read L-001, L-002 …"
+                {/* KOT numbers come from the course / category code (boxes below), not the printer */}
+                {!codes && <input defaultValue={p.prefix || ''} key={'x' + p.id + p.prefix} maxLength={4} title="KOT letters: KOT numbers read L-001, L-002 …"
                   onBlur={e => e.target.value.trim().toUpperCase() !== (p.prefix || '') && save(p, { prefix: e.target.value.trim().toUpperCase() || null })}
-                  style={{ ...fld, width:62, textTransform:'uppercase' }} aria-label="KOT letters" />
+                  style={{ ...fld, width:62, textTransform:'uppercase' }} aria-label="KOT letters" />}
                 <input defaultValue={p.printer_ip || ''} key={'i' + p.id + p.printer_ip} placeholder="Printer address, e.g. 192.168.1.50"
                   onBlur={e => e.target.value.trim() !== (p.printer_ip || '') && save(p, { printer_ip: e.target.value.trim() || null, printer_port: 9100 })}
                   style={{ ...fld, width:210, borderColor: dupIp(p.printer_ip) ? '#DC2626' : 'var(--line)' }} aria-label="Printer address" />
@@ -260,7 +289,7 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
         <div style={box} data-testid="course-printers">
           <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:8, flexWrap:'wrap' }}>
             <span style={{ fontWeight:900, fontSize:15 }}>Courses</span>
-            <span style={{ fontSize:12.5, color:'var(--ink2)' }}>Each course is its own KOT; choose the printer it prints on. Its categories follow.</span>
+            <span style={{ fontSize:12.5, color:'var(--ink2)' }}>Each course is its own KOT; choose the printer it prints on. Its categories follow.{codes ? ' The black box is its KOT code: KOT numbers read IN-041, CH-042 … (the number runs on for the whole event).' : ''}</span>
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:8 }}>
             {courseGroups.map(g => {
@@ -271,6 +300,7 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
               return (
                 <div key={g.name} data-course={g.name} style={{ background:'#fff', border:'1px solid var(--line)', borderRadius:10, padding:'8px 10px' }}>
                   <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    {codeBox(g.name)}
                     <span style={{ flex:1, minWidth:0, fontWeight:900, fontSize:13.5 }}>{g.name}</span>
                     <select value={value} onChange={e => e.target.value !== '__mixed' && setCourse(g.name, g.cats, e.target.value)} style={{ ...fld, padding:'5px 8px', fontSize:12.5 }}>
                       {value === '__mixed' && <option value="__mixed">Mixed - choose one</option>}
@@ -291,12 +321,13 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
         <div style={box}>
           <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:8, flexWrap:'wrap' }}>
             <span style={{ fontWeight:900, fontSize:15 }}>Categories</span>
-            <span style={{ fontSize:12.5, color:'var(--ink2)' }}>Each category is its own KOT; choose the printer it prints on (also on the Menu tab).</span>
+            <span style={{ fontSize:12.5, color:'var(--ink2)' }}>Each category is its own KOT; choose the printer it prints on (also on the Menu tab).{codes && !byCourse ? ' The black box is its KOT code: KOT numbers read JU-041, GU-042 … (the number runs on for the whole event).' : ''}</span>
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:8 }}>
             {shown.map(c => (
               <label key={c.id} data-cat={c.name} style={{ display:'flex', alignItems:'center', gap:8, background: c.is_visible === false ? '#F8FAFC' : '#fff',
                 border:'1px solid var(--line)', borderRadius:10, padding:'7px 10px', opacity: c.is_visible === false ? 0.6 : 1 }}>
+                {!byCourse && codeBox(c.name)}
                 <span style={{ flex:1, minWidth:0, fontWeight:700, fontSize:13, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={c.name}>
                   {catLabel(c.name)}{c.is_visible === false ? ' (hidden)' : ''}</span>
                 <select value={c.kitchen_id || ''} onChange={e => setCat(c, e.target.value)} style={{ ...fld, padding:'5px 8px', fontSize:12.5 }}>

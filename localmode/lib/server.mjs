@@ -707,6 +707,11 @@ async function applyKotJump(pool, local, snap, n, events) {
     if (hasB) await pool.query('update public.kitchens set kot_seq_b = coalesce(kot_seq_b, 0) + $2 where event_id::text = any($1::text[])', [events, n])
     amount = n
   }
+  // Guest / captain events number their KOTs per event (IN-041, CH-042): the same jump
+  if ((await pool.query("select to_regclass('public.kot_series') as r")).rows[0].r) {
+    const r = await pool.query('update public.kot_series set seq = seq + $2 where event_id::text = any($1::text[])', [events, n])
+    if (r.rowCount) amount = n
+  }
   local.kotJump = { snapshotAt: snap.downloadedAt, amount, at: new Date().toISOString(), dataAgeMinutes: Math.round(ageMs / 60000) }
   saveLocal(local)
   logLine('server', `kot jump ${amount} (data ${fmtAgo(ageMs)})`)

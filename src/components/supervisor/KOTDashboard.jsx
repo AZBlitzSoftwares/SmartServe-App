@@ -106,7 +106,7 @@ function WaiterPicker({ waiters, busyOf, title, sub, current, allowNone, onPick,
    waiter changes (memo): with 150+ cards on a slow tablet, redrawing them all
    for every tap or new order is what made Delivered take seconds. The buttons
    call the screen's handlers through act (always the current ones). */
-const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, withMin, act }) {
+const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, withMin, ageMin, act }) {
   const isSos  = kind === 'sos'
   const isKot  = kind === 'kot'
   // a KOT keeps its dishes as [{ name, qty, note }]
@@ -128,6 +128,7 @@ const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, wi
   // Since the order came in (frozen once finished) - what the guest has waited
   const endTs = rec.delivered_at || rec.resolved_at
   const band = st === 'new' ? (isSos ? 'New help request' : 'New order')
+             : st === 'newlate' ? (isSos ? 'Help request' : 'New order') + ' · ' + ageMin + ' min · not assigned'
              : st === 'delay' ? 'Delay · ' + withMin + ' min with waiter ' + (waiterLabel || '')
              : st === 'progress' ? (waiterLabel ? 'Waiter ' + waiterLabel + ' · ' + withMin + ' min' : 'In progress')
              : st === 'done' ? (isSos ? 'Done ✓' : 'Delivered ✓')
@@ -135,7 +136,7 @@ const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, wi
   const shown = lines_.slice(0, 4)
   const nameOf = li => isSos ? li.item_name : (li.menu_items?.name || 'Item')
   return (
-    <div className={'kt st-' + st} data-card={id}>
+    <div className={'kt st-' + st + ' k-' + kind} data-card={id}>
       <div className={'kt-band b-' + st}>{band}</div>
       <div className="kt-body" onClick={() => act.current.toggle(id)}>
         <div className="kt-head">
@@ -160,7 +161,7 @@ const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, wi
         </ul>
       </div>
       <div className="kt-act">
-        {st === 'new' && <button className="kt-assign" disabled={busy} onClick={() => act.current.openPicker(isSos ? 'sos' : isKot ? 'kot' : 'order', rec)}>Assign waiter</button>}
+        {(st === 'new' || st === 'newlate') && <button className="kt-assign" disabled={busy} onClick={() => act.current.openPicker(isSos ? 'sos' : isKot ? 'kot' : 'order', rec)}>Assign waiter</button>}
         {(st === 'progress' || st === 'delay') && (
           <button className="kt-deliver" onClick={() => isSos ? act.current.resolveSOSRequest(rec.id) : isKot ? act.current.deliverKot(rec) : act.current.markDelivered(rec)}>✓ {isSos ? 'Done' : 'Delivered'}</button>
         )}
@@ -186,7 +187,7 @@ const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, wi
   )
 })
 
-const BUILD_VERSION = 'v2.10.1 \u00B7 2026-10-29'
+const BUILD_VERSION = 'v2.11 \u00B7 2026-10-29'
 // this device's Live Orders tab (new / assigned)
 const LIVE_TAB_KEY = 'ss_live_tab'
 
@@ -677,24 +678,26 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
   // to bottom and needs true chronological order.
   // new = nobody on it yet · progress = a waiter has it · delay = a waiter has had it
   // DELAY_MIN minutes and it is not delivered · done / void = finished
+  // newlate = nobody assigned DELAY_MIN minutes after it came in: the KOT number flashes
   function cardState(rec, isSos, isKot) {
+    const fresh = () => (nowTs - new Date(rec.created_at).getTime()) / 60000 >= DELAY_MIN ? 'newlate' : 'new'
     if (isKot) {
       if (rec.status === 'delivered') return 'done'
       if (rec.status === 'cancelled') return 'void'
-      if (!rec.waiter_id) return 'new'
+      if (!rec.waiter_id) return fresh()
     } else if (isSos) {
       if (rec.status === 'resolved') return 'done'
       if (rec.status === 'cancelled') return 'void'
-      if (rec.status === 'open' || (!rec.waiter_id && rec.status !== 'in_progress')) return 'new'
+      if (rec.status === 'open' || (!rec.waiter_id && rec.status !== 'in_progress')) return fresh()
     } else {
       if (rec.status === 'delivered') return 'done'
       if (rec.status === 'cancelled') return 'void'
-      if (!rec.waiter_id && ['pending', 'placed'].includes(rec.status)) return 'new'
+      if (!rec.waiter_id && ['pending', 'placed'].includes(rec.status)) return fresh()
     }
     const since = rec.assigned_at ? (nowTs - new Date(rec.assigned_at).getTime()) / 60000 : 0
     return since >= DELAY_MIN ? 'delay' : 'progress'
   }
-  const RANK = { new: 0, delay: 1, progress: 2, done: 3, void: 4 }
+  const RANK = { newlate: 0, new: 0, delay: 1, progress: 2, done: 3, void: 4 }
   const timelineAll = [
     ...filteredSOS.map(r => ({ kind:'sos', at:r.created_at, sos:r, st:cardState(r, true) })),
     ...filteredOrders.map(o => ({ kind:'order', at:o.created_at, order:o, st:cardState(o, false) })),
@@ -703,7 +706,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
     ? (RANK[a.st] - RANK[b.st]) || (new Date(a.at) - new Date(b.at))
     : new Date(b.at) - new Date(a.at))
   // New / Assigned: the same open list, split (the KOT finder shows its KOT on any tab)
-  const isNewRow = r => r.st === 'new'
+  const isNewRow = r => r.st === 'new' || r.st === 'newlate'
   const isAssignedRow = r => r.st === 'progress' || r.st === 'delay'
   const countNew = filter === 'active' && !kotQ ? timelineAll.filter(isNewRow).length : null
   const countAssigned = filter === 'active' && !kotQ ? timelineAll.filter(isAssignedRow).length : null
@@ -944,7 +947,13 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
             @keyframes ktDelay { 0%,49.9% { background:#FEE2E2; color:#B91C1C; } 50%,100% { background:#EF4444; color:#fff; } }
             .kt-band.b-new { background:#DBEAFE; color:#1E40AF; animation:ktNew 1.2s steps(1,end) infinite; }
             .kt-band.b-delay { background:#FEE2E2; color:#B91C1C; animation:ktDelay 1.2s steps(1,end) infinite; }
-            @media (prefers-reduced-motion: reduce) { .kt-band.b-new, .kt-band.b-delay { animation:none; } }
+            .kt.st-newlate { border-color:#FCA5A5; border-width:2px; }
+            .kt-band.b-newlate { background:#FEF2F2; color:#B91C1C; }
+            @keyframes ktLateNo { 0%,49.9% { background:#DC2626; color:#fff; box-shadow:0 0 0 3px #FCA5A5; } 50%,100% { background:#0F172A; color:#fff; box-shadow:none; } }
+            .kt.st-newlate .kt-no { animation:ktLateNo 1s steps(1,end) infinite; }
+            .kt.st-newlate.k-sos .kt-t { animation:ktLateNo 1s steps(1,end) infinite; color:#fff; padding:0 6px; }
+            @media (prefers-reduced-motion: reduce) { .kt-band.b-new, .kt-band.b-delay, .kt.st-newlate .kt-no, .kt.st-newlate.k-sos .kt-t { animation:none; }
+              .kt.st-newlate .kt-no { background:#DC2626; } }
             .kt-body { padding:9px 11px 6px; cursor:pointer; }
             .kt-head { display:flex; align-items:center; gap:8px; }
             .kt-no { font-size:28px; font-weight:900; color:#fff; background:#0F172A; border-radius:8px; padding:1px 9px; letter-spacing:.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
@@ -1016,6 +1025,7 @@ export default function KOTDashboard({ eventData, onOrderCountChange, onNewOrder
                 busy={assigning === (row.kind === 'sos' ? 'sos-' : row.kind === 'kot' ? 'kot-' : '') + rec.id}
                 prn={row.kind === 'kot' ? printerOf(rec) : null}
                 withMin={rec.assigned_at ? Math.max(0, Math.floor((nowTs - new Date(rec.assigned_at).getTime()) / 60000)) : 0}
+                ageMin={row.st === 'newlate' ? Math.max(0, Math.floor((nowTs - new Date(rec.created_at).getTime()) / 60000)) : 0}
                 act={actRef} />
             )
           })}

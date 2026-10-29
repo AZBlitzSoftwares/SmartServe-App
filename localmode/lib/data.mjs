@@ -134,7 +134,7 @@ function copyPlan(tables) {
     ['events', 'id::text = any($1::text[])'],
     ['help_items', `${EV} or event_id is null`, 'event_id'],
     ...['supervisors', 'tables', 'captains', 'waiters', 'kitchens', 'barkers', 'menu_categories', 'table_carts',
-      'orders', 'ms_covers', 'ms_firings', 'kots', 'ms_items', 'sos_requests', 'chat_messages', 'feedback', 'contact_requests'].map((t) => [t, EV, 'event_id']),
+      'orders', 'ms_covers', 'ms_firings', 'kots', 'ms_items', 'sos_requests', 'chat_messages', 'feedback', 'contact_requests', 'kot_series'].map((t) => [t, EV, 'event_id']),
     ['menu_items', `category_id in (select id from public.menu_categories where ${EV})`, 'category_id', 'menu_categories'],
     ['order_items', `order_id in (select id from public.orders where ${EV})`, 'order_id', 'orders'],
     ['sos_request_items', `sos_request_id in (select id from public.sos_requests where ${EV})`, 'sos_request_id', 'sos_requests'],
@@ -194,7 +194,7 @@ export async function downloadEventData(cloud, eventIds, cloudTables) {
 // is not one snapshot like the database route; prepare runs before service,
 // and a refresh at the venue reads orders before their dishes and KOTs.
 const EVENT_TABLES = ['supervisors', 'tables', 'captains', 'waiters', 'kitchens', 'barkers', 'menu_categories', 'table_carts',
-  'orders', 'ms_covers', 'ms_firings', 'kots', 'ms_items', 'sos_requests', 'chat_messages', 'feedback', 'contact_requests']
+  'orders', 'ms_covers', 'ms_firings', 'kots', 'ms_items', 'sos_requests', 'chat_messages', 'feedback', 'contact_requests', 'kot_series']
 
 export async function downloadEventDataApi(api, eventIds, localTables) {
   const copy = []
