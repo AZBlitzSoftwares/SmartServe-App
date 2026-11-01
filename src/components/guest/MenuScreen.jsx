@@ -348,6 +348,39 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   function ItemCard({ item }) {
     const qty = getQty(item.id)
     const isVeg = item.is_veg !== false
+    // A captain's tablet: the Maestro captain tile - no photo, three to a row (two on a
+    // phone, more on a wide screen): live tag on top, the name on up to three lines, one
+    // line of description and + at the bottom (then − qty +). Guest tablets keep the photo.
+    if (captain) return (
+      <div className="ss-dish ss-ctile" data-dish={item.name}
+        style={{ background: qty > 0 ? '#FFFBF0' : '#fff', borderRadius:10, display:'flex', flexDirection:'column', gap:3,
+          padding: qty > 0 ? '7px 8px' : '8px 9px', minHeight:104, minWidth:0,
+          boxShadow:'0 1px 2px rgba(0,0,0,0.06)', border: qty > 0 ? '2px solid #E8890C' : '1px solid #E5E5E5' }}>
+        {(item.is_live_counter || qty > 0) && (
+          <div style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:4, minHeight:16 }}>
+            {item.is_live_counter && <span style={{ fontSize:10, color:'#92400E', fontWeight:800, background:'#FEF3C7', padding:'1px 6px', borderRadius:4 }}>⏱ Live</span>}
+            {qty > 0 && <span style={{ marginLeft:'auto', fontSize:10.5, color:'#9A5B00', fontWeight:800 }}>{qty} added</span>}
+          </div>
+        )}
+        <div style={{ display:'flex', alignItems:'flex-start', gap:6, minWidth:0 }}>
+          <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:12, height:12, borderRadius:2, border:'1.5px solid '+(isVeg?'#16A34A':'#DC2626'), flexShrink:0, marginTop:3 }}>
+            <span style={{ width:5, height:5, borderRadius:'50%', background:isVeg?'#16A34A':'#DC2626', display:'block' }}></span>
+          </span>
+          <div style={{ fontWeight:700, fontSize:14, color:'#1A1A1A', lineHeight:1.24, display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden', overflowWrap:'anywhere', minWidth:0 }}>{item.name}</div>
+        </div>
+        {item.description && <div style={{ fontSize:11, color:'#888', lineHeight:1.3, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', paddingLeft:18 }}>{item.description}</div>}
+        <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'flex-end', marginTop:'auto', paddingTop:4 }}>
+          {qty===0
+            ? <button onClick={()=>addToCart(item)} aria-label={'Add '+item.name} style={{ width:44, height:40, borderRadius:9, border:0, background:'#E8890C', color:'#fff', fontSize:22, fontWeight:800, lineHeight:1, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>+</button>
+            : <div style={{ display:'flex', alignItems:'center', background:'#E8890C', borderRadius:9, overflow:'hidden', height:40 }}>
+                <button onClick={()=>removeFromCart(item.id)} aria-label={'Remove '+item.name} style={{ background:'none', border:'none', color:'#fff', fontSize:22, fontWeight:800, cursor:'pointer', padding:'0 11px', height:40, lineHeight:1 }}>−</button>
+                <span style={{ color:'#fff', fontWeight:800, fontSize:15, minWidth:18, textAlign:'center' }}>{qty}</span>
+                <button onClick={()=>addToCart(item)} aria-label={'Add '+item.name} style={{ background:'none', border:'none', color:'#fff', fontSize:22, fontWeight:800, cursor:'pointer', padding:'0 11px', height:40, lineHeight:1 }}>+</button>
+              </div>
+          }
+        </div>
+      </div>
+    )
     return (
       <div className="ss-dish" data-dish={item.name}
         style={{ background:'#fff', borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column',
@@ -382,7 +415,12 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       </div>
     )
   }
-  const TILE_GRID = { display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:12, padding:'12px 12px 4px' }
+  // Captain tiles: three to a row, as on the Maestro captain tablet (columns set by the
+  // ss-ctiles rules below, so a phone gets two and a wide screen more)
+  const TILE_GRID = captain
+    ? { display:'grid', gap:7, padding:'10px 10px 4px', alignItems:'stretch' }
+    : { display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:12, padding:'12px 12px 4px' }
+  const TILE_CLASS = captain ? 'ss-ctiles' : undefined
   // Filter chips: same look as the rest of the app (dark when chosen, amber outline otherwise)
   const chip = on => ({ flexShrink:0, padding:'6px 14px', borderRadius:999, fontSize:13, fontWeight:800, cursor:'pointer',
     border:'1.5px solid ' + (on ? '#1A0A0A' : 'rgba(232,137,12,0.55)'), background: on ? '#1A0A0A' : '#fff', color: on ? '#fff' : '#3A2A1A',
@@ -505,6 +543,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       {/* SCROLLABLE MENU CONTENT */}
       {/* ss-scroll-pad-64. One bar either way now, so the old 200px gap for
           two stacked bars would just be dead space at the end of the list. */}
+      {captain && <style>{`.ss-ctiles{grid-template-columns:repeat(3,minmax(0,1fr))}@media screen and (min-width:1000px){.ss-ctiles{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}}@media screen and (max-width:420px){.ss-ctiles{grid-template-columns:repeat(2,minmax(0,1fr))}}`}</style>}
       <div ref={scrollRef} style={{ flex:1, overflowY:'auto',
         paddingBottom: 110 }}>
         {loading ? (
@@ -515,7 +554,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
             <div style={{ padding:'10px 16px 6px', fontSize:13, color:'#888', fontWeight:600 }}>{filtered.length} results for "{search}"</div>
             {filtered.length===0
               ? <div style={{ textAlign:'center', padding:60 }}><div style={{ fontSize:40, marginBottom:12 }}>🔍</div><div style={{ color:'#888', fontWeight:600 }}>No dishes found</div></div>
-              : <div style={TILE_GRID}>{filtered.map(item => <ItemCard key={item.id} item={item} />)}</div>
+              : <div className={TILE_CLASS} style={TILE_GRID}>{filtered.map(item => <ItemCard key={item.id} item={item} />)}</div>
             }
           </>
         ) : (
@@ -529,7 +568,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
                   <span style={{ fontWeight:900, fontSize:15, color:'#E8890C', letterSpacing:'0.5px', textTransform:'uppercase' }}>{catLabel(cat.name)}</span>
                   <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)', background:'rgba(255,255,255,0.1)', padding:'2px 8px', borderRadius:999, fontWeight:600 }}>{catItems.length} item{catItems.length!==1?'s':''}</span>
                 </div>
-                <div style={TILE_GRID}>{catItems.map(item => <ItemCard key={item.id} item={item} />)}</div>
+                <div className={TILE_CLASS} style={TILE_GRID}>{catItems.map(item => <ItemCard key={item.id} item={item} />)}</div>
               </div>
             ))
         )}
