@@ -20,6 +20,8 @@ const COL_LABEL = { name:'Dish', category:'Cuisine', course:'Course', descriptio
 
 export default function MenuImport({ eventData, rows: givenRows, fileName, onClose, onDone, onEventChange }) {
   const isMs = !!eventData?.maestro
+  // Maestro menus are split by cuisine (kitchen); guest and captain menus by category (counter)
+  const catWord = isMs || eventData?.multi_kitchen ? 'Cuisine' : 'Category'
   // guest / captain events: the courses set so far (none while the event still has the default list)
   const courses = useMemo(() => isMs ? coursesOf(eventData) : eventCourses(eventData, []), [isMs, eventData])
   const [text, setText] = useState('')
@@ -218,7 +220,7 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
             <h3 style={{ fontSize:18, fontWeight:900 }}>{rows ? 'Check the menu before importing' : 'Paste the menu from Excel'}</h3>
             <div style={{ fontSize:12.5, color:'var(--ink2)', marginTop:3 }}>
               {rows ? (fileName ? fileName + ' · ' : '') + 'Nothing is saved until you press Import.'
-                : 'In Excel, select the rows including the header row (Dish, Cuisine, Course, Description, Veg), copy, and paste below.'}
+                : 'In Excel, select the rows including the header row (Dish, ' + catWord + ', Course, Description, Veg), copy, and paste below.'}
             </div>
           </div>
           <button onClick={onClose} disabled={busy} style={{ background:'none', border:'none', fontSize:20, cursor:'pointer', color:'#888' }}>✕</button>
@@ -259,7 +261,7 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
 
             <div style={{ fontSize:12.5, marginBottom:8 }}>
               <b>Columns read:</b>{' '}
-              {Object.keys(parsed.cols).map(k => <span key={k} style={pill('#F0FDF4', '#15803D', '#BBF7D0')}>{COL_LABEL[k]}</span>)}
+              {Object.keys(parsed.cols).map(k => <span key={k} style={pill('#F0FDF4', '#15803D', '#BBF7D0')}>{k === 'category' ? catWord : COL_LABEL[k]}</span>)}
               {isMs && parsed.cols.course == null && <span style={pill('#FFF7ED', '#B45309', '#FED7AA')}>No Course column</span>}
             </div>
             {parsed.headings?.length > 0 && (
@@ -287,11 +289,11 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
             )}
 
             <div style={{ fontSize:12.5, marginBottom:10 }}>
-              <b>Cuisines:</b>{' '}
+              <b>{catWord === 'Cuisine' ? 'Cuisines' : 'Categories'}:</b>{' '}
               {catCounts.map(([c, n]) => (
                 <span key={c} style={catKnown(c) ? pill('#fff', 'var(--ink)', 'var(--line)') : pill('#EFF6FF', '#1D4ED8', '#BFDBFE')}>{c} · {n}{catKnown(c) ? '' : ' · new'}</span>
               ))}
-              {parsed.cols.category == null && <span style={{ color:'var(--ink2)' }}>No Cuisine column: dishes go under headings in the sheet, or General.</span>}
+              {parsed.cols.category == null && <span style={{ color:'var(--ink2)' }}>No {catWord} column: dishes go under headings in the sheet, or General.</span>}
             </div>
 
             {plan.dupes.length > 0 && (
@@ -311,7 +313,7 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
             <div style={{ border:'1px solid var(--line)', borderRadius:10, overflow:'hidden', marginBottom:14 }}>
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5 }}>
                 <thead><tr style={{ background:'var(--ink)', color:'#fff', textAlign:'left' }}>
-                  <th style={{ padding:'7px 10px' }}>Dish</th><th style={{ padding:'7px 10px' }}>Cuisine</th>
+                  <th style={{ padding:'7px 10px' }}>Dish</th><th style={{ padding:'7px 10px' }}>{catWord}</th>
                   {showCourses && <th style={{ padding:'7px 10px' }}>Course</th>}<th style={{ padding:'7px 10px' }}>Veg</th><th style={{ padding:'7px 10px' }} />
                 </tr></thead>
                 <tbody>

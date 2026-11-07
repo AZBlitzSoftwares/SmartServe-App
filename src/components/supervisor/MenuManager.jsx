@@ -272,7 +272,7 @@ export default function MenuManager({ eventData, onEventChange }) {
                 {importResult.error ? '❌ '+importResult.error
                   : '✅ ' + importResult.added + ' dishes added' + (importResult.updated ? ', ' + importResult.updated + ' updated' : '')
                     + (importResult.skipped ? ', ' + importResult.skipped + ' left as they were' : '')
-                    + (importResult.newCats ? ' · ' + importResult.newCats + ' new cuisine' + (importResult.newCats === 1 ? '' : 's') : '')
+                    + (importResult.newCats ? ' · ' + importResult.newCats + (isMs || eventData?.multi_kitchen ? ' new cuisine' + (importResult.newCats === 1 ? '' : 's') : ' new categor' + (importResult.newCats === 1 ? 'y' : 'ies')) : '')
                     + (importResult.newCourses?.length ? ' · courses added: ' + importResult.newCourses.join(', ') : '')}
               </div>
               {importResult.errors?.map((err,i)=><div key={i} style={{ color:'#DC2626', fontSize:12, marginTop:4 }}>{err}</div>)}

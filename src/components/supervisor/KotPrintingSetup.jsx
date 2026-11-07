@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import PrintHubDownload from './PrintHubDownload'
 
 /* KOT printing for Guest Self-Service and Captain Service events.
 
@@ -283,6 +284,14 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
           })}
           <button onClick={addPrinter} data-testid="add-printer"
             style={{ marginTop:8, border:'1.5px dashed var(--line)', background:'var(--bg)', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:800, cursor:'pointer' }}>+ Add printer</button>
+          {/* the Print Hub prints on these printers: offer it right here (internet days);
+              with the laptop server it is the Offline Kit's own "4 Start Print Hub" */}
+          {list.length > 0 && <>
+            <PrintHubDownload />
+            <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:4 }}>
+              Laptop server (internet down): use the Offline Kit's <b>4 Start Print Hub</b> instead. Only one Print Hub per event.
+            </div>
+          </>}
         </div>
 
         {byCourse && (
@@ -339,7 +348,7 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
             {!shown.length && <div style={{ fontSize:12.5, color:'var(--ink2)' }}>No categories yet: add the menu under the Menu tab.</div>}
           </div>
           <div style={{ fontSize:12, color:'var(--ink2)', marginTop:10, lineHeight:1.5 }}>
-            How it prints: a printer with an address prints through the <b>Print Hub</b> on the event laptop (Offline Kit, “Start Print Hub”).
+            How it prints: a printer with an address prints through the <b>Print Hub</b> on the laptop connected to the printers’ router (Printers, above).
             With no printers, KOTs print at the desk on this computer's printer, as before.
           </div>
         </div>
