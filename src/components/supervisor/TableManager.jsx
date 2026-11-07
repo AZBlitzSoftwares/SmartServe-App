@@ -4,6 +4,7 @@ import { WaiterList, HelpItemsEditor } from './EventManager'
 import CaptainList from './CaptainList'
 import KitchenSetup from './KitchenSetup'
 import KotPrintingSetup from './KotPrintingSetup'
+import CoursesSetup from './CoursesSetup'
 import { AutoAssignSetting } from './AutoAssign'
 import OfflineKitCard from './OfflineKitCard'
 import Fold from './Fold'
@@ -66,8 +67,8 @@ export default function TableManager({ eventData, onEventChange }) {
 
   // The jump bar: every section of this event type, in order
   const nav = {
-    self:    [['ss-ready','Ready check'], ['st-tables','Tables & tablets'], ['ss-waiters','Waiters'], ['ss-printing','KOT printing'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
-    captain: [['ss-ready','Ready check'], ['ss-captains','Captains'], ['ss-waiters','Waiters'], ['ss-printing','KOT printing'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
+    self:    [['ss-ready','Ready check'], ['st-tables','Tables & tablets'], ['ss-waiters','Waiters'], ['ss-courses','Courses & categories'], ['ss-printing','KOT printing'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
+    captain: [['ss-ready','Ready check'], ['ss-captains','Captains'], ['ss-waiters','Waiters'], ['ss-courses','Courses & categories'], ['ss-printing','KOT printing'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
     multi:   [['ks-ready','Ready check'], ['ks-chairs','Chairs'], ['ks-kitchens','Kitchens & printers'], ['ks-routing','Menu routing'], ['ks-captains','Captains'], ['ks-waiters','Waiters'], ['st-tables','Tables'], ['ss-help','Help requests'], ['ss-limit','Order limit'], ['ss-offline','Offline kit']],
     maestro: [['ms-ready','Ready check'], ['ks-chairs','1 Tables & chairs'], ['ks-kitchens','2 Kitchens & printers'], ['ms-barkers','3 Barkers'], ['ks-captains','4 Captains'],
       ['ms-courses','5 Courses'], ['ks-routing','6 Menu routing'], ['ms-rules','7 Kitchen rules'], ['ms-dishes','8 Dishes'], ['ms-vip','9 VIP guests'], ['ms-screens','10 Big screens'], ['ss-offline','11 Offline kit']],
@@ -131,7 +132,9 @@ export default function TableManager({ eventData, onEventChange }) {
           {sectionHead('ss-waiters', 'Waiters', 'The people who carry food and answer help requests. The desk assigns them to orders, or they are assigned automatically.')}
           <AutoAssignSetting eventData={eventData} onEventChange={onEventChange} />
           <WaiterList eventId={eventData.id} />
-          {sectionHead('ss-printing', 'KOT printing', 'One KOT per category, the event\'s printers, and which printer each category prints on.')}
+          {sectionHead('ss-courses', 'Courses & categories', 'Courses are the first row on the tablet (Beverages, Starters, Main Course…); categories are the counters inside them. Create both here, then add the dishes in the Menu tab.')}
+          <CoursesSetup eventData={eventData} onEventChange={onEventChange} />
+          {sectionHead('ss-printing', 'KOT printing', 'One KOT per category or per course, the event\'s printers, and which printer each course or category prints on.')}
           <KotPrintingSetup eventData={eventData} onEventChange={onEventChange} />
         </>}
 
@@ -180,7 +183,7 @@ function BasicReadiness({ eventData, mode }) {
   const n = eventData.number_of_tables || 0
   const live = d.tables.filter(t => statusOf(t) === 'online').length
   const checks = [
-    { id:'ss-menu', title:'Menu', ok: d.items.length > 0, detail: d.items.length
+    { id:'ss-courses', title:'Menu', ok: d.items.length > 0, detail: d.items.length
         ? d.items.length + ' dishes in ' + d.cats + ' categories'
         : 'No dishes yet — add the menu under the Menu tab' },
     { id:'st-tables', title:'Tables', ok: n > 0, detail: n ? n + ' tables at this event' : 'Set the number of tables' },

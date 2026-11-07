@@ -4,12 +4,12 @@ import MenuImport from './MenuImport'
 import { supabase } from '../../lib/supabase'
 import { readSheetFile, menuTemplateCsv } from '../../lib/sheetImport'
 import { coursesOf } from '../../maestro/msData'
+import { eventCourses, saveCourseOrder } from '../../lib/courses'
 
 export default function MenuManager({ eventData, onEventChange }) {
   // Maestro dishes also need a course: the captain takes the order by course
   // and the kitchen fires course by course
   const isMs = !!eventData?.maestro
-  const courses = coursesOf(eventData)
   const [courseFilter, setCourseFilter] = useState('all')
   const [importing2, setImporting2] = useState(null)   // { rows, fileName } or { paste:true }
   const [categories, setCategories] = useState([])
@@ -30,6 +30,11 @@ export default function MenuManager({ eventData, onEventChange }) {
   const [showCopyEvent, setShowCopyEvent] = useState(false)
   const [allEvents, setAllEvents] = useState([])
   const fileRef = useRef()
+  // Guest and captain events have courses too once they are set (Control › Courses & categories,
+  // or a Course column in the import): a course row on the dishes, a course on each dish
+  const courses = isMs ? coursesOf(eventData) : eventCourses(eventData, [...items.map(i => i.course), ...categories.map(c => c.course)])
+  const hasCourses = isMs || courses.length > 0
+  const catCourse = id => { const c = categories.find(x => x.id === id); return c && courses.includes(c.course) ? c.course : '' }
 
   useEffect(() => { if (eventData) loadMenu() }, [eventData])
   // One KOT per category (guest / captain events): each category picks its KOT printer here too
@@ -94,10 +99,10 @@ export default function MenuManager({ eventData, onEventChange }) {
     if (isMs && courses.length && !courses.includes(newItem.course)) { alert('Pick the course for this dish (' + courses.join(', ') + ').'); return }
     setSaving(true)
     if (editItem) {
-      const { error } = await supabase.from('menu_items').update({ name:newItem.name.trim(), description:newItem.description.trim(), category_id:catId, is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, ...(isMs ? { course:newItem.course||null, vip_only:!!newItem.vip_only } : {}) }).eq('id', editItem.id)
+      const { error } = await supabase.from('menu_items').update({ name:newItem.name.trim(), description:newItem.description.trim(), category_id:catId, is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, ...(isMs ? { course:newItem.course||null, vip_only:!!newItem.vip_only } : hasCourses ? { course:newItem.course||null } : {}) }).eq('id', editItem.id)
       if (error) { alert('Could not save the dish: ' + error.message); setSaving(false); return }
     } else {
-      const { error } = await supabase.from('menu_items').insert({ category_id:catId, name:newItem.name.trim(), description:newItem.description.trim(), is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, is_available:true, ...(isMs ? { course:newItem.course||null, vip_only:!!newItem.vip_only } : {}) })
+      const { error } = await supabase.from('menu_items').insert({ category_id:catId, name:newItem.name.trim(), description:newItem.description.trim(), is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, is_available:true, ...(isMs ? { course:newItem.course||null, vip_only:!!newItem.vip_only } : hasCourses ? { course:newItem.course||null } : {}) })
       // a VIP-only special dish stays out of the shared dish library
       if (!error && !(isMs && newItem.vip_only)) await syncToFoodMaster({ name:newItem.name.trim(), description:newItem.description.trim(), category:categories.find(c=>c.id===catId)?.name, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null })
       if (error) { alert('Error adding dish: ' + error.message); setSaving(false); return }
@@ -147,7 +152,7 @@ export default function MenuManager({ eventData, onEventChange }) {
   }
 
   function downloadTemplate() {
-    const blob = new Blob(['\uFEFF' + menuTemplateCsv(isMs ? courses : [])], { type:'text/csv;charset=utf-8' })
+    const blob = new Blob(['\uFEFF' + menuTemplateCsv(hasCourses ? courses : [])], { type:'text/csv;charset=utf-8' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob); a.download = 'menu-template.csv'
     document.body.appendChild(a); a.click(); a.remove()
@@ -231,7 +236,7 @@ export default function MenuManager({ eventData, onEventChange }) {
   // Category and search stack, so a supervisor can narrow to Starters and
   // then type. Description is searched too - dishes are often remembered by
   // an ingredient rather than by their menu name.
-  const byCourse = !isMs || courseFilter === 'all' ? items
+  const byCourse = !hasCourses || courseFilter === 'all' ? items
     : courseFilter === '__none' ? items.filter(i => !i.course || !courses.includes(i.course))
     : items.filter(i => i.course === courseFilter)
   const byCategory = activeCategory === 'all' ? byCourse : byCourse.filter(i => i.category_id === activeCategory)
@@ -254,7 +259,7 @@ export default function MenuManager({ eventData, onEventChange }) {
           <button onClick={()=>{ setImportResult(null); setImporting2({ paste:true }) }} style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#16A34A', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
             📋 Paste from Excel
           </button>
-          <button onClick={()=>{ setEditItem(null); setNewItem({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course:'', vip_only:false }); setShowAdd(true) }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Add Dish</button>
+          <button onClick={()=>{ setEditItem(null); setNewItem({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course: !isMs && activeCategory && activeCategory !== 'all' ? catCourse(activeCategory) : '', vip_only:false }); setShowAdd(true) }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Add Dish</button>
         </div>
         <input ref={fileRef} type="file" accept=".xlsx,.xlsm,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={handleFileImport} style={{ display:'none' }} />
       </div>
@@ -288,7 +293,7 @@ export default function MenuManager({ eventData, onEventChange }) {
       )}
 
       <div style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', borderRadius:12, padding:'10px 14px', marginBottom:14, fontSize:12, color:'#15803D' }}>
-        📋 Import a whole menu from Excel (.xlsx), CSV, or rows pasted from Excel. Columns: <strong>Dish, Cuisine{isMs ? ', Course' : ''}, Description, Veg</strong>{isMs ? <> (and <strong>Barker</strong> A/B if you want to fix it)</> : null} — only Dish is required; a title row above the header is fine.{' '}
+        📋 Import a whole menu from Excel (.xlsx), CSV, or rows pasted from Excel. Columns: <strong>Dish, {isMs ? 'Cuisine' : 'Category'}, Course, Description, Veg</strong>{isMs ? <> (and <strong>Barker</strong> A/B if you want to fix it)</> : null} — only Dish is required; a title row above the header is fine.{' '}
         <button onClick={downloadTemplate} style={{ background:'none', border:'none', padding:0, color:'#15803D', fontWeight:800, textDecoration:'underline', cursor:'pointer', fontSize:12 }}>Download the template</button>
       </div>
 
@@ -341,7 +346,7 @@ export default function MenuManager({ eventData, onEventChange }) {
         </div>
       )}
 
-      {isMs && (
+      {hasCourses && (
         <div style={{ display:'flex', gap:6, marginBottom:10, flexWrap:'wrap', alignItems:'center' }}>
           <span style={{ fontSize:11, fontWeight:800, color:'var(--ink2)', textTransform:'uppercase', letterSpacing:'.4px', marginRight:4 }}>Course</span>
           {[['all', 'All courses', items.length], ...courses.map(c => [c, c, items.filter(i => i.course === c).length]),
@@ -414,14 +419,20 @@ export default function MenuManager({ eventData, onEventChange }) {
           <h3 style={{ fontSize:16, fontWeight:800, marginBottom:16 }}>{editItem?'Edit Dish':'Add New Dish'}</h3>
           <input value={newItem.name} onChange={e=>setNewItem(p=>({...p,name:e.target.value}))} placeholder="Dish name *" style={INP} autoFocus />
           <textarea value={newItem.description} onChange={e=>setNewItem(p=>({...p,description:e.target.value}))} placeholder="Description (optional)" style={{ ...INP, resize:'none', height:72 }} />
-          <select value={newItem.category_id||activeCategory||''} onChange={e=>setNewItem(p=>({...p,category_id:e.target.value}))} style={{ ...INP, background:'#fff' }}>
+          <select value={newItem.category_id||activeCategory||''} onChange={e=>{ const id = e.target.value; setNewItem(p=>({...p, category_id:id, course: !isMs && catCourse(id) ? catCourse(id) : p.course })) }} style={{ ...INP, background:'#fff' }}>
             <option value="">Select category *</option>
             {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          {isMs && (
-            <div style={{ marginBottom:10 }}>
-              <label style={{ fontSize:13, fontWeight:600, color:'var(--ink2)', display:'block', marginBottom:6 }}>Course *</label>
+          {hasCourses && (
+            <div style={{ marginBottom:10 }} data-testid="dish-course">
+              <label style={{ fontSize:13, fontWeight:600, color:'var(--ink2)', display:'block', marginBottom:6 }}>{isMs ? 'Course *' : 'Course'}</label>
               <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                {!isMs && (
+                  <button type="button" onClick={()=>setNewItem(p=>({...p, course:''}))}
+                    style={{ borderRadius:999, padding:'7px 14px', fontSize:13, fontWeight:800, cursor:'pointer',
+                      border:'1.5px solid ' + (!newItem.course ? '#B8862B' : 'var(--line)'),
+                      background: !newItem.course ? '#F6E7C8' : '#fff', color:'var(--ink)' }}>No course</button>
+                )}
                 {courses.map(c => (
                   <button key={c} type="button" onClick={()=>setNewItem(p=>({...p, course:c}))}
                     style={{ borderRadius:999, padding:'7px 14px', fontSize:13, fontWeight:800, cursor:'pointer',
@@ -429,7 +440,8 @@ export default function MenuManager({ eventData, onEventChange }) {
                       background: newItem.course===c ? '#F6E7C8' : '#fff', color:'var(--ink)' }}>{c}</button>
                 ))}
               </div>
-              {!newItem.course && <div style={{ fontSize:11.5, color:'#B45309', fontWeight:700, marginTop:5 }}>Pick the course: captains find the dish under it and the kitchen fires it with that course.</div>}
+              {isMs && !newItem.course && <div style={{ fontSize:11.5, color:'#B45309', fontWeight:700, marginTop:5 }}>Pick the course: captains find the dish under it and the kitchen fires it with that course.</div>}
+              {!isMs && <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:5 }}>The course row on the tablet{eventData?.kot_per_course ? ' and the KOT it prints on' : ''}. Add or rename courses under Control › Courses &amp; categories.</div>}
             </div>
           )}
           {/* Image — URL or Upload */}
@@ -501,7 +513,7 @@ export default function MenuManager({ eventData, onEventChange }) {
               {isMs && item.vip_only && <span style={{ fontSize:11, color:'#7A4B00', background:'#FFF1CC', border:'1px solid #EBCB85', padding:'1px 7px', borderRadius:999, fontWeight:800 }}>★ VIP only</span>}
             </div>
             {item.description && <div style={{ fontSize:12, color:'var(--ink2)', marginTop:2 }}>{item.description}</div>}
-            {isMs && (
+            {hasCourses && (
               <select value={courses.includes(item.course) ? item.course : ''} onChange={e => setCourse(item, e.target.value)} title="Course"
                 style={{ marginTop:5, marginRight:6, border:'1.5px solid ' + (courses.includes(item.course) ? '#E7D3A6' : '#FED7AA'), borderRadius:999,
                   padding:'2px 8px', fontSize:11.5, fontWeight:800, background: courses.includes(item.course) ? '#FBF3E2' : '#FFF7ED',
@@ -557,14 +569,21 @@ export default function MenuManager({ eventData, onEventChange }) {
                 const srcCat = srcCats.find(c=>c.id===item.category_id)
                 const catKey = (srcCat?.name||'General').toLowerCase()
                 if (!catCache[catKey]) {
-                  const { data: nc } = await supabase.from('menu_categories').insert({ event_id:eventData.id, name:srcCat?.name||'General', sort_order:Object.keys(catCache).length+1, is_visible:true }).select().single()
+                  const { data: nc } = await supabase.from('menu_categories').insert({ event_id:eventData.id, name:srcCat?.name||'General', sort_order:Object.keys(catCache).length+1, is_visible:true, ...(!isMs && srcCat?.course ? { course: srcCat.course } : {}) }).select().single()
                   if (nc) catCache[catKey] = nc.id
                 }
                 await supabase.from('menu_items').insert({ category_id:catCache[catKey], name:item.name, description:item.description, is_veg:item.is_veg, is_live_counter:item.is_live_counter, photo_url:item.photo_url, is_available:true,
-                  ...(isMs ? { course: courses.includes(item.course) ? item.course : null, barker: item.barker || null } : {}) })
+                  ...(isMs ? { course: courses.includes(item.course) ? item.course : null, barker: item.barker || null } : { course: item.course || null }) })
                 await syncToFoodMaster({ name:item.name, description:item.description, category:catKey, is_veg:item.is_veg, photo_url:item.photo_url })
                 destNames.add(item.name.toLowerCase().trim())
                 copyAdded++
+              }
+              // guest / captain events: the copied dishes' courses join this event's courses, in the source event's order
+              if (!isMs) {
+                const { data: srcEv } = await supabase.from('events').select('courses').eq('id', srcId).maybeSingle()
+                const used = [...new Set(srcItems.map(i => String(i.course || '').trim()).filter(Boolean))]
+                const add = eventCourses({ courses: srcEv?.courses }, used).filter(c => !courses.some(x => x.toLowerCase() === c.toLowerCase()))
+                if (add.length) { try { const ev2 = await saveCourseOrder(eventData, [...courses, ...add]); if (ev2) onEventChange?.(ev2) } catch { /* the dishes keep their course; the order can be set under Control */ } }
               }
               alert('✅ Copied ' + copyAdded + ' items!' + (copySkipped>0?' Skipped '+copySkipped+' duplicates.':''))
               setShowCopyEvent(false); loadMenu()

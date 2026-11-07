@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { parseDelimited, menuRows, matchCourse } from '../../lib/sheetImport'
 import { coursesOf } from '../../maestro/msData'
+import { eventCourses } from '../../lib/courses'
 
 /* Import a whole menu from a spreadsheet, with a preview before anything is
    written.
@@ -19,7 +20,8 @@ const COL_LABEL = { name:'Dish', category:'Cuisine', course:'Course', descriptio
 
 export default function MenuImport({ eventData, rows: givenRows, fileName, onClose, onDone, onEventChange }) {
   const isMs = !!eventData?.maestro
-  const courses = coursesOf(eventData)
+  // guest / captain events: the courses set so far (none while the event still has the default list)
+  const courses = useMemo(() => isMs ? coursesOf(eventData) : eventCourses(eventData, []), [isMs, eventData])
   const [text, setText] = useState('')
   const [rows, setRows] = useState(givenRows || null)
   const [existing, setExisting] = useState('update')
@@ -42,9 +44,12 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
         // a heading row such as "SOUPS" is the course when it names one, otherwise the cuisine
         if (!rawCourse && d.section && matchCourse(d.section, courses)) rawCourse = d.section
         else if (!category && d.section) category = titleCase(d.section)
-      } else if (!category) {
-        // events without courses: a heading ("STARTERS") or a Course column is the menu category
-        category = d.section ? titleCase(d.section) : d.course ? titleCase(d.course) : ''
+      } else {
+        // guest / captain events: a heading ("STARTERS") is the category when the sheet has none;
+        // a Course column next to a category is the course (Beverages › Mocktails), alone it is the category
+        if (!category && d.section) category = titleCase(d.section)
+        if (category && d.course) rawCourse = d.course
+        else if (!category && d.course) category = titleCase(d.course)
       }
       let course = rawCourse ? matchCourse(rawCourse, courses) : null
       if (rawCourse && !course) {
@@ -103,6 +108,8 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
   const nExisting = plan && existingNames ? plan.dishes.filter(isExisting).length : 0
   const nNew = plan ? plan.dishes.length - nExisting : 0
   const noCourse = plan?.dishes.filter(d => !d.courseOut).length || 0
+  // the course part of the preview: always on Maestro, on other events when the sheet brings courses
+  const showCourses = isMs || !!plan?.dishes.some(d => d.courseOut)
   const catKnown = name => existingCats.some(c => c.name.toLowerCase() === name.toLowerCase())
 
   async function run() {
@@ -111,19 +118,21 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
     try {
       // 1. new courses go on the event, after the existing ones (reorder them under Control)
       let courseList = courses
-      if (isMs && plan.newCourses.length && addCourses) {
+      if (plan.newCourses.length && addCourses) {
         setProgress('Adding courses…')
         courseList = [...courses, ...plan.newCourses]
         const { data, error } = await supabase.from('events').update({ courses: courseList }).eq('id', eventData.id).select('*').maybeSingle()
         if (error) throw error
         if (data && onEventChange) onEventChange(data)
       }
-      const courseFor = d => isMs && d.courseOut && courseList.includes(d.courseOut) ? d.courseOut : null
-
       // 2. cuisines (menu categories)
       setProgress('Creating cuisines…')
-      const { data: cats, error: ce } = await supabase.from('menu_categories').select('id, name, sort_order').eq('event_id', eventData.id)
+      const { data: cats, error: ce } = await supabase.from('menu_categories').select('*').eq('event_id', eventData.id)
       if (ce) throw ce
+      // a dish with no course of its own takes its category's course (guest / captain events)
+      const catCourse = new Map((cats || []).filter(c => c.course).map(c => [c.name.toLowerCase(), c.course]))
+      const courseFor = d => d.courseOut && courseList.includes(d.courseOut) ? d.courseOut
+        : !isMs && !d.courseOut && courseList.includes(catCourse.get(d.category.toLowerCase())) ? catCourse.get(d.category.toLowerCase()) : null
       const catId = new Map((cats || []).map(c => [c.name.toLowerCase(), c.id]))
       // only cuisines a dish will actually sit in: new dishes, and existing ones moved by the sheet
       const needsCat = d => !isExisting(d) || (d.hasCat && existing === 'update')
@@ -134,6 +143,12 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
           .insert(missing.map(name => ({ event_id: eventData.id, name, sort_order: ++sort, is_visible: true }))).select('id, name')
         if (error) throw error
         made.forEach(c => catId.set(c.name.toLowerCase(), c.id))
+        // a new category whose dishes all share one course belongs to that course (Control › Courses & categories)
+        if (!isMs) {
+          const one = made.map(c => [c.id, [...new Set(plan.dishes.filter(d => d.category.toLowerCase() === c.name.toLowerCase()).map(courseFor))]])
+            .filter(([, cs]) => cs.length === 1 && cs[0])
+          await Promise.all(one.map(([id, cs]) => supabase.from('menu_categories').update({ course: cs[0] }).eq('id', id)))   // best effort: older databases have no course on categories
+        }
       }
 
       // 3. dishes: new ones in bulk, existing ones updated (or skipped)
@@ -144,14 +159,15 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
       for (const d of plan.dishes) {
         const row = { category_id: catId.get(d.category.toLowerCase()), name: d.name, description: d.description || '',
           is_veg: d.is_veg, is_live_counter: d.is_live_counter, photo_url: d.photo_url }
-        if (isMs) { row.course = courseFor(d); if (d.barker) row.barker = d.barker }
+        if (isMs || courseFor(d)) row.course = courseFor(d)
+        if (isMs && d.barker) row.barker = d.barker
         const id = byName.get(d.name.toLowerCase().trim())
         if (!id) fresh.push({ ...row, is_available: true })
         else if (existing === 'update') {
           const patch = d.hasCat ? { category_id: row.category_id } : {}
           if (parsed.cols.description != null && d.description) patch.description = d.description
           if (parsed.cols.veg != null) patch.is_veg = d.is_veg
-          if (isMs && row.course) patch.course = row.course
+          if (row.course) patch.course = row.course
           if (isMs && d.barker) patch.barker = d.barker
           if (d.photo_url) patch.photo_url = d.photo_url
           if (Object.keys(patch).length) updates.push([id, patch])
@@ -187,7 +203,7 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
       } catch { /* the library must never block a menu import */ }
 
       onDone({ added, updated, skipped: existing === 'skip' ? nExisting : 0, dupes: plan.dupes.length, newCats: missing.length,
-        newCourses: isMs && addCourses ? plan.newCourses : [] })
+        newCourses: addCourses ? plan.newCourses : [] })
     } catch (e) {
       setErr('Import stopped: ' + (e?.message || String(e)) + '. Dishes added before this point are kept; importing again updates them.')
     }
@@ -233,7 +249,7 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:8, marginBottom:12 }}>
               {[[plan.dishes.length, 'dishes in the sheet', 'var(--ink)'], [existingNames ? nNew : '…', 'new', '#16A34A'],
                 [existingNames ? nExisting : '…', 'already on the menu', '#2563EB'],
-                ...(isMs ? [[noCourse, 'without a course', noCourse ? '#B45309' : '#16A34A']] : [])].map(([n, l, c]) => (
+                ...(showCourses ? [[noCourse, 'without a course', noCourse && isMs ? '#B45309' : '#16A34A']] : [])].map(([n, l, c]) => (
                 <div key={l} style={{ background:'var(--bg)', borderRadius:10, padding:'8px 10px', textAlign:'center' }}>
                   <div style={{ fontSize:20, fontWeight:900, color:c }}>{n}</div>
                   <div style={{ fontSize:11, fontWeight:800, color:'var(--ink2)', textTransform:'uppercase', letterSpacing:'.3px' }}>{l}</div>
@@ -252,7 +268,7 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
               </div>
             )}
 
-            {isMs && (
+            {showCourses && (
               <div style={{ fontSize:12.5, marginBottom:8 }}>
                 <b>Courses:</b>{' '}
                 {courseCounts.map(([c, n]) => (
@@ -263,10 +279,10 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
                 {plan.newCourses.length > 0 && (
                   <label style={{ display:'flex', gap:8, alignItems:'center', fontSize:12.5, fontWeight:700, margin:'2px 0 4px' }}>
                     <input type="checkbox" checked={addCourses} onChange={e => setAddCourses(e.target.checked)} />
-                    Add {plan.newCourses.join(', ')} to this event’s courses (after {courses[courses.length - 1]}; change the order under Control)
+                    Add {plan.newCourses.join(', ')} to this event’s courses ({courses.length ? 'after ' + courses[courses.length - 1] + '; ' : ''}change the order under Control{isMs ? '' : ' › Courses & categories'})
                   </label>
                 )}
-                {noCourse > 0 && <div style={{ color:'#B45309', fontWeight:700 }}>Dishes without a course cannot be fired; give them one in the menu list after importing.</div>}
+                {isMs && noCourse > 0 && <div style={{ color:'#B45309', fontWeight:700 }}>Dishes without a course cannot be fired; give them one in the menu list after importing.</div>}
               </div>
             )}
 
@@ -296,14 +312,14 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5 }}>
                 <thead><tr style={{ background:'var(--ink)', color:'#fff', textAlign:'left' }}>
                   <th style={{ padding:'7px 10px' }}>Dish</th><th style={{ padding:'7px 10px' }}>Cuisine</th>
-                  {isMs && <th style={{ padding:'7px 10px' }}>Course</th>}<th style={{ padding:'7px 10px' }}>Veg</th><th style={{ padding:'7px 10px' }} />
+                  {showCourses && <th style={{ padding:'7px 10px' }}>Course</th>}<th style={{ padding:'7px 10px' }}>Veg</th><th style={{ padding:'7px 10px' }} />
                 </tr></thead>
                 <tbody>
                   {plan.dishes.slice(0, 12).map((d, i) => (
                     <tr key={i} style={{ borderTop:'1px solid var(--line)', background: i % 2 ? '#FAFAF9' : '#fff' }}>
                       <td style={{ padding:'6px 10px', fontWeight:700 }}>{d.name}{d.description && <div style={{ fontWeight:500, color:'var(--ink2)', fontSize:11.5 }}>{d.description}</div>}</td>
                       <td style={{ padding:'6px 10px' }}>{d.category}</td>
-                      {isMs && <td style={{ padding:'6px 10px', color: d.courseOut ? 'inherit' : '#B45309', fontWeight: d.courseOut ? 500 : 800 }}>{d.courseOut || 'none'}</td>}
+                      {showCourses && <td style={{ padding:'6px 10px', color: d.courseOut || !isMs ? 'inherit' : '#B45309', fontWeight: d.courseOut || !isMs ? 500 : 800 }}>{d.courseOut || (isMs ? 'none' : '–')}</td>}
                       <td style={{ padding:'6px 10px', color: d.is_veg ? '#16A34A' : '#DC2626', fontWeight:800 }}>{d.is_veg ? 'Veg' : 'Non-veg'}</td>
                       <td style={{ padding:'6px 10px', color:'#2563EB', fontWeight:700, fontSize:11.5 }}>{isExisting(d) ? (existing === 'update' ? 'update' : 'skip') : ''}</td>
                     </tr>

@@ -312,7 +312,7 @@ export default function KotPrintingSetup({ eventData, onEventChange }) {
                 </div>
               )
             })}
-            {!courseGroups.length && <div style={{ fontSize:12.5, color:'var(--ink2)' }}>No dishes have a course yet: set the course on the dishes (Menu tab), or use one KOT per category.</div>}
+            {!courseGroups.length && <div style={{ fontSize:12.5, color:'var(--ink2)' }}>No dishes have a course yet: put the categories in courses under Courses & categories (above), or use one KOT per category.</div>}
           </div>
           {noCourse.length > 0 && <div style={{ fontSize:12, color:'var(--ink2)', marginTop:8 }}>Categories whose dishes have no course still print by category, below.</div>}
         </div>
