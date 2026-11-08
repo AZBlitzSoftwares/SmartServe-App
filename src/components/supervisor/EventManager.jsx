@@ -228,6 +228,7 @@ export function WaiterList({ eventId, embedded = false }) {
     // Soft delete, so delivered orders keep the name in the reports
     await supabase.from('waiters').update({ is_active:false }).eq('id', w.id)
     setBusy(false); loadWaiters()
+    window.dispatchEvent(new Event('ss-setup-changed'))
   }
 
   async function create() {
@@ -240,6 +241,7 @@ export function WaiterList({ eventId, embedded = false }) {
     })
     setAdd({ number:'', name:'', mobile:'' })
     setBusy(false); loadWaiters()
+    window.dispatchEvent(new Event('ss-setup-changed')) // the Ready check on Control counts waiters
   }
 
   const fld = { width:'100%', border:'1px solid var(--line)', borderRadius:7,

@@ -73,6 +73,7 @@ export default function CaptainList({ eventId }) {
     setBusy(true)
     await supabase.from('captains').update({ is_active:false }).eq('id', c.id)
     setBusy(false); load()
+    window.dispatchEvent(new Event('ss-setup-changed'))
   }
 
   async function create() {
@@ -98,6 +99,7 @@ export default function CaptainList({ eventId }) {
     }
     setAdd({ name:'', pin:'', mobile:'' })
     load()
+    window.dispatchEvent(new Event('ss-setup-changed')) // the Ready check above counts captains
   }
 
   const fld = { width:'100%', border:'1px solid var(--line)', borderRadius:7,

@@ -161,6 +161,16 @@ export default function TableManager({ eventData, onEventChange }) {
    service needs is in place, each line jumps to the section to fix it. */
 function BasicReadiness({ eventData, mode }) {
   const [d, setD] = useState(null)
+  // Re-checked when a captain or waiter is added or removed on this page, and
+  // when Ready check is tapped in the jump bar - not only when the page opens
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const again = () => setTick(t => t + 1)
+    const onFold = e => { if (e.detail?.id === 'ss-ready') again() }
+    window.addEventListener('ss-setup-changed', again)
+    window.addEventListener('ss-fold', onFold)
+    return () => { window.removeEventListener('ss-setup-changed', again); window.removeEventListener('ss-fold', onFold) }
+  }, [])
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -178,7 +188,7 @@ function BasicReadiness({ eventData, mode }) {
         tables: tables.data || [], sups: sups.data || [] })
     })()
     return () => { alive = false }
-  }, [eventData.id])
+  }, [eventData.id, tick])
   if (!d) return <div style={{ padding:20, color:'var(--ink2)', fontSize:13 }}>Checking the set-up…</div>
   const n = eventData.number_of_tables || 0
   const live = d.tables.filter(t => statusOf(t) === 'online').length
