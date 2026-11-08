@@ -4,7 +4,7 @@ import MenuImport from './MenuImport'
 import { supabase } from '../../lib/supabase'
 import { readSheetFile, menuTemplateCsv } from '../../lib/sheetImport'
 import { coursesOf } from '../../maestro/msData'
-import { eventCourses, saveCourseOrder } from '../../lib/courses'
+import { eventCourses, saveCourseOrder, cleanCourse, isDefaultCourseList } from '../../lib/courses'
 
 export default function MenuManager({ eventData, onEventChange }) {
   // Maestro dishes also need a course: the captain takes the order by course
@@ -21,6 +21,11 @@ export default function MenuManager({ eventData, onEventChange }) {
   const [showAddCat, setShowAddCat] = useState(false)
   const [editItem, setEditItem] = useState(null)
   const [newCatName, setNewCatName] = useState('')
+  const [newCatCourse, setNewCatCourse] = useState('')
+  const [showAddCourse, setShowAddCourse] = useState(false)
+  const [newCourseName, setNewCourseName] = useState('')
+  // Add Dish: the course follows the category; the course buttons open only when needed
+  const [courseOpen, setCourseOpen] = useState(false)
   const [newItem, setNewItem] = useState({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course:'', vip_only:false })
   const [saving, setSaving] = useState(false)
   const [uploadingImg, setUploadingImg] = useState(false)
@@ -34,7 +39,23 @@ export default function MenuManager({ eventData, onEventChange }) {
   // or a Course column in the import): a course row on the dishes, a course on each dish
   const courses = isMs ? coursesOf(eventData) : eventCourses(eventData, [...items.map(i => i.course), ...categories.map(c => c.course)])
   const hasCourses = isMs || courses.length > 0
-  const catCourse = id => { const c = categories.find(x => x.id === id); return c && courses.includes(c.course) ? c.course : '' }
+  // guest and captain events (not multi-kitchen): courses and categories are made here and in Control › Courses & categories
+  const gc = !isMs && !eventData?.multi_kitchen
+  // The course of a category: its own, else the one course all its dishes share
+  // (menus imported before categories carried a course). '' = none or mixed.
+  const catCourse = id => {
+    const c = categories.find(x => x.id === id)
+    if (!c) return ''
+    if (courses.includes(c.course)) return c.course
+    const cs = [...new Set(items.filter(i => i.category_id === id).map(i => i.course).filter(Boolean))]
+    return cs.length === 1 && courses.includes(cs[0]) ? cs[0] : ''
+  }
+  // the course list as shown, saved on the event (the first time it replaces the unused default list)
+  async function keepCourseList(list) {
+    if (!isDefaultCourseList(eventData?.courses) && (eventData?.courses || []).length === list.length) return
+    const ev2 = await saveCourseOrder(eventData, list)
+    if (ev2) onEventChange?.(ev2)
+  }
 
   useEffect(() => { if (eventData) loadMenu() }, [eventData])
   // One KOT per category (guest / captain events): each category picks its KOT printer here too
@@ -68,13 +89,34 @@ export default function MenuManager({ eventData, onEventChange }) {
   }
 
   async function addCategory() {
-    if (!newCatName.trim()) return
+    const name = newCatName.replace(/\s+/g, ' ').trim()
+    if (!name) return
+    if (categories.some(c => (c.name || '').toLowerCase() === name.toLowerCase())) { alert(name + ' is already a category.'); return }
     setSaving(true)
-    const { data, error } = await supabase.from('menu_categories').insert({ event_id:eventData.id, name:newCatName.trim(), sort_order:categories.length+1, is_visible:true }).select().single()
+    const course = gc && courses.includes(newCatCourse) ? newCatCourse : ''
+    try { if (course) await keepCourseList(courses) } catch { /* the category still gets its course */ }
+    const row = { event_id:eventData.id, name, sort_order:Math.max(0, ...categories.map(c => c.sort_order || 0)) + 1, is_visible:true }
+    let { data, error } = await supabase.from('menu_categories').insert(course ? { ...row, course } : row).select().single()
+    // a database without db/2026-11-08_courses.sql has no course on categories
+    if (error && course && /course/i.test(error.message || '')) ({ data, error } = await supabase.from('menu_categories').insert(row).select().single())
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
-    setNewCatName(''); setShowAddCat(false); setSaving(false)
+    setNewCatName(''); setNewCatCourse(''); setShowAddCat(false); setSaving(false)
     if (data) setActiveCategory(data.id)
     loadMenu()
+  }
+
+  // A new course from the Menu tab: it goes after the others (reorder under Control › Courses & categories)
+  async function addCourse() {
+    const name = cleanCourse(newCourseName)
+    if (!name) return
+    if (courses.some(c => c.toLowerCase() === name.toLowerCase())) { alert(name + ' is already a course.'); return }
+    setSaving(true)
+    try {
+      const ev2 = await saveCourseOrder(eventData, [...courses, name])
+      if (ev2) onEventChange?.(ev2)
+      setNewCourseName(''); setShowAddCourse(false)
+    } catch (e) { alert('Course not added: ' + (e?.message || e)) }
+    setSaving(false)
   }
 
   // Updated in place rather than through loadMenu(). A reload flips the
@@ -93,7 +135,7 @@ export default function MenuManager({ eventData, onEventChange }) {
   }
 
   async function saveItem() {
-    const catId = newItem.category_id || activeCategory
+    const catId = newItem.category_id || (activeCategory !== 'all' ? activeCategory : '')
     if (!newItem.name.trim() || !catId) { alert('Dish name and category required'); return }
     // a Maestro dish without a course never shows up on the captain's course tabs
     if (isMs && courses.length && !courses.includes(newItem.course)) { alert('Pick the course for this dish (' + courses.join(', ') + ').'); return }
@@ -130,6 +172,7 @@ export default function MenuManager({ eventData, onEventChange }) {
   }
 
   function startEdit(item) {
+    setCourseOpen(false)
     setNewItem({ name:item.name, description:item.description||'', is_live_counter:item.is_live_counter||false, is_veg:item.is_veg!==false, photo_url:item.photo_url||'', category_id:item.category_id, course:item.course||'', vip_only:!!item.vip_only })
     setEditItem(item); setShowAdd(true)
   }
@@ -152,8 +195,14 @@ export default function MenuManager({ eventData, onEventChange }) {
   }
 
   function downloadTemplate() {
-    const blob = new Blob(['\uFEFF' + menuTemplateCsv(hasCourses ? courses : [])], { type:'text/csv;charset=utf-8' })
     const a = document.createElement('a')
+    // guest / captain events: the Excel template (Dish, Category, Course, Description, Veg, Live counter)
+    if (gc) {
+      a.href = '/templates/SmartServe-Menu-Template.xlsx'; a.download = 'SmartServe Menu Template.xlsx'
+      document.body.appendChild(a); a.click(); a.remove()
+      return
+    }
+    const blob = new Blob(['\uFEFF' + menuTemplateCsv(hasCourses ? courses : [])], { type:'text/csv;charset=utf-8' })
     a.href = URL.createObjectURL(blob); a.download = 'menu-template.csv'
     document.body.appendChild(a); a.click(); a.remove()
     setTimeout(() => URL.revokeObjectURL(a.href), 2000)
@@ -259,7 +308,8 @@ export default function MenuManager({ eventData, onEventChange }) {
           <button onClick={()=>{ setImportResult(null); setImporting2({ paste:true }) }} style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#16A34A', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
             📋 Paste from Excel
           </button>
-          <button onClick={()=>{ setEditItem(null); setNewItem({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'', course: !isMs && activeCategory && activeCategory !== 'all' ? catCourse(activeCategory) : '', vip_only:false }); setShowAdd(true) }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Add Dish</button>
+          <button onClick={()=>{ setEditItem(null); setCourseOpen(false); setNewItem({ name:'', description:'', is_live_counter:false, is_veg:true, photo_url:'', category_id:'',
+              course: activeCategory && activeCategory !== 'all' && catCourse(activeCategory) ? catCourse(activeCategory) : courses.includes(courseFilter) ? courseFilter : '', vip_only:false }); setShowAdd(true) }} style={{ background:'var(--ink)', color:'#fff', border:'none', borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Add Dish</button>
         </div>
         <input ref={fileRef} type="file" accept=".xlsx,.xlsm,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={handleFileImport} style={{ display:'none' }} />
       </div>
@@ -346,10 +396,10 @@ export default function MenuManager({ eventData, onEventChange }) {
         </div>
       )}
 
-      {hasCourses && (
-        <div style={{ display:'flex', gap:6, marginBottom:10, flexWrap:'wrap', alignItems:'center' }}>
+      {(hasCourses || (gc && categories.length > 0)) && (
+        <div style={{ display:'flex', gap:6, marginBottom:10, flexWrap:'wrap', alignItems:'center' }} data-testid="menu-course-row">
           <span style={{ fontSize:11, fontWeight:800, color:'var(--ink2)', textTransform:'uppercase', letterSpacing:'.4px', marginRight:4 }}>Course</span>
-          {[['all', 'All courses', items.length], ...courses.map(c => [c, c, items.filter(i => i.course === c).length]),
+          {hasCourses && [['all', 'All courses', items.length], ...courses.map(c => [c, c, items.filter(i => i.course === c).length]),
             ['__none', 'No course', items.filter(i => !i.course || !courses.includes(i.course)).length]]
             .filter(([k, , n]) => k !== '__none' || n > 0)
             .map(([k, label, n]) => {
@@ -361,6 +411,23 @@ export default function MenuManager({ eventData, onEventChange }) {
                   {label} <span style={{ opacity:.65 }}>{n}</span></button>
               )
             })}
+          {/* guest / captain events: a new course right here, like + Category (Maestro courses: Control) */}
+          {gc && (showAddCourse ? (
+            <span style={{ display:'inline-flex', gap:6, alignItems:'center' }}>
+              <input value={newCourseName} onChange={e => setNewCourseName(e.target.value)} placeholder="New course, e.g. Starters" autoFocus data-testid="menu-new-course"
+                onKeyDown={e => { if (e.key === 'Enter') addCourse(); if (e.key === 'Escape') { setShowAddCourse(false); setNewCourseName('') } }}
+                style={{ border:'1.5px solid #FCD34D', borderRadius:999, padding:'6px 12px', fontSize:12.5, fontWeight:700, fontFamily:'Manrope', outline:'none', width:190 }} />
+              <button onClick={addCourse} disabled={saving || !newCourseName.trim()} data-testid="menu-save-course"
+                style={{ borderRadius:999, padding:'6px 13px', fontSize:12.5, fontWeight:800, cursor:'pointer', border:'1.5px solid #E8890C', background:'#E8890C', color:'#fff', opacity: newCourseName.trim() ? 1 : 0.5 }}>
+                {saving ? 'Saving…' : 'Add'}</button>
+              <button onClick={() => { setShowAddCourse(false); setNewCourseName('') }}
+                style={{ borderRadius:999, padding:'6px 11px', fontSize:12.5, fontWeight:800, cursor:'pointer', border:'1.5px solid var(--line)', background:'#fff', color:'var(--ink2)' }}>Cancel</button>
+            </span>
+          ) : (
+            <button onClick={() => setShowAddCourse(true)} data-testid="menu-add-course"
+              style={{ borderRadius:999, padding:'6px 13px', fontSize:12.5, fontWeight:800, cursor:'pointer', border:'1.5px solid #FCD34D', background:'#FEF3C7', color:'#92400E' }}>+ Course</button>
+          ))}
+          {gc && !hasCourses && !showAddCourse && <span style={{ fontSize:12, color:'var(--ink2)' }}>No courses yet: a big menu reads easier with Beverages, Starters, Main Course, Desserts…</span>}
         </div>
       )}
 
@@ -381,7 +448,7 @@ export default function MenuManager({ eventData, onEventChange }) {
             </span>
           </button>
         ))}
-        <button onClick={()=>setShowAddCat(true)} style={{ flexShrink:0, background:'#FEF3C7', border:'1.5px solid #FCD34D', color:'#92400E', borderRadius:999, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Category</button>
+        <button onClick={()=>{ setNewCatCourse(courses.includes(courseFilter) ? courseFilter : ''); setShowAddCat(true) }} style={{ flexShrink:0, background:'#FEF3C7', border:'1.5px solid #FCD34D', color:'#92400E', borderRadius:999, padding:'8px 16px', fontSize:13, fontWeight:700 }}>+ Category</button>
       </div>
 
       {kpc && (() => {
@@ -406,7 +473,21 @@ export default function MenuManager({ eventData, onEventChange }) {
       {showAddCat && (
         <div style={{ background:'#fff', borderRadius:14, padding:16, marginBottom:14, boxShadow:'var(--shadow)', border:'2px solid #E8890C' }}>
           <div style={{ fontWeight:800, fontSize:14, marginBottom:10 }}>New Category</div>
-          <input value={newCatName} onChange={e=>setNewCatName(e.target.value)} placeholder="e.g. Starters, Main Course" style={INP} onKeyDown={e=>e.key==='Enter'&&addCategory()} autoFocus />
+          <input value={newCatName} onChange={e=>setNewCatName(e.target.value)} placeholder={gc && courses.length ? 'e.g. Chaat Counter, Tandoor, Soup Station' : 'e.g. Starters, Main Course'} style={INP} onKeyDown={e=>e.key==='Enter'&&addCategory()} autoFocus />
+          {gc && courses.length > 0 && (
+            <div style={{ marginBottom:10 }} data-testid="new-cat-course">
+              <label style={{ fontSize:13, fontWeight:600, color:'var(--ink2)', display:'block', marginBottom:6 }}>In course</label>
+              <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                {['', ...courses].map(c => (
+                  <button key={c || '__none'} type="button" onClick={() => setNewCatCourse(c)}
+                    style={{ borderRadius:999, padding:'6px 13px', fontSize:12.5, fontWeight:800, cursor:'pointer',
+                      border:'1.5px solid ' + (newCatCourse === c ? '#B8862B' : 'var(--line)'), background: newCatCourse === c ? '#F6E7C8' : '#fff', color:'var(--ink)' }}>
+                    {c || 'No course'}</button>
+                ))}
+              </div>
+              <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:5 }}>Dishes added to this category take this course by themselves.</div>
+            </div>
+          )}
           <div style={{ display:'flex', gap:8 }}>
             <button onClick={addCategory} disabled={saving} style={{ flex:1, background:'#E8890C', color:'#fff', border:'none', borderRadius:10, padding:'10px', fontSize:14, fontWeight:800 }}>{saving?'Saving...':'Save'}</button>
             <button onClick={()=>{ setShowAddCat(false); setNewCatName('') }} style={{ flex:1, background:'var(--bg)', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px', fontSize:14, fontWeight:700 }}>Cancel</button>
@@ -419,11 +500,40 @@ export default function MenuManager({ eventData, onEventChange }) {
           <h3 style={{ fontSize:16, fontWeight:800, marginBottom:16 }}>{editItem?'Edit Dish':'Add New Dish'}</h3>
           <input value={newItem.name} onChange={e=>setNewItem(p=>({...p,name:e.target.value}))} placeholder="Dish name *" style={INP} autoFocus />
           <textarea value={newItem.description} onChange={e=>setNewItem(p=>({...p,description:e.target.value}))} placeholder="Description (optional)" style={{ ...INP, resize:'none', height:72 }} />
-          <select value={newItem.category_id||activeCategory||''} onChange={e=>{ const id = e.target.value; setNewItem(p=>({...p, category_id:id, course: !isMs && catCourse(id) ? catCourse(id) : p.course })) }} style={{ ...INP, background:'#fff' }}>
-            <option value="">Select category *</option>
-            {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          {hasCourses && (
+          {(() => {
+            // guest / captain events: categories listed under their course, so picking the category sets the course too
+            const grouped = !isMs && courses.length > 0
+            const inCourse = c => categories.filter(x => catCourse(x.id) === c)
+            const rest = categories.filter(x => !catCourse(x.id))
+            const opt = c => <option key={c.id} value={c.id}>{c.name}</option>
+            return (
+              <select value={newItem.category_id||(activeCategory !== 'all' ? activeCategory : '')||''} data-testid="dish-category"
+                onChange={e=>{ const id = e.target.value; setNewItem(p=>({...p, category_id:id, course: !isMs && catCourse(id) ? catCourse(id) : p.course })); if (!isMs && catCourse(id)) setCourseOpen(false) }}
+                style={{ ...INP, background:'#fff' }}>
+                <option value="">Select category *</option>
+                {grouped ? <>
+                  {courses.filter(c => inCourse(c).length).map(c => <optgroup key={c} label={c}>{inCourse(c).map(opt)}</optgroup>)}
+                  {rest.length > 0 && <optgroup label="No course / mixed">{rest.map(opt)}</optgroup>}
+                </> : categories.map(opt)}
+              </select>
+            )
+          })()}
+          {hasCourses && !isMs && !courseOpen && (() => {
+            const cid = newItem.category_id || (activeCategory !== 'all' ? activeCategory : '')
+            const cc = cid ? catCourse(cid) : ''
+            if (!cc || newItem.course !== cc) return null
+            // the usual case: the category's course; one line instead of a row of buttons
+            return (
+              <div data-testid="dish-course-auto" style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:10, fontSize:13 }}>
+                <span style={{ color:'var(--ink2)', fontWeight:600 }}>Course</span>
+                <span style={{ borderRadius:999, padding:'5px 12px', fontWeight:800, border:'1.5px solid #B8862B', background:'#F6E7C8' }}>{cc}</span>
+                <span style={{ color:'var(--ink2)', fontSize:12 }}>from the category</span>
+                <button type="button" onClick={() => setCourseOpen(true)} data-testid="dish-course-change"
+                  style={{ border:'none', background:'none', color:'#2563EB', fontWeight:800, fontSize:12.5, cursor:'pointer', padding:0 }}>Change</button>
+              </div>
+            )
+          })()}
+          {hasCourses && (isMs || courseOpen || (() => { const cid = newItem.category_id || (activeCategory !== 'all' ? activeCategory : ''); const cc = cid ? catCourse(cid) : ''; return !cc || newItem.course !== cc })()) && (
             <div style={{ marginBottom:10 }} data-testid="dish-course">
               <label style={{ fontSize:13, fontWeight:600, color:'var(--ink2)', display:'block', marginBottom:6 }}>{isMs ? 'Course *' : 'Course'}</label>
               <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
@@ -441,7 +551,7 @@ export default function MenuManager({ eventData, onEventChange }) {
                 ))}
               </div>
               {isMs && !newItem.course && <div style={{ fontSize:11.5, color:'#B45309', fontWeight:700, marginTop:5 }}>Pick the course: captains find the dish under it and the kitchen fires it with that course.</div>}
-              {!isMs && <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:5 }}>The course row on the tablet{eventData?.kot_per_course ? ' and the KOT it prints on' : ''}. Add or rename courses under Control › Courses &amp; categories.</div>}
+              {!isMs && <div style={{ fontSize:11.5, color:'var(--ink2)', marginTop:5 }}>The course row on the tablet{eventData?.kot_per_course ? ' and the KOT it prints on' : ''}. A category in a course gives its dishes that course by itself (Control › Courses &amp; categories).</div>}
             </div>
           )}
           {/* Image — URL or Upload */}

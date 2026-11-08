@@ -12,6 +12,8 @@ import { eventCourses, cleanCourse, saveCourseOrder, renameCourse, removeCourse,
    Both are made here. A category put in a course gives that course to all its
    dishes, and to dishes added to it later. A counter with dishes from two
    courses shows "Mixed": its dishes keep their own course (Menu tab).
+   "Pick categories & dishes" on a course opens a picklist: tick the categories
+   (all their dishes come along) or single dishes that belong to that course.
    The dishes themselves are added in the Menu tab (or imported from Excel). */
 
 const key = s => String(s || '').trim().toLowerCase()
@@ -30,6 +32,8 @@ export default function CoursesSetup({ eventData, onEventChange }) {
   const [newCourse, setNewCourse] = useState('')
   const [newCat, setNewCat] = useState('')
   const [newCatCourse, setNewCatCourse] = useState('')
+  // the picklist of one course: what is ticked now, and what was ticked when it opened
+  const [pick, setPick] = useState(null)   // { course, tab, q, cat, cats:Set, dishes:Set, cats0:Set, dishes0:Set }
   const alive = useRef(true)
 
   async function load() {
@@ -39,7 +43,7 @@ export default function CoursesSetup({ eventData, onEventChange }) {
     setCats(c || [])
     setHasCatCourse(!(c || []).length || Object.prototype.hasOwnProperty.call(c[0], 'course'))
     const ids = (c || []).map(x => x.id)
-    const { data: d } = ids.length ? await supabase.from('menu_items').select('id,category_id,course').in('category_id', ids) : { data: [] }
+    const { data: d } = ids.length ? await supabase.from('menu_items').select('id,category_id,course,name,is_veg').in('category_id', ids) : { data: [] }
     if (alive.current) setDishes(d || [])
   }
   useEffect(() => {
@@ -102,6 +106,67 @@ export default function CoursesSetup({ eventData, onEventChange }) {
     if (!window.confirm('Remove the course ' + name + '?' + (n ? '\n\n' + n + ' dish' + (n === 1 ? '' : 'es') + ' keep their category and have no course any more.' : ''))) return
     run(async () => { await removeCourse(ev, courses, name); await reloadEvent() })
   }
+
+  // ---------------------------------------------------------- picklist of a course
+  function openPick(course) {
+    if (pick?.course === course) { setPick(null); return }
+    const cats0 = new Set((cats || []).filter(c => courseOfCat(c) === course).map(c => c.id))
+    const dishes0 = new Set(dishes.filter(d => key(d.course) === key(course)).map(d => d.id))
+    setPick({ course, tab:'cats', q:'', cat:'', cats:new Set(cats0), dishes:new Set(dishes0), cats0, dishes0 })
+  }
+  const pickCats = () => { const q = key(pick?.q); return (cats || []).filter(c => !q || key(c.name).includes(q)) }
+  const pickDishes = () => {
+    const q = key(pick?.q)
+    return dishes.filter(d => (!pick?.cat || d.category_id === pick.cat) && (!q || key(d.name).includes(q) || key(catName(d.category_id)).includes(q)))
+      .sort((a, b) => catOrder(a.category_id) - catOrder(b.category_id) || String(a.name).localeCompare(String(b.name)))
+  }
+  const catName = id => (cats || []).find(c => c.id === id)?.name || ''
+  const catOrder = id => (cats || []).findIndex(c => c.id === id)
+  // a category ticked brings all its dishes; untick it and they go too
+  function toggleCat(c) {
+    setPick(p => {
+      const cs = new Set(p.cats), ds = new Set(p.dishes)
+      const on = !cs.has(c.id)
+      if (on) cs.add(c.id); else cs.delete(c.id)
+      catDishes(c).forEach(d => (on ? ds.add(d.id) : ds.delete(d.id)))
+      return { ...p, cats: cs, dishes: ds }
+    })
+  }
+  const toggleDish = d => setPick(p => { const ds = new Set(p.dishes); if (ds.has(d.id)) ds.delete(d.id); else ds.add(d.id); return { ...p, dishes: ds } })
+  function tickShown(on) {
+    setPick(p => {
+      const cs = new Set(p.cats), ds = new Set(p.dishes)
+      if (p.tab === 'cats') pickCats().forEach(c => { if (on) cs.add(c.id); else cs.delete(c.id); catDishes(c).forEach(d => (on ? ds.add(d.id) : ds.delete(d.id))) })
+      else pickDishes().forEach(d => (on ? ds.add(d.id) : ds.delete(d.id)))
+      return { ...p, cats: cs, dishes: ds }
+    })
+  }
+  const diff = (now, was) => [[...now].filter(x => !was.has(x)), [...was].filter(x => !now.has(x))]
+  const pickChanges = () => {
+    if (!pick) return 0
+    const [ca, cd] = diff(pick.cats, pick.cats0), [da, dd] = diff(pick.dishes, pick.dishes0)
+    return ca.length + cd.length + da.length + dd.length
+  }
+  const savePick = () => run(async () => {
+    const course = pick.course
+    const [catsIn, catsOut] = diff(pick.cats, pick.cats0)
+    const [dishesIn, dishesOut] = diff(pick.dishes, pick.dishes0)
+    if (isDefaultCourseList(ev.courses) || (ev.courses || []).length !== courses.length) await writeList(courses)
+    const upd = async (table, patch, ids) => {
+      for (let i = 0; i < ids.length; i += 100) {
+        const { error } = await supabase.from(table).update(patch).in('id', ids.slice(i, i + 100))
+        if (error) throw new Error('Not saved: ' + error.message)
+      }
+    }
+    if (hasCatCourse) {
+      await upd('menu_categories', { course }, catsIn)
+      await upd('menu_categories', { course: null }, catsOut.filter(id => key((cats || []).find(c => c.id === id)?.course) === key(course)))
+    }
+    await upd('menu_items', { course }, dishesIn)
+    await upd('menu_items', { course: null }, dishesOut)
+    setPick(null)
+    await load()
+  })
 
   // ---------------------------------------------------------- categories
   async function setCatCourse(c, course) {
@@ -171,6 +236,69 @@ export default function CoursesSetup({ eventData, onEventChange }) {
     await load()
   })
 
+  // called as a function, not as <Component>: a component made inside a render would remount on every key press
+  function renderPicker() {
+    const course = pick.course
+    const shownCats = pick.tab === 'cats' ? pickCats() : []
+    const shownDishes = pick.tab === 'dishes' ? pickDishes() : []
+    const n = pickChanges()
+    const tab = (id, label) => (
+      <button onClick={() => setPick(p => ({ ...p, tab: id, q: '' }))} data-pick-tab={id}
+        style={{ border:'none', borderBottom:'3px solid ' + (pick.tab === id ? '#B8862B' : 'transparent'), background:'none', padding:'6px 4px', marginRight:14,
+          fontSize:13.5, fontWeight:900, color: pick.tab === id ? 'var(--ink)' : 'var(--ink2)', cursor:'pointer' }}>{label}</button>
+    )
+    const now = name => name === '__mixed' ? 'Mixed' : name || 'No course'
+    const row = (on, onClick, main, sub, other, testAttr) => (
+      <label {...testAttr} style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 6px', borderTop:'1px solid #F1E6CF', cursor:'pointer', background: on ? '#FFF8E8' : 'transparent' }}>
+        <input type="checkbox" checked={on} onChange={onClick} style={{ width:17, height:17, accentColor:'#B8862B', flexShrink:0 }} />
+        <span style={{ flex:1, minWidth:0 }}>
+          <span style={{ fontWeight:800, fontSize:13.5 }}>{main}</span>
+          {sub && <span style={{ fontSize:12, color:'var(--ink2)', marginLeft:8 }}>{sub}</span>}
+        </span>
+        {other && <span style={{ fontSize:11.5, fontWeight:800, color:'#B45309', background:'#FFF7ED', border:'1px solid #FED7AA', borderRadius:999, padding:'1px 8px', whiteSpace:'nowrap' }}>{other}</span>}
+      </label>
+    )
+    return (
+      <div data-testid="course-picker" style={{ flexBasis:'100%', margin:'6px 0 2px', border:'1.5px solid #E7D3A6', background:'#FFFCF5', borderRadius:12, padding:'12px 14px' }}>
+        <div style={{ fontSize:13, marginBottom:6 }}>
+          Tick what belongs in <b>{course}</b>. A ticked category brings all its dishes; untick single dishes in the Dishes list to keep them out.
+        </div>
+        <div style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:8, borderBottom:'1px solid #F1E6CF', marginBottom:8 }}>
+          {tab('cats', 'Categories (' + pick.cats.size + ' of ' + cats.length + ')')}
+          {tab('dishes', 'Dishes (' + pick.dishes.size + ' of ' + dishes.length + ')')}
+          <span style={{ flex:1 }} />
+          <input value={pick.q} onChange={e => { const q = e.target.value; setPick(p => ({ ...p, q })) }} placeholder={pick.tab === 'cats' ? 'Search categories…' : 'Search dishes…'}
+            data-testid="pick-search" style={{ ...fld, width:200, padding:'5px 10px', marginBottom:4 }} />
+          {pick.tab === 'dishes' && (
+            <select value={pick.cat} onChange={e => { const cat = e.target.value; setPick(p => ({ ...p, cat })) }} aria-label="Only this category" style={{ ...fld, padding:'5px 8px', marginBottom:4, maxWidth:220 }}>
+              <option value="">All categories</option>
+              {cats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
+        </div>
+        <div style={{ maxHeight:330, overflowY:'auto', borderBottom:'1px solid #F1E6CF' }}>
+          {pick.tab === 'cats' && shownCats.map(c => {
+            const cur = courseOfCat(c)
+            return row(pick.cats.has(c.id), () => toggleCat(c), c.name, catDishes(c).length + ' dish' + (catDishes(c).length === 1 ? '' : 'es'),
+              cur !== course && cur ? 'now: ' + now(cur) : '', { 'data-pick-cat': c.name })
+          })}
+          {pick.tab === 'dishes' && shownDishes.map(d => row(pick.dishes.has(d.id), () => toggleDish(d),
+            <><span style={{ display:'inline-block', width:8, height:8, borderRadius:999, background: d.is_veg === false ? '#DC2626' : '#16A34A', marginRight:7, verticalAlign:'middle' }} />{d.name}</>,
+            catName(d.category_id), d.course && key(d.course) !== key(course) ? 'now: ' + d.course : '', { 'data-pick-dish': d.name }))}
+          {(pick.tab === 'cats' ? shownCats : shownDishes).length === 0 && <div style={{ padding:'10px 6px', fontSize:13, color:'var(--ink2)' }}>Nothing matches “{pick.q}”.</div>}
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginTop:10 }}>
+          <button onClick={() => tickShown(true)} disabled={busy} style={pillBtn('#fff', 'var(--ink)', 'var(--line)')}>Tick all shown</button>
+          <button onClick={() => tickShown(false)} disabled={busy} style={pillBtn('#fff', 'var(--ink)', 'var(--line)')}>Untick all shown</button>
+          <span style={{ flex:1 }} />
+          <span style={{ fontSize:12.5, fontWeight:700, color: n ? '#7A561A' : 'var(--ink2)' }}>{n ? n + ' change' + (n === 1 ? '' : 's') : 'No changes yet'}</span>
+          <button onClick={savePick} disabled={busy || !n} data-testid="pick-save" style={{ ...pillBtn('var(--ink)', '#fff', 'var(--ink)'), opacity: n ? 1 : 0.5 }}>{busy ? 'Saving…' : 'Save'}</button>
+          <button onClick={() => setPick(null)} disabled={busy} style={pillBtn('var(--bg)', 'var(--ink)', 'var(--line)')}>Cancel</button>
+        </div>
+      </div>
+    )
+  }
+
   if (!cats) return <div style={{ ...box, color:'var(--ink2)', fontSize:13 }}>Loading the menu…</div>
 
   return (
@@ -202,7 +330,11 @@ export default function CoursesSetup({ eventData, onEventChange }) {
               <span style={{ fontSize:12, fontWeight:800, color: n ? '#15803D' : '#B45309', background: n ? '#DCFCE7' : '#FEF3C7', borderRadius:999, padding:'3px 10px' }}>
                 {n} dish{n === 1 ? '' : 'es'}</span>
               <span style={{ flex:1, minWidth:120, fontSize:12, color:'var(--ink2)' }}>{cs.map(x => x.name).join(' · ')}</span>
+              <button onClick={() => openPick(c)} disabled={busy || !cats.length} data-pick={c}
+                style={pillBtn(pick?.course === c ? '#B8862B' : '#FBF3E2', pick?.course === c ? '#fff' : '#7A561A', '#E7D3A6')}>
+                {pick?.course === c ? 'Close list' : 'Pick categories & dishes'}</button>
               <button onClick={() => remove(c)} disabled={busy} style={{ border:'none', background:'none', color:'#B91C1C', fontWeight:800, fontSize:12.5, cursor:'pointer' }}>Remove</button>
+              {pick?.course === c && renderPicker()}
             </div>
           )
         })}

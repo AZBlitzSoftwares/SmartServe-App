@@ -18,6 +18,34 @@ const pill = (bg, fg, bd) => ({ display:'inline-block', background:bg, color:fg,
 const btn = { border:'none', borderRadius:10, padding:'10px 16px', fontSize:13.5, fontWeight:800, cursor:'pointer', fontFamily:'Manrope' }
 const COL_LABEL = { name:'Dish', category:'Cuisine', course:'Course', description:'Description', veg:'Veg', barker:'Barker', live:'Live counter', photo:'Image' }
 
+/* Which dish of the sheet is which dish of the menu.
+   Maestro: a dish is its name (each dish once). Guest and captain menus may
+   list the same dish in two categories (Lunch - South Indian and Dinner -
+   South Indian), so there a dish is its name in its category; a dish that is
+   on the menu once and in the sheet once is still the same dish when the
+   sheet moves it to another category. */
+const nameOf = d => String(d?.name || '').toLowerCase().trim()
+const catKey = (name, cat) => name + '\u0001' + String(cat || '').toLowerCase().trim()
+function indexMenu(items, cats) {
+  const catName = new Map((cats || []).map(c => [c.id, c.name]))
+  const byKey = new Map(), byName = new Map()
+  for (const i of items || []) {
+    const n = nameOf(i), k = catKey(n, catName.get(i.category_id))
+    if (!byKey.has(k)) byKey.set(k, i.id)
+    byName.set(n, [...(byName.get(n) || []), i.id])
+  }
+  return { byKey, byName }
+}
+function findExisting(idx, d, nameCount, perCat) {
+  if (!idx) return undefined
+  const n = nameOf(d)
+  const same = idx.byName.get(n) || []
+  if (!perCat) return same[0]
+  if (d.hasCat) { const id = idx.byKey.get(catKey(n, d.category)); if (id) return id }
+  if (same.length === 1 && (nameCount?.get(n) || 0) === 1) return same[0]
+  return d.hasCat ? undefined : same[0]
+}
+
 export default function MenuImport({ eventData, rows: givenRows, fileName, onClose, onDone, onEventChange }) {
   const isMs = !!eventData?.maestro
   // Maestro menus are split by cuisine (kitchen); guest and captain menus by category (counter)
@@ -33,6 +61,9 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
   const [err, setErr] = useState('')
 
   const parsed = useMemo(() => rows ? menuRows(rows) : null, [rows])
+
+  const perCat = !isMs
+
 
   // Courses and cuisines as they will be written
   const plan = useMemo(() => {
@@ -64,11 +95,14 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
       return { ...d, category: category || 'General', hasCat: !!category, courseOut: course, courseIsNew: !!course && !courses.includes(course) }
     })
     const seen = new Set(), dupes = []
-    const unique = dishes.filter(d => { const k = d.name.toLowerCase(); if (seen.has(k)) { dupes.push(d.name); return false } seen.add(k); return true })
-    return { dishes: unique, dupes, newCourses }
+    const unique = dishes.filter(d => { const k = isMs ? nameOf(d) : catKey(nameOf(d), d.category); if (seen.has(k)) { dupes.push(d.name); return false } seen.add(k); return true })
+    // how often each name is in the sheet: a dish on the menu once and in the sheet once is the same dish, wherever it sits
+    const nameCount = new Map()
+    unique.forEach(d => { const n = nameOf(d); nameCount.set(n, (nameCount.get(n) || 0) + 1) })
+    return { dishes: unique, dupes, newCourses, nameCount }
   }, [parsed, courses, isMs])
 
-  const [existingNames, setExistingNames] = useState(null)
+  const [existingNames, setExistingNames] = useState(null)   // the menu as it is: { byKey, byName }
   const [existingCats, setExistingCats] = useState([])
   useEffect(() => {
     if (!plan) return
@@ -77,14 +111,14 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
         const { data: cats, error: e1 } = await supabase.from('menu_categories').select('id, name').eq('event_id', eventData.id)
         if (e1) throw e1
         const ids = (cats || []).map(c => c.id)
-        const { data: items, error: e2 } = ids.length ? await supabase.from('menu_items').select('id, name').in('category_id', ids) : { data: [] }
+        const { data: items, error: e2 } = ids.length ? await supabase.from('menu_items').select('id, name, category_id').in('category_id', ids) : { data: [] }
         if (e2) throw e2
         setExistingCats(cats || [])
-        setExistingNames(new Map((items || []).map(i => [i.name.toLowerCase().trim(), i.id])))
+        setExistingNames(indexMenu(items, cats))
       } catch (e) {
         // the preview still works; Import re-reads the menu itself before writing
         setErr('Could not read the current menu (' + (e?.message || 'no connection') + '). Dishes already on the menu are checked again when you press Import.')
-        setExistingCats([]); setExistingNames(new Map())
+        setExistingCats([]); setExistingNames(indexMenu([], []))
       }
     })()
   }, [plan, eventData.id])
@@ -106,7 +140,7 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
     plan?.dishes.forEach(d => { const k = d.courseOut || '— no course'; m.set(k, (m.get(k) || 0) + 1) })
     return [...m.entries()]
   }, [plan])
-  const isExisting = d => existingNames?.has(d.name.toLowerCase().trim())
+  const isExisting = d => !!findExisting(existingNames, d, plan?.nameCount, perCat)
   const nExisting = plan && existingNames ? plan.dishes.filter(isExisting).length : 0
   const nNew = plan ? plan.dishes.length - nExisting : 0
   const noCourse = plan?.dishes.filter(d => !d.courseOut).length || 0
@@ -128,7 +162,7 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
         if (data && onEventChange) onEventChange(data)
       }
       // 2. cuisines (menu categories)
-      setProgress('Creating cuisines…')
+      setProgress(catWord === 'Cuisine' ? 'Creating cuisines…' : 'Creating categories…')
       const { data: cats, error: ce } = await supabase.from('menu_categories').select('*').eq('event_id', eventData.id)
       if (ce) throw ce
       // a dish with no course of its own takes its category's course (guest / captain events)
@@ -140,35 +174,46 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
       const needsCat = d => !isExisting(d) || (d.hasCat && existing === 'update')
       const missing = [...new Set(plan.dishes.filter(needsCat).map(d => d.category))].filter(n => !catId.has(n.toLowerCase()))
       let sort = Math.max(0, ...(cats || []).map(c => c.sort_order || 0))
+      let made = []
       if (missing.length) {
-        const { data: made, error } = await supabase.from('menu_categories')
+        const res = await supabase.from('menu_categories')
           .insert(missing.map(name => ({ event_id: eventData.id, name, sort_order: ++sort, is_visible: true }))).select('id, name')
-        if (error) throw error
+        if (res.error) throw res.error
+        made = res.data || []
         made.forEach(c => catId.set(c.name.toLowerCase(), c.id))
-        // a new category whose dishes all share one course belongs to that course (Control › Courses & categories)
-        if (!isMs) {
-          const one = made.map(c => [c.id, [...new Set(plan.dishes.filter(d => d.category.toLowerCase() === c.name.toLowerCase()).map(courseFor))]])
-            .filter(([, cs]) => cs.length === 1 && cs[0])
-          await Promise.all(one.map(([id, cs]) => supabase.from('menu_categories').update({ course: cs[0] }).eq('id', id)))   // best effort: older databases have no course on categories
-        }
       }
+      // a category whose dishes in the sheet all share one course belongs to that course
+      // (Control › Courses & categories): new categories, and the sheet's own categories when it updates
+      if (!isMs) {
+        const allCats = [...(cats || []), ...made.map(c => ({ ...c, course: null }))]
+        const one = allCats
+          .filter(c => made.some(m => m.id === c.id) || existing === 'update')
+          .map(c => [c, [...new Set(plan.dishes.filter(d => d.hasCat && d.category.toLowerCase() === String(c.name).toLowerCase()).map(courseFor))]])
+          .filter(([c, cs]) => cs.length === 1 && cs[0] && c.course !== cs[0])
+        await Promise.all(one.map(([c, cs]) => supabase.from('menu_categories').update({ course: cs[0] }).eq('id', c.id)))   // best effort: older databases have no course on categories
+      }
+      const catRows = [...(cats || []), ...made]
 
       // 3. dishes: new ones in bulk, existing ones updated (or skipped)
       const ids = [...catId.values()]
-      const { data: have } = await supabase.from('menu_items').select('id, name').in('category_id', ids)
-      const byName = new Map((have || []).map(i => [i.name.toLowerCase().trim(), i.id]))
-      const fresh = [], updates = []
+      const { data: have, error: he } = await supabase.from('menu_items').select('id, name, category_id').in('category_id', ids)
+      if (he) throw he
+      const idx = indexMenu(have, catRows)
+      const fresh = [], updates = [], taken = new Set()
       for (const d of plan.dishes) {
         const row = { category_id: catId.get(d.category.toLowerCase()), name: d.name, description: d.description || '',
           is_veg: d.is_veg, is_live_counter: d.is_live_counter, photo_url: d.photo_url }
         if (isMs || courseFor(d)) row.course = courseFor(d)
         if (isMs && d.barker) row.barker = d.barker
-        const id = byName.get(d.name.toLowerCase().trim())
+        let id = findExisting(idx, d, plan.nameCount, perCat)
+        if (id && taken.has(id)) id = undefined   // one menu dish answers one row of the sheet
+        if (id) taken.add(id)
         if (!id) fresh.push({ ...row, is_available: true })
         else if (existing === 'update') {
           const patch = d.hasCat ? { category_id: row.category_id } : {}
           if (parsed.cols.description != null && d.description) patch.description = d.description
           if (parsed.cols.veg != null) patch.is_veg = d.is_veg
+          if (parsed.cols.live != null) patch.is_live_counter = d.is_live_counter
           if (row.course) patch.course = row.course
           if (isMs && d.barker) patch.barker = d.barker
           if (d.photo_url) patch.photo_url = d.photo_url
