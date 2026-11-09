@@ -132,11 +132,30 @@ export async function pgAnswers(local, timeoutMs = 3000) {
   }
 }
 
-const pgLog = () => path.join(P.logs, 'postgres.log')
+// pg_ctl's own messages and the database's log are two different files. On
+// Windows pg_ctl starts the database through cmd.exe with ">> logfile", and
+// cmd cannot open a file that this program already holds open for pg_ctl's
+// output: "The process cannot access the file because it is being used by
+// another process", and the database never starts.
+const pgCtlLog = () => path.join(P.logs, 'pg_ctl.log')
+// Each start also gets a fresh database log: a database left running by a
+// closed window keeps its old log file locked on Windows.
+let pgLogFile = null
+const pgLog = () => pgLogFile || path.join(P.logs, 'postgres.log')
+function newPgLog() {
+  fs.mkdirSync(P.logs, { recursive: true })
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15)
+  pgLogFile = path.join(P.logs, `postgres-${stamp}.log`)
+  try { // keep the five newest
+    const old = fs.readdirSync(P.logs).filter((f) => /^postgres-\d{8}-\d{6}\.log$/.test(f)).sort()
+    for (const f of old.slice(0, -5)) { try { fs.rmSync(path.join(P.logs, f), { force: true }) } catch { /* in use */ } }
+  } catch { /* no folder yet */ }
+  return pgLogFile
+}
 
 export async function stopPostgres(pgb) {
-  let r = await exec(pgb.pg_ctl, ['stop', '-D', P.pgData, '-m', 'fast', '-w', '-t', '60'], { logFile: pgLog() })
-  if (r.code !== 0) r = await exec(pgb.pg_ctl, ['stop', '-D', P.pgData, '-m', 'immediate', '-w', '-t', '30'], { logFile: pgLog() })
+  let r = await exec(pgb.pg_ctl, ['stop', '-D', P.pgData, '-m', 'fast', '-w', '-t', '60'], { logFile: pgCtlLog() })
+  if (r.code !== 0) r = await exec(pgb.pg_ctl, ['stop', '-D', P.pgData, '-m', 'immediate', '-w', '-t', '30'], { logFile: pgCtlLog() })
   return r.code === 0
 }
 
@@ -150,13 +169,13 @@ export async function startPostgres(pgb, local) {
       console.log('  A database from an earlier run is still running - stopping it cleanly first...')
       await stopPostgres(pgb)
     } else {
-      const st = await exec(pgb.pg_ctl, ['status', '-D', P.pgData], { logFile: pgLog() })
+      const st = await exec(pgb.pg_ctl, ['status', '-D', P.pgData], { logFile: pgCtlLog() })
       if (st.code === 0) {
         // pg_ctl sees a live process with that id but it is not answering:
         // either still shutting down, or the id now belongs to another program.
         await sleep(3000)
         if (fs.existsSync(pidFile) && !(await pgAnswers(local))) {
-          await exec(pgb.pg_ctl, ['stop', '-D', P.pgData, '-m', 'fast', '-w', '-t', '20'], { logFile: pgLog() })
+          await exec(pgb.pg_ctl, ['stop', '-D', P.pgData, '-m', 'fast', '-w', '-t', '20'], { logFile: pgCtlLog() })
         }
       }
       // Postgres itself also refuses to start twice on one folder (shared
@@ -168,9 +187,9 @@ export async function startPostgres(pgb, local) {
     local.pgPort = await freePort()
     saveLocal(local)
   }
-  const r = await exec(pgb.pg_ctl, ['start', '-D', P.pgData, '-l', pgLog(), '-w', '-t', '120', '-o', `-p ${local.pgPort}`], { logFile: pgLog(), timeoutMs: 150000 })
+  const r = await exec(pgb.pg_ctl, ['start', '-D', P.pgData, '-l', newPgLog(), '-w', '-t', '120', '-o', `-p ${local.pgPort}`], { logFile: pgCtlLog(), timeoutMs: 150000 })
   if (r.code !== 0 || !(await pgAnswers(local, 10000))) {
-    throw new Error(`The local database did not start.\n${tail(pgLog())}\n\nIf this keeps happening, restart the laptop and try again.`)
+    throw new Error(`The local database did not start.\n${tail(pgCtlLog(), 8)}\n${tail(pgLog(), 8)}\n\nIf this keeps happening, restart the laptop and try again.`)
   }
 }
 
