@@ -203,10 +203,27 @@ function goToLaptop(base, fragment = '') {
     url = u.toString()
   } catch { /* keep the plain address */ }
   const go = () => window.location.replace(url + fragment)
-  // In the tablet app, after a moment, so the link rules that keep the laptop
-  // inside the app are in place first (medianLinks.js).
-  if (typeof window.__ssLinkRulesAt === 'number') setTimeout(go, Math.max(0, 300 - (Date.now() - window.__ssLinkRulesAt)))
+  // In the tablet app, only once the link rules that keep the laptop inside
+  // the app are surely in place (medianLinks.js). A fixed 300 ms after the
+  // rules was too short on slower tablets: the laptop then opened in the
+  // APK's in-app browser (address bar on top, Back closes it). So: wait for
+  // the page to finish loading, send the rules once more, then go.
+  if (typeof window.__ssLinkRulesAt === 'number') afterLinkRules(go)
   else go()
+}
+
+function afterLinkRules(go) {
+  let done = false
+  const leave = () => {
+    if (done) return
+    done = true
+    try { if (typeof window.__ssSendLinkRules === 'function') window.__ssSendLinkRules() } catch { /* old app */ }
+    setTimeout(go, 400)
+  }
+  const settle = () => setTimeout(leave, Math.max(0, 800 - (Date.now() - window.__ssLinkRulesAt)))
+  if (document.readyState === 'complete') settle()
+  else window.addEventListener('load', settle, { once: true })
+  setTimeout(leave, 4000)   // a page that never reports loaded still leaves
 }
 
 /** From a laptop page to the laptop's new address, keeping this device's

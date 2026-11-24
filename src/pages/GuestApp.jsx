@@ -9,6 +9,7 @@ import CaptainTableBlocked from '../components/guest/CaptainTableBlocked'
 import CaptainChat from '../components/guest/CaptainChat'
 import ChairPicker from '../components/guest/ChairPicker'
 import { installTapFx } from '../lib/feedbackFx'
+import { installKioskScreen, pauseKioskScreen, resumeKioskScreen } from '../lib/kioskScreen'
 import WelcomeScreen from '../components/guest/WelcomeScreen'
 import MenuScreen from '../components/guest/MenuScreen'
 import CartDrawer from '../components/guest/CartDrawer'
@@ -153,6 +154,9 @@ export default function GuestApp() {
   // alike. Installed once at the document level rather than wired into each
   // of the hundred-odd buttons, which would guarantee some got missed.
   useEffect(() => installTapFx(), [])
+  // In a browser (not the APK): full screen from the first tap, so no address
+  // bar shows and Back cannot drop a captain out of the app (lib/kioskScreen.js).
+  useEffect(() => installKioskScreen(), [])
 
   function goTo(screen) {
     appStateRef.current = screen
@@ -317,6 +321,7 @@ export default function GuestApp() {
   function performExit() {
     allowExitRef.current = true
     setShowExitGate(false)
+    pauseKioskScreen()
 
     // Works only for windows opened by script, but harmless to try
     try { window.close() } catch (e) {}
@@ -339,6 +344,7 @@ export default function GuestApp() {
 
   function cancelExit() {
     allowExitRef.current = false
+    resumeKioskScreen()
     lastBackAtRef.current = 0
     setShowExitGate(false)
     setExitReady(false)

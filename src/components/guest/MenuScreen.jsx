@@ -132,7 +132,7 @@ function HeaderCarousel({ eventData, tableNumber, isOnline, captain, onSwitchCap
 
 // captain is read by the bottom bar below - without it here the whole
 // menu screen crashes with "captain is not defined" the moment it renders.
-function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, onShowStatus, menuSheetOpen, onMenuSheetChange, onBack, captain }) {
+function MenuModal({ categories, items, onSelect, courseTiles, courseNow, onSelectCourse, cartCount, hasActiveOrders, onShowStatus, menuSheetOpen, onMenuSheetChange, onBack, captain }) {
   const open = menuSheetOpen
   const setOpen = onMenuSheetChange
   return (
@@ -198,6 +198,39 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
               <h3 style={{ fontSize:18, fontWeight:800, textAlign:'center', flex:1 }}>Browse Menu</h3>
               <button onClick={()=>setOpen(false)} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
             </div>
+            {/* A menu with courses (each course is a counter, one KOT each): the
+                sheet lists the courses, as the filter row at the top does, with
+                their categories underneath in small. Picking one shows that
+                course. A menu without courses keeps the list of categories. */}
+            {courseTiles ? (
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                <button onClick={()=>{ onSelectCourse(null); setOpen(false) }}
+                  style={{ gridColumn:'1 / -1', background: !courseNow ? '#1A0A0A' : '#F8F8F8', color: !courseNow ? '#fff' : '#1A1A1A',
+                    border:'1.5px solid ' + (!courseNow ? '#1A0A0A' : '#EBEBEB'), borderRadius:14, padding:'13px 12px', cursor:'pointer',
+                    display:'flex', justifyContent:'space-between', alignItems:'center', fontWeight:800, fontSize:14 }}>
+                  <span>All courses</span>
+                  <span style={{ fontSize:12, fontWeight:600, opacity:0.7 }}>{items.length}</span>
+                </button>
+                {courseTiles.map(c => {
+                  const on = courseNow === c.name
+                  return (
+                    <button key={c.name} data-course={c.name} onClick={()=>{ onSelectCourse(c.name); setOpen(false) }}
+                      style={{ background: on ? '#FFF4E5' : '#F8F8F8', border:'1.5px solid ' + (on ? '#E8890C' : '#EBEBEB'), borderRadius:14,
+                        padding:'13px 12px', textAlign:'left', cursor:'pointer', display:'flex', flexDirection:'column', gap:4, minWidth:0 }}>
+                      <span style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, width:'100%' }}>
+                        <span style={{ fontWeight:800, fontSize:14, color:'#1A1A1A', minWidth:0, overflowWrap:'anywhere' }}>{c.name}</span>
+                        <span style={{ fontSize:12, color:'#888', fontWeight:600, flexShrink:0 }}>{c.count}</span>
+                      </span>
+                      {c.cats.length > 0 && !(c.cats.length === 1 && c.cats[0] === c.name) && (
+                        <span style={{ fontSize:11, color:'#888', fontWeight:600, lineHeight:1.3, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>
+                          {c.cats.join(' · ')}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
               {/* Only list categories that actually have dishes right now.
                   Matches the rule the menu page already uses, so Browse Menu
@@ -213,6 +246,7 @@ function MenuModal({ categories, items, onSelect, cartCount, hasActiveOrders, on
                 )
               })}
             </div>
+            )}
             <button onClick={()=>setOpen(false)} style={{ width:'100%', marginTop:16, background:'#1A0A0A', color:'#fff', border:'none', borderRadius:14, padding:'15px', fontSize:15, fontWeight:800, cursor:'pointer' }}>
               ✕ Close
             </button>
@@ -337,6 +371,18 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   })).filter(g => g.items.length > 0 && (!catNow || g.cat.id === catNow))
   const pickCat = id => { setCatSel(id); try { scrollRef.current?.scrollTo({ top: 0 }) } catch { /* old browser */ } }
   const pickCourse = c => { setCourseSel(c); try { scrollRef.current?.scrollTo({ top: 0 }) } catch { /* old browser */ } }
+  // The MENU button's sheet: the courses (with their categories) when the menu
+  // has courses, otherwise the categories as before
+  const courseTiles = showCourses ? courseList.map(c => {
+    const inCourse = items.filter(i => courseOf(i) === c)
+    return {
+      name: c,
+      count: inCourse.length,
+      cats: categories.filter(cat => inCourse.some(i => i.category_id === cat.id)).map(cat => catLabel(cat.name)),
+    }
+  }) : null
+  // a course from the sheet shows the whole course: no category left picked
+  const pickCourseFromSheet = c => { setCatSel(null); pickCourse(c) }
 
   // Flat list for search
   const flatFiltered = search.length > 0 ? filtered : null
@@ -576,7 +622,8 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
 
       {/* FLOATING BOTTOM BUTTONS — MENU (right) + Track Order (left of menu) */}
       {search.length === 0 && categories.length > 0 && (
-        <MenuModal categories={categories} items={items} onSelect={id => pickCat(id)} cartCount={cartCount} hasActiveOrders={hasActiveOrders} onShowStatus={onShowStatus} menuSheetOpen={menuSheetOpen} onMenuSheetChange={setMenuSheetOpen} onBack={onBack} captain={captain} />
+        <MenuModal categories={categories} items={items} onSelect={id => pickCat(id)}
+          courseTiles={courseTiles} courseNow={courseNow} onSelectCourse={pickCourseFromSheet} cartCount={cartCount} hasActiveOrders={hasActiveOrders} onShowStatus={onShowStatus} menuSheetOpen={menuSheetOpen} onMenuSheetChange={setMenuSheetOpen} onBack={onBack} captain={captain} />
       )}
 
       {/* FEEDBACK BUBBLE */}

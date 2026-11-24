@@ -36,7 +36,11 @@ import { startLaptopWatch } from './lib/laptopWatch'
 
 // The tablet app (APK) must open the event laptop inside the app, not in its
 // in-app browser: set its link rules first (src/lib/medianLinks.js).
-if (keepLaptopInApp()) window.__ssLinkRulesAt = Date.now()
+if (keepLaptopInApp()) {
+  window.__ssLinkRulesAt = Date.now()
+  // serverSwitch.js sends them once more just before leaving for the laptop
+  window.__ssSendLinkRules = keepLaptopInApp
+}
 
 // Before anything is drawn: a device set to the event laptop goes there now
 // (the APK always opens the cloud address). See src/lib/serverSwitch.js.
