@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { Loc, Bi } from '../MenuLang'
+import { useLocal } from '../menuLangCtx'
 
 function mapStatus(raw) {
   if (!raw) return 'placed'
@@ -81,6 +83,7 @@ function OrderCard({ order, onCancel, now }) {
   const currentIdx = statuses.indexOf(status)
   const orderId = order?.id ? '#' + String(order.id).slice(-6).toUpperCase() : '#------'
   const items = Array.isArray(order?.order_items) ? order.order_items : []
+  const L = useLocal()
 
   return (
     <div style={{ background:'#fff', borderRadius:20, padding:'20px 18px 20px', marginBottom:14,
@@ -97,7 +100,7 @@ function OrderCard({ order, onCancel, now }) {
       <div style={{ textAlign:'center', marginBottom:18 }}>
         <div style={{ fontSize:44, marginBottom:8 }}>{cfg.icon}</div>
         <div style={{ fontSize:20, fontWeight:800, color:'#1A0A0A', marginBottom:10 }}>
-          {cfg.label}
+          <Bi en={cfg.label} stack>{cfg.label}</Bi>
         </div>
       </div>
 
@@ -142,7 +145,7 @@ function OrderCard({ order, onCancel, now }) {
           {items.map((oi, i) => (
             <div key={i} style={{ display:'flex', justifyContent:'space-between',
               padding:'5px 0', fontSize:13 }}>
-              <span style={{ fontWeight:600 }}>{oi?.menu_items?.name || 'Item'}</span>
+              <span style={{ fontWeight:600 }}>{oi?.menu_items?.name || 'Item'}<Loc text={L.byName(oi?.menu_items?.name)} block style={{ fontSize:13, color:'#7A4A00', fontWeight:700 }} /></span>
               <span style={{ fontWeight:800, color:'#888' }}>x{oi?.quantity ?? 1}</span>
             </div>
           ))}
@@ -171,17 +174,20 @@ function DoneCard({ order }) {
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.delivered
   const orderId = order?.id ? '#' + String(order.id).slice(-6).toUpperCase() : ''
   const items = Array.isArray(order?.order_items) ? order.order_items : []
-  const names = items.map(oi => (oi?.menu_items?.name || 'Item') + ' ×' + (oi?.quantity ?? 1)).join(', ')
+  const L = useLocal()
+  const names = items.map((oi, i) => (
+    <span key={i}>{i ? ', ' : ''}{oi?.menu_items?.name || 'Item'}<Loc text={L.byName(oi?.menu_items?.name)} sep=" · " />{' ×' + (oi?.quantity ?? 1)}</span>
+  ))
   return (
     <div data-testid="done-order" style={{ background:'#fff', borderRadius:14, padding:'10px 14px', marginBottom:10,
       borderLeft:'4px solid ' + cfg.color, boxShadow:'0 2px 8px rgba(0,0,0,0.05)' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:10, flexWrap:'wrap' }}>
         <span style={{ fontSize:13, fontWeight:800, color:cfg.color }}>
-          {status === 'cancelled' ? '✕ Cancelled' : '✓ Delivered'} <span style={{ color:'#999', fontWeight:700 }}>{orderId}</span>
+          {status === 'cancelled' ? <Bi en="Cancelled">✕ Cancelled</Bi> : <Bi en="Delivered">✓ Delivered</Bi>} <span style={{ color:'#999', fontWeight:700 }}>{orderId}</span>
         </span>
         <TimeLine order={order} now={0} />
       </div>
-      {names && <div style={{ fontSize:12, color:'#777', marginTop:3, overflow:'hidden', textOverflow:'ellipsis',
+      {names.length > 0 && <div style={{ fontSize:12, color:'#777', marginTop:3, overflow:'hidden', textOverflow:'ellipsis',
         whiteSpace:'nowrap' }}>{names}</div>}
     </div>
   )
@@ -195,7 +201,7 @@ function Header({ tableNumber, onBack }) {
       <button onClick={onBack} style={{ background:'#E8890C', border:'none',
         borderRadius:10, padding:'11px 20px', fontSize:15, fontWeight:800, cursor:'pointer',
         color:'#fff', boxShadow:'0 3px 12px rgba(232,137,12,0.5)', flexShrink:0 }}>← Back</button>
-      <h2 style={{ fontSize:17, fontWeight:800, color:'#fff', flex:1 }}>Track Orders</h2>
+      <h2 style={{ fontSize:17, fontWeight:800, color:'#fff', flex:1 }}><Bi en="Track Orders">Track Orders</Bi></h2>
       <div style={{ background:'transparent', color:'#E8890C', fontSize:12, fontWeight:800,
         padding:'5px 12px', borderRadius:999, border:'1.5px solid #E8890C', flexShrink:0 }}>TABLE {tableNumber}</div>
     </div>
@@ -270,13 +276,13 @@ export default function OrderStatus({ activeOrders, doneOrders, activeHelp, tabl
     <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center',
       justifyContent:'center', padding:24, textAlign:'center' }}>
       <div style={{ fontSize:48, marginBottom:12 }}>🍽️</div>
-      <div style={{ fontSize:18, fontWeight:800, marginBottom:8, color:'#1A0A0A' }}>No active orders</div>
+      <div style={{ fontSize:18, fontWeight:800, marginBottom:8, color:'#1A0A0A' }}><Bi en="No active orders" stack>No active orders</Bi></div>
       <div style={{ fontSize:14, color:'#888', marginBottom:24, lineHeight:1.6, maxWidth:300 }}>
         Your order was cancelled or delivered.<br/>Go back to menu to place a new order.
       </div>
       <button onClick={onBack} style={{ background:'#1A0A0A', color:'#fff', border:'none',
         borderRadius:14, padding:'16px 32px', fontSize:16, fontWeight:800, cursor:'pointer' }}>
-        ← Back to Menu
+        ← <Bi en="Back to Menu">Back to Menu</Bi>
       </button>
     </div>
   )) : (
@@ -291,7 +297,7 @@ export default function OrderStatus({ activeOrders, doneOrders, activeHelp, tabl
       <button onClick={onBack} style={{ width:'100%', marginTop:6, background:'#1A0A0A',
         color:'#fff', border:'none', borderRadius:14, padding:'16px', fontSize:16,
         fontWeight:800, cursor:'pointer' }}>
-        ← Back to Menu
+        ← <Bi en="Back to Menu">Back to Menu</Bi>
       </button>
     </div>
   )
@@ -313,7 +319,7 @@ export default function OrderStatus({ activeOrders, doneOrders, activeHelp, tabl
                   <span style={{ fontSize:12, fontWeight:800, padding:'4px 11px', borderRadius:999,
                     background: onWay ? '#EFF6FF' : '#FEF3C7',
                     color: onWay ? '#2563EB' : '#D97706' }}>
-                    {onWay ? 'Waiter On The Way' : 'Request Received'}
+                    {onWay ? <Bi en="Waiter On The Way">Waiter On The Way</Bi> : 'Request Received'}
                   </span>
                 </div>
                 {(h.sos_request_items || []).map((li, i) => (

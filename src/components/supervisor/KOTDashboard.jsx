@@ -187,7 +187,7 @@ const Card = memo(function Card({ id, kind, rec, st, open, w, tOn, busy, prn, wi
   )
 })
 
-const BUILD_VERSION = 'v2.17.2 \u00B7 2026-11-27'
+const BUILD_VERSION = 'v2.18 \u00B7 2026-11-28'
 // this device's Live Orders tab (new / assigned)
 const LIVE_TAB_KEY = 'ss_live_tab'
 

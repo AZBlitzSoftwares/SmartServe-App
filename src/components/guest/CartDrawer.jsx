@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { queueOrder, flushOrderQueue } from '../../lib/offlineQueue'
 import { newOrderId, sendOrderWithRetry } from '../../lib/placeOrder'
+import { Loc, Bi } from '../MenuLang'
+import { useLocal } from '../menuLangCtx'
 
 function quickSignal(ms) {
   try { if (AbortSignal.timeout) return AbortSignal.timeout(ms) } catch { /* older browser */ }
@@ -10,6 +12,8 @@ function quickSignal(ms) {
 import { NoteChips } from './mkShared'
 
 export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrderPlaced, onRemove, onAdd, cartOpen, onCartOpenChange, captain, captainTable, onShowStatus, onOpenMenu, showTrack, onOpenChairs, onNote }) {
+  // v2.18: the event's menu language with the English (dish names; guest buttons)
+  const L = useLocal()
   const [open, setOpen] = useState(cartOpen || false)
 
   // Sync with parent
@@ -263,7 +267,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
             <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
           </svg>
-          <span style={{ color:'#C06A00', fontWeight:800, fontSize:15, whiteSpace:'nowrap' }}>Cart</span>
+          <span style={{ color:'#C06A00', fontWeight:800, fontSize:15, whiteSpace:'nowrap' }}><Bi en="Cart" stack>Cart</Bi></span>
           <span style={{ background:'#E8890C', color:'#fff', borderRadius:999, minWidth:22,
             height:22, padding:'0 6px', display:'flex', alignItems:'center',
             justifyContent:'center', fontWeight:800, fontSize:13 }}>{total}</span>
@@ -306,7 +310,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             border:'none', borderRadius:13, padding:'13px 22px',
             fontWeight:900, fontSize:16, whiteSpace:'nowrap',
             cursor: placing ? 'wait' : 'pointer' }}>
-          {placing ? (slow ? 'Still sending…' : 'Sending…') : orderLimitHit ? (captainMode ? '🔒 Table busy' : '🔒 Place Order') : 'Place Order \u2192'}
+          {placing ? (slow ? 'Still sending…' : 'Sending…') : orderLimitHit ? (captainMode ? '🔒 Table busy' : <Bi en="Place Order" stack>🔒 Place Order</Bi>) : <Bi en="Place Order" stack>Place Order {'\u2192'}</Bi>}
         </button>
       </div>
 
@@ -318,18 +322,18 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             boxShadow:'0 20px 60px rgba(0,0,0,0.45)' }}>
             <div style={{ fontSize:52, marginBottom:12, lineHeight:1 }}>⏳</div>
             <div style={{ fontWeight:900, fontSize:30, color:'#BE123C', marginBottom:12,
-              letterSpacing:'1px' }}>PLEASE WAIT</div>
+              letterSpacing:'1px' }}><Bi en="Please wait" stack>PLEASE WAIT</Bi></div>
             <div style={{ fontSize:17, color:'#9F1239', lineHeight:1.6, fontWeight:600,
               marginBottom:24 }}>
               {captainMode
                 ? 'Table ' + (captainTable ?? '') + ' already has an order being prepared. Your items are safe here.'
-                : 'Your current order is being prepared'}
+                : <Bi en="Your current order is being prepared" stack>Your current order is being prepared</Bi>}
             </div>
             <button onClick={() => setShowWait(false)}
               style={{ background:'#1A0A0A', color:'#E8890C', border:'none', borderRadius:14,
                 padding:'14px 30px', fontSize:15, fontWeight:900, cursor:'pointer',
                 display:'inline-flex', alignItems:'center', gap:8 }}>
-              🍽️ Back to Menu
+              🍽️ <Bi en="Back to Menu">Back to Menu</Bi>
             </button>
           </div>
         </div>
@@ -341,7 +345,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 20px' }} />
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
               <h3 style={{ fontSize:20, fontWeight:800 }}>
-                Your Order{captainMode && captainTable != null ? ' \u00B7 Table ' + captainTable : ''}
+                <Bi en="Your Order">Your Order</Bi>{captainMode && captainTable != null ? ' \u00B7 Table ' + captainTable : ''}
               </h3>
               <button onClick={() => { setOpen(false); onCartOpenChange?.(false) }} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
             </div>
@@ -352,7 +356,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             {multi && cart.map(item => (
               <div key={item.id} style={{ padding:'12px 0', borderBottom:'1px solid #F0F0F0' }}>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                  <div style={{ fontWeight:700, fontSize:15, flex:1 }}>{item.name}</div>
+                  <div style={{ fontWeight:700, fontSize:15, flex:1 }}>{item.name}<Loc text={L.dish(item)} block style={{ fontSize:14, color:'#7A4A00', lineHeight:1.4 }} /></div>
                   <div style={{ display:'flex', alignItems:'center', gap:12 }}>
                     <button onClick={() => onRemove(item.id)} style={{ width:36, height:36, borderRadius:'50%', background:'#F5F5F5', border:'1.5px solid #E5E7EB', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, cursor:'pointer' }}>−</button>
                     <span style={{ fontWeight:800, fontSize:16, minWidth:20, textAlign:'center' }}>{item.quantity}</span>
@@ -369,7 +373,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
 
             {!multi && cart.map(item => (
               <div key={item.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 0', borderBottom:'1px solid #F0F0F0' }}>
-                <div style={{ fontWeight:700, fontSize:15, flex:1 }}>{item.name}</div>
+                <div style={{ fontWeight:700, fontSize:15, flex:1 }}>{item.name}<Loc text={L.dish(item)} block style={{ fontSize:14, color:'#7A4A00', lineHeight:1.4 }} /></div>
                 <div style={{ display:'flex', alignItems:'center', gap:12 }}>
                   <button onClick={() => onRemove(item.id)} style={{ width:28, height:28, borderRadius:'50%', background:'#F5F5F5', border:'1.5px solid #E5E7EB', fontSize:16, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, cursor:'pointer' }}>−</button>
                   <span style={{ fontWeight:800, fontSize:16, minWidth:20, textAlign:'center' }}>{item.quantity}</span>
@@ -379,7 +383,7 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             ))}
 
             <div style={{ marginTop:20, display:'flex', justifyContent:'space-between', fontSize:16, fontWeight:700, marginBottom:16 }}>
-              <span>{multi ? 'Total plates' : 'Total items'}</span><span>{total}</span>
+              <span>{multi ? 'Total plates' : <Bi en="Total items">Total items</Bi>}</span><span>{total}</span>
             </div>
 
             {isOnline === false && !captainMode && (
@@ -397,15 +401,15 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
             {orderLimitHit && (
               <div style={{ background:'#FFF1F2', border:'2px solid #FDA4AF', borderRadius:16, padding:'22px 18px', marginBottom:12, textAlign:'center' }}>
                 <div style={{ fontSize:36, marginBottom:10 }}>⏳</div>
-                <div style={{ fontWeight:900, fontSize:26, color:'#BE123C', marginBottom:8, letterSpacing:'0.5px' }}>PLEASE WAIT</div>
+                <div style={{ fontWeight:900, fontSize:26, color:'#BE123C', marginBottom:8, letterSpacing:'0.5px' }}><Bi en="Please wait" stack>PLEASE WAIT</Bi></div>
                 <div style={{ fontSize:16, color:'#9F1239', lineHeight:1.6, marginBottom:16, fontWeight:500 }}>
                   {captainMode
                     ? 'Table ' + (captainTable ?? '') + ' already has an order being prepared. These items stay here until it is delivered.'
-                    : 'Your current order is being prepared'}
+                    : <Bi en="Your current order is being prepared" stack>Your current order is being prepared</Bi>}
                 </div>
                 <button onClick={() => setOpen(false)}
                   style={{ background:'#1A0A0A', color:'#E8890C', border:'none', borderRadius:12, padding:'11px 20px', fontSize:14, fontWeight:800, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }}>
-                  🍽️ Browse Menu
+                  🍽️ <Bi en="Browse Menu">Browse Menu</Bi>
                 </button>
               </div>
             )}
@@ -423,10 +427,10 @@ export default function CartDrawer({ cart, tableData, eventData, isOnline, onOrd
               {placing
                 ? (slow ? '⏳ Still sending… please wait' : '⏳ Sending order…')
                 : orderLimitHit
-                  ? (captainMode ? '🔒 Please Wait' : '🔒 Place Order')
+                  ? (captainMode ? '🔒 Please Wait' : <Bi en="Place Order" stack>🔒 Place Order</Bi>)
                   : captainMode
                     ? '✓ Place Order · Table ' + (captainTable ?? '')
-                    : '✓ Place Order'}
+                    : <Bi en="Place Order" stack>✓ Place Order</Bi>}
             </button>
           </div>
         </div>

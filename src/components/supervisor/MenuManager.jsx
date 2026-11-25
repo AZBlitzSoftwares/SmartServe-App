@@ -5,6 +5,8 @@ import { supabase } from '../../lib/supabase'
 import { readSheetFile, menuTemplateCsv } from '../../lib/sheetImport'
 import { coursesOf } from '../../maestro/msData'
 import { eventCourses, saveCourseOrder, cleanCourse, isDefaultCourseList } from '../../lib/courses'
+import MenuLanguagePanel from './MenuLanguagePanel'
+import { langInfo, localOf, withLocal, fontFor } from '../../lib/menuLang'
 
 export default function MenuManager({ eventData, onEventChange }) {
   // Maestro dishes also need a course: the captain takes the order by course
@@ -33,6 +35,9 @@ export default function MenuManager({ eventData, onEventChange }) {
   const [importResult, setImportResult] = useState(null)
   const [showFoodMaster, setShowFoodMaster] = useState(false)
   const [showCopyEvent, setShowCopyEvent] = useState(false)
+  const [showLang, setShowLang] = useState(false)
+  // v2.18: the event's second menu language (null = English only)
+  const ml = langInfo(eventData?.menu_lang)
   const [allEvents, setAllEvents] = useState([])
   const fileRef = useRef()
   // Guest and captain events have courses too once they are set (Control › Courses & categories,
@@ -140,11 +145,13 @@ export default function MenuManager({ eventData, onEventChange }) {
     // a Maestro dish without a course never shows up on the captain's course tabs
     if (isMs && courses.length && !courses.includes(newItem.course)) { alert('Pick the course for this dish (' + courses.join(', ') + ').'); return }
     setSaving(true)
+    // the dish in the event's menu language (other languages it has are kept)
+    const loc = ml ? { i18n: withLocal(editItem?.i18n, ml.code, { name: newItem.loc_name || '', description: newItem.loc_desc || '' }) } : {}
     if (editItem) {
-      const { error } = await supabase.from('menu_items').update({ name:newItem.name.trim(), description:newItem.description.trim(), category_id:catId, is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, ...(isMs ? { course:newItem.course||null, vip_only:!!newItem.vip_only } : hasCourses ? { course:newItem.course||null } : {}) }).eq('id', editItem.id)
+      const { error } = await supabase.from('menu_items').update({ ...loc, name:newItem.name.trim(), description:newItem.description.trim(), category_id:catId, is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, ...(isMs ? { course:newItem.course||null, vip_only:!!newItem.vip_only } : hasCourses ? { course:newItem.course||null } : {}) }).eq('id', editItem.id)
       if (error) { alert('Could not save the dish: ' + error.message); setSaving(false); return }
     } else {
-      const { error } = await supabase.from('menu_items').insert({ category_id:catId, name:newItem.name.trim(), description:newItem.description.trim(), is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, is_available:true, ...(isMs ? { course:newItem.course||null, vip_only:!!newItem.vip_only } : hasCourses ? { course:newItem.course||null } : {}) })
+      const { error } = await supabase.from('menu_items').insert({ ...loc, category_id:catId, name:newItem.name.trim(), description:newItem.description.trim(), is_live_counter:newItem.is_live_counter, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null, is_available:true, ...(isMs ? { course:newItem.course||null, vip_only:!!newItem.vip_only } : hasCourses ? { course:newItem.course||null } : {}) })
       // a VIP-only special dish stays out of the shared dish library
       if (!error && !(isMs && newItem.vip_only)) await syncToFoodMaster({ name:newItem.name.trim(), description:newItem.description.trim(), category:categories.find(c=>c.id===catId)?.name, is_veg:newItem.is_veg, photo_url:newItem.photo_url.trim()||null })
       if (error) { alert('Error adding dish: ' + error.message); setSaving(false); return }
@@ -173,7 +180,8 @@ export default function MenuManager({ eventData, onEventChange }) {
 
   function startEdit(item) {
     setCourseOpen(false)
-    setNewItem({ name:item.name, description:item.description||'', is_live_counter:item.is_live_counter||false, is_veg:item.is_veg!==false, photo_url:item.photo_url||'', category_id:item.category_id, course:item.course||'', vip_only:!!item.vip_only })
+    setNewItem({ name:item.name, description:item.description||'', is_live_counter:item.is_live_counter||false, is_veg:item.is_veg!==false, photo_url:item.photo_url||'', category_id:item.category_id, course:item.course||'', vip_only:!!item.vip_only,
+      loc_name: ml ? localOf(item, ml.code) : '', loc_desc: ml ? localOf(item, ml.code, 'description') : '' })
     setEditItem(item); setShowAdd(true)
   }
 
@@ -202,7 +210,7 @@ export default function MenuManager({ eventData, onEventChange }) {
       document.body.appendChild(a); a.click(); a.remove()
       return
     }
-    const blob = new Blob(['\uFEFF' + menuTemplateCsv(hasCourses ? courses : [])], { type:'text/csv;charset=utf-8' })
+    const blob = new Blob(['\uFEFF' + menuTemplateCsv(hasCourses ? courses : [], ml?.name)], { type:'text/csv;charset=utf-8' })
     a.href = URL.createObjectURL(blob); a.download = 'menu-template.csv'
     document.body.appendChild(a); a.click(); a.remove()
     setTimeout(() => URL.revokeObjectURL(a.href), 2000)
@@ -308,7 +316,8 @@ export default function MenuManager({ eventData, onEventChange }) {
   const q = search.trim().toLowerCase()
   const filtered = !q ? byCategory : byCategory.filter(i =>
     (i.name || '').toLowerCase().includes(q) ||
-    (i.description || '').toLowerCase().includes(q))
+    (i.description || '').toLowerCase().includes(q) ||
+    (ml && localOf(i, ml.code).toLowerCase().includes(q)))
   const INP = { width:'100%', border:'1.5px solid var(--line)', borderRadius:10, padding:'10px 14px', fontSize:14, marginBottom:10, fontFamily:'Manrope', outline:'none', boxSizing:'border-box' }
 
   return (
@@ -316,6 +325,8 @@ export default function MenuManager({ eventData, onEventChange }) {
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, gap:10, flexWrap:'wrap' }}>
         <h2 style={{ fontSize:20, fontWeight:800 }}>Menu Manager</h2>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <button onClick={()=>setShowLang(true)} data-testid="menu-lang-btn" style={{ background: ml ? '#F5F3FF' : '#fff', border:'1px solid ' + (ml ? '#A78BFA' : 'var(--line)'), color: ml ? '#6D28D9' : 'var(--ink)', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+            🌐 {ml ? ml.name + (items.length ? ' · ' + items.filter(i => localOf(i, ml.code)).length + '/' + items.length : '') : 'Menu language'}</button>
           <button onClick={()=>setShowFoodMaster(true)} style={{ background:'#F5F3FF', border:'1px solid #DDD6FE', color:'#7C3AED', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>📚 Food Master</button>
           <button onClick={()=>setShowCopyEvent(true)} style={{ background:'#EFF6FF', border:'1px solid #BFDBFE', color:'#2563EB', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>📋 Copy from Event</button>
           <button onClick={()=>fileRef.current?.click()} style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', color:'#16A34A', borderRadius:10, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
@@ -339,7 +350,8 @@ export default function MenuManager({ eventData, onEventChange }) {
                   : '✅ ' + importResult.added + ' dishes added' + (importResult.updated ? ', ' + importResult.updated + ' updated' : '')
                     + (importResult.skipped ? ', ' + importResult.skipped + ' left as they were' : '')
                     + (importResult.newCats ? ' · ' + importResult.newCats + (isMs || eventData?.multi_kitchen ? ' new cuisine' + (importResult.newCats === 1 ? '' : 's') : ' new categor' + (importResult.newCats === 1 ? 'y' : 'ies')) : '')
-                    + (importResult.newCourses?.length ? ' · courses added: ' + importResult.newCourses.join(', ') : '')}
+                    + (importResult.newCourses?.length ? ' · courses added: ' + importResult.newCourses.join(', ') : '')
+                    + (importResult.local ? ' · ' + importResult.local + ' with ' + importResult.localLang + ' names' : '')}
               </div>
               {importResult.errors?.map((err,i)=><div key={i} style={{ color:'#DC2626', fontSize:12, marginTop:4 }}>{err}</div>)}
               {importResult.newCats > 0 && eventData?.multi_kitchen && (
@@ -533,6 +545,15 @@ export default function MenuManager({ eventData, onEventChange }) {
           <h3 style={{ fontSize:16, fontWeight:800, marginBottom:16 }}>{editItem?'Edit Dish':'Add New Dish'}</h3>
           <input value={newItem.name} onChange={e=>setNewItem(p=>({...p,name:e.target.value}))} placeholder="Dish name *" style={INP} autoFocus />
           <textarea value={newItem.description} onChange={e=>setNewItem(p=>({...p,description:e.target.value}))} placeholder="Description (optional)" style={{ ...INP, resize:'none', height:72 }} />
+          {ml && (
+            <div style={{ background:'#F5F3FF', border:'1px solid #DDD6FE', borderRadius:12, padding:'10px 10px 0', marginBottom:10 }}>
+              <div style={{ fontSize:11, fontWeight:800, color:'#6D28D9', textTransform:'uppercase', letterSpacing:'.4px', marginBottom:6 }}>🌐 In {ml.name} (shown under the English)</div>
+              <input value={newItem.loc_name||''} onChange={e=>setNewItem(p=>({...p,loc_name:e.target.value}))} placeholder={'Dish name in ' + ml.name} data-testid="dish-loc-name"
+                lang={ml.code} dir={ml.rtl ? 'rtl' : undefined} style={{ ...INP, fontFamily: fontFor(ml) }} />
+              <textarea value={newItem.loc_desc||''} onChange={e=>setNewItem(p=>({...p,loc_desc:e.target.value}))} placeholder={'Description in ' + ml.name + ' (optional)'}
+                lang={ml.code} dir={ml.rtl ? 'rtl' : undefined} style={{ ...INP, resize:'none', height:60, fontFamily: fontFor(ml) }} />
+            </div>
+          )}
           {(() => {
             // guest / captain events: categories listed under their course, so picking the category sets the course too
             const grouped = !isMs && courses.length > 0
@@ -652,6 +673,7 @@ export default function MenuManager({ eventData, onEventChange }) {
                 <span style={{ width:6, height:6, borderRadius:'50%', background:item.is_veg!==false?'#16A34A':'#DC2626', display:'block' }}></span>
               </span>
               <span style={{ fontWeight:700, fontSize:15 }}>{item.name}</span>
+              {ml && localOf(item, ml.code) && <span lang={ml.code} dir={ml.rtl ? 'rtl' : undefined} style={{ fontWeight:700, fontSize:14, color:'#6D28D9', fontFamily: fontFor(ml) }}>{localOf(item, ml.code)}</span>}
               {item.is_live_counter && <span style={{ fontSize:11, color:'#D97706', background:'#FEF3C7', padding:'1px 6px', borderRadius:999, fontWeight:600 }}>Live</span>}
               {isMs && item.vip_only && <span style={{ fontSize:11, color:'#7A4B00', background:'#FFF1CC', border:'1px solid #EBCB85', padding:'1px 7px', borderRadius:999, fontWeight:800 }}>★ VIP only</span>}
             </div>
@@ -675,6 +697,10 @@ export default function MenuManager({ eventData, onEventChange }) {
         </div>
       ))}
       {showFoodMaster && <FoodMaster eventData={eventData} onClose={()=>{ setShowFoodMaster(false); loadMenu() }} />}
+      {showLang && (
+        <MenuLanguagePanel eventData={eventData} categories={categories} items={items} courses={courses}
+          onEventChange={onEventChange} onSaved={loadMenu} onClose={() => setShowLang(false)} />
+      )}
       {importing2 && (
         <MenuImport eventData={eventData} rows={importing2.rows} fileName={importing2.fileName}
           onEventChange={onEventChange}
@@ -712,10 +738,11 @@ export default function MenuManager({ eventData, onEventChange }) {
                 const srcCat = srcCats.find(c=>c.id===item.category_id)
                 const catKey = (srcCat?.name||'General').toLowerCase()
                 if (!catCache[catKey]) {
-                  const { data: nc } = await supabase.from('menu_categories').insert({ event_id:eventData.id, name:srcCat?.name||'General', sort_order:Object.keys(catCache).length+1, is_visible:true, ...(!isMs && srcCat?.course ? { course: srcCat.course } : {}) }).select().single()
+                  const { data: nc } = await supabase.from('menu_categories').insert({ event_id:eventData.id, name:srcCat?.name||'General', sort_order:Object.keys(catCache).length+1, is_visible:true, ...(!isMs && srcCat?.course ? { course: srcCat.course } : {}), ...(srcCat?.i18n ? { i18n: srcCat.i18n } : {}) }).select().single()
                   if (nc) catCache[catKey] = nc.id
                 }
                 await supabase.from('menu_items').insert({ category_id:catCache[catKey], name:item.name, description:item.description, is_veg:item.is_veg, is_live_counter:item.is_live_counter, photo_url:item.photo_url, is_available:true,
+                  ...(item.i18n ? { i18n: item.i18n } : {}),
                   ...(isMs ? { course: courses.includes(item.course) ? item.course : null, barker: item.barker || null } : { course: item.course || null }) })
                 await syncToFoodMaster({ name:item.name, description:item.description, category:catKey, is_veg:item.is_veg, photo_url:item.photo_url })
                 destNames.add(item.name.toLowerCase().trim())

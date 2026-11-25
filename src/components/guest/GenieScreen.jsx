@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { FaceSVG, SENTIMENT_CONFIG } from './FeedbackModal'
 import { chairsLabel, kotState, learnServerTime } from './mkShared'
+import { Bi } from '../MenuLang'
 
 /* ss-multi-kitchen: "Sent to N kitchens". One row per KOT with its print
    status live - Printing..., Printed, or Failed (the operator's desk raises
@@ -231,7 +232,7 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
 
       <div style={{ fontSize:'clamp(18px, 2.9vh, 26px)', fontWeight:900, color:'#1A0A0A',
         textAlign:'center', lineHeight:1.25, maxWidth:520, flexShrink:0 }}>
-        {captainMode ? 'Order placed' : 'Your order will be served in few minutes'}
+        {captainMode ? 'Order placed' : <Bi en="Your order will be served in few minutes" stack>Your order will be served in few minutes</Bi>}
       </div>
 
       {captainMode && !multi && (
@@ -249,7 +250,7 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
         <>
           <div style={{ fontSize:'clamp(12px, 1.7vh, 15px)', fontWeight:700, color:'#6B6B6B',
             textAlign:'center', marginTop:'0.6vh', flexShrink:0 }}>
-            How is your experience using the app?
+            <Bi en="How is your experience using the app?" stack>How is your experience using the app?</Bi>
           </div>
 
           {/* Faces with their names. An unlabelled face is a guess - the
@@ -271,7 +272,7 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
                   <FaceSVG type={key} size={50} />
                   <span style={{ fontSize:'clamp(11px, 1.5vh, 14px)', fontWeight:800,
                     color: cfg.color, whiteSpace:'nowrap', letterSpacing:'0.2px' }}>
-                    {cfg.label}
+                    <Bi en={cfg.label} stack>{cfg.label}</Bi>
                   </span>
                 </button>
               )
@@ -298,7 +299,7 @@ export default function GenieScreen({ tableData, eventData, orderId, onOrderAgai
         {/* The same words in both apps. A captain reading "Next Table" had
             no reason to expect the table grid; "Place Another Order" is what
             they are about to do, and it is what the guest app already says. */}
-        {'Place Another Order \u2192'}
+        <Bi en="Place Another Order" stack>{'Place Another Order \u2192'}</Bi>
       </button>
     </div>
   )

@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { parseDelimited, menuRows, matchCourse } from '../../lib/sheetImport'
 import { coursesOf } from '../../maestro/msData'
 import { eventCourses } from '../../lib/courses'
+import { langInfo, withLocal, withCourseLocal, fontFor } from '../../lib/menuLang'
 
 /* Import a whole menu from a spreadsheet, with a preview before anything is
    written.
@@ -63,6 +64,33 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
   const parsed = useMemo(() => rows ? menuRows(rows) : null, [rows])
 
   const perCat = !isMs
+
+  // v2.18: the sheet's other language(s). "Dish (Gujarati)" names its language;
+  // "Local name" means the event's own. An event without a menu language takes
+  // the one language the sheet names.
+  const evLang = langInfo(eventData?.menu_lang)
+  const sheetLangs = Object.keys(parsed?.cols?.locals || {})
+  const namedLangs = sheetLangs.filter(c => c !== 'local')
+  const setLang = !evLang && namedLangs.length === 1 ? langInfo(namedLangs[0]) : null
+  const targetOf = k => (k === 'local' ? (evLang || setLang) : langInfo(k))?.code || null
+  const lostLocal = sheetLangs.includes('local') && !evLang && !setLang
+  // { gu: { name, description } } for a dish, only languages that have somewhere to go
+  const localFor = d => {
+    if (!d?.local) return null
+    const out = {}
+    for (const [k, v] of Object.entries(d.local)) {
+      const code = targetOf(k)
+      if (!code) continue
+      const f = {}
+      if (v.name) f.name = v.name
+      if (v.description) f.description = v.description
+      if (Object.keys(f).length) out[code] = { ...(out[code] || {}), ...f }
+    }
+    return Object.keys(out).length ? out : null
+  }
+  const mergeLocal = (i18n, loc) => Object.entries(loc || {}).reduce((acc, [code, f]) => withLocal(acc, code, { ...(acc?.[code] || {}), ...f }), i18n || null)
+  const wantsLocal = sheetLangs.some(k => targetOf(k))
+  const langLabel = code => langInfo(code)?.name || code
 
 
   // Courses and cuisines as they will be written
@@ -147,11 +175,17 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
   // the course part of the preview: always on Maestro, on other events when the sheet brings courses
   const showCourses = isMs || !!plan?.dishes.some(d => d.courseOut)
   const catKnown = name => existingCats.some(c => c.name.toLowerCase() === name.toLowerCase())
+  const localCount = plan ? plan.dishes.filter(d => localFor(d)).length : 0
 
   async function run() {
     if (!plan?.dishes.length) return
     setBusy(true); setErr('')
     try {
+      // 0. the language columns must exist before anything is written (db/2026-11-26_menu_language.sql)
+      if (wantsLocal) {
+        const { error } = await supabase.from('menu_items').select('i18n').limit(1)
+        if (error) throw new Error('This database has no language columns yet. Run db/2026-11-26_menu_language.sql in the Supabase SQL Editor, then import again (nothing was changed)')
+      }
       // 1. new courses go on the event, after the existing ones (reorder them under Control)
       let courseList = courses
       if (plan.newCourses.length && addCourses) {
@@ -196,8 +230,9 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
 
       // 3. dishes: new ones in bulk, existing ones updated (or skipped)
       const ids = [...catId.values()]
-      const { data: have, error: he } = await supabase.from('menu_items').select('id, name, category_id').in('category_id', ids)
+      const { data: have, error: he } = await supabase.from('menu_items').select(wantsLocal ? 'id, name, category_id, i18n' : 'id, name, category_id').in('category_id', ids)
       if (he) throw he
+      const haveI18n = new Map((have || []).map(r => [r.id, r.i18n || null]))
       const idx = indexMenu(have, catRows)
       const fresh = [], updates = [], taken = new Set()
       for (const d of plan.dishes) {
@@ -205,6 +240,8 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
           is_veg: d.is_veg, is_live_counter: d.is_live_counter, photo_url: d.photo_url }
         if (isMs || courseFor(d)) row.course = courseFor(d)
         if (isMs && d.barker) row.barker = d.barker
+        const loc = localFor(d)
+        if (loc) row.i18n = mergeLocal(null, loc)
         let id = findExisting(idx, d, plan.nameCount, perCat)
         if (id && taken.has(id)) id = undefined   // one menu dish answers one row of the sheet
         if (id) taken.add(id)
@@ -217,6 +254,7 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
           if (row.course) patch.course = row.course
           if (isMs && d.barker) patch.barker = d.barker
           if (d.photo_url) patch.photo_url = d.photo_url
+          if (loc) patch.i18n = mergeLocal(haveI18n.get(id), loc)
           if (Object.keys(patch).length) updates.push([id, patch])
         }
       }
@@ -235,6 +273,41 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
         updated += res.length
       }
 
+      // 3b. the other language for categories and courses, and the event's menu language
+      if (wantsLocal) {
+        setProgress('Saving ' + [...new Set(sheetLangs.map(targetOf).filter(Boolean))].map(langLabel).join(', ') + ' names…')
+        const catLocal = new Map(), courseLocal = new Map()   // English (lower) -> { code: local }
+        for (const d of plan.dishes) {
+          for (const [k, v] of Object.entries(d.local || {})) {
+            const code = targetOf(k)
+            if (!code) continue
+            if (v.category && d.hasCat) { const m = catLocal.get(d.category.toLowerCase()) || {}; if (!m[code]) m[code] = v.category; catLocal.set(d.category.toLowerCase(), m) }
+            const cn = courseFor(d)
+            if (v.course && cn) { const m = courseLocal.get(cn) || {}; if (!m[code]) m[code] = v.course; courseLocal.set(cn, m) }
+          }
+        }
+        const catUpd = catRows.filter(c => catLocal.has(String(c.name).toLowerCase())).map(c => {
+          let next = c.i18n || null
+          for (const [code, name] of Object.entries(catLocal.get(String(c.name).toLowerCase()))) next = withLocal(next, code, { name })
+          return [c.id, next, JSON.stringify(next) !== JSON.stringify(c.i18n || null)]
+        }).filter(x => x[2])
+        for (let i = 0; i < catUpd.length; i += 20) {
+          const res = await Promise.all(catUpd.slice(i, i + 20).map(([id, i18n]) => supabase.from('menu_categories').update({ i18n }).eq('id', id)))
+          const bad = res.find(r => r.error)
+          if (bad) throw bad.error
+        }
+        let evI18n = eventData.i18n || null
+        for (const [course, m] of courseLocal) for (const [code, name] of Object.entries(m)) evI18n = withCourseLocal(evI18n, code, course, name)
+        const evPatch = {}
+        if (JSON.stringify(evI18n) !== JSON.stringify(eventData.i18n || null)) evPatch.i18n = evI18n
+        if (setLang) evPatch.menu_lang = setLang.code
+        if (Object.keys(evPatch).length) {
+          const { data, error } = await supabase.from('events').update(evPatch).eq('id', eventData.id).select('*').maybeSingle()
+          if (error) throw error
+          if (data && onEventChange) onEventChange(data)
+        }
+      }
+
       // 4. the shared dish library, best effort
       try {
         setProgress('Filing new dishes in the Food Master…')
@@ -246,11 +319,16 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
         }
         const lib = fresh.filter(d => !known.has(d.name.toLowerCase())).map(d => ({ name: d.name, description: d.description || null,
           category: plan.dishes.find(x => x.name === d.name)?.category || 'General', is_veg: d.is_veg, photo_url: d.photo_url || null }))
-        for (let i = 0; i < lib.length; i += 100) await supabase.from('food_master').insert(lib.slice(i, i + 100))
+        // with the dish's other language when the library has the column (an older one gets the English only)
+        const libLoc = lib.map(r => { const f = fresh.find(x => x.name === r.name); return f?.i18n ? { ...r, i18n: f.i18n } : r })
+        for (let i = 0; i < lib.length; i += 100) {
+          const { error } = await supabase.from('food_master').insert(libLoc.slice(i, i + 100))
+          if (error) await supabase.from('food_master').insert(lib.slice(i, i + 100))
+        }
       } catch { /* the library must never block a menu import */ }
 
       onDone({ added, updated, skipped: existing === 'skip' ? nExisting : 0, dupes: plan.dupes.length, newCats: missing.length,
-        newCourses: addCourses ? plan.newCourses : [] })
+        newCourses: addCourses ? plan.newCourses : [], local: localCount, localLang: wantsLocal ? [...new Set(sheetLangs.map(targetOf).filter(Boolean))].map(langLabel).join(', ') : '' })
     } catch (e) {
       setErr('Import stopped: ' + (e?.message || String(e)) + '. Dishes added before this point are kept; importing again updates them.')
     }
@@ -306,9 +384,25 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
 
             <div style={{ fontSize:12.5, marginBottom:8 }}>
               <b>Columns read:</b>{' '}
-              {Object.keys(parsed.cols).map(k => <span key={k} style={pill('#F0FDF4', '#15803D', '#BBF7D0')}>{k === 'category' ? catWord : COL_LABEL[k]}</span>)}
+              {Object.keys(parsed.cols).filter(k => k !== 'locals').map(k => <span key={k} style={pill('#F0FDF4', '#15803D', '#BBF7D0')}>{k === 'category' ? catWord : COL_LABEL[k]}</span>)}
+              {Object.entries(parsed.cols.locals || {}).map(([k, f]) => (
+                <span key={'l' + k} style={targetOf(k) ? pill('#F5F3FF', '#6D28D9', '#DDD6FE') : pill('#FFF7ED', '#B45309', '#FED7AA')}>
+                  🌐 {k === 'local' ? (targetOf(k) ? langLabel(targetOf(k)) : 'Local') : langLabel(k)}: {Object.keys(f).map(x => x === 'category' ? catWord.toLowerCase() : x === 'name' ? 'dish' : x).join(', ')}</span>
+              ))}
               {isMs && parsed.cols.course == null && <span style={pill('#FFF7ED', '#B45309', '#FED7AA')}>No Course column</span>}
             </div>
+            {wantsLocal && (
+              <div style={{ fontSize:12.5, marginBottom:8, color:'#6D28D9', fontWeight:700 }}>
+                🌐 {localCount} dish{localCount === 1 ? '' : 'es'} with {[...new Set(sheetLangs.map(targetOf).filter(Boolean))].map(langLabel).join(', ')} names
+                {setLang ? ' · the event’s menu language will be set to ' + setLang.name : ''}
+                {existing === 'skip' && nExisting > 0 ? ' · dishes already on the menu keep their names (choose “update them” to add the ' + langLabel(targetOf(sheetLangs[0])) + ' names to them too)' : ''}
+              </div>
+            )}
+            {lostLocal && (
+              <div style={{ fontSize:12.5, marginBottom:8, color:'#B45309', fontWeight:700 }}>
+                The sheet has Local columns, but this event has no menu language yet: set it under Menu › 🌐 Menu language first (or name the language in the header, e.g. “Dish (Gujarati)”). The English is imported either way.
+              </div>
+            )}
             {parsed.headings?.length > 0 && (
               <div style={{ fontSize:12.5, marginBottom:8, color:'var(--ink2)' }}>
                 <b style={{ color:'var(--ink)' }}>Read as headings, not dishes:</b> {parsed.headings.slice(0, 10).join(', ')}{parsed.headings.length > 10 ? '…' : ''}
@@ -364,7 +458,11 @@ export default function MenuImport({ eventData, rows: givenRows, fileName, onClo
                 <tbody>
                   {plan.dishes.slice(0, 12).map((d, i) => (
                     <tr key={i} style={{ borderTop:'1px solid var(--line)', background: i % 2 ? '#FAFAF9' : '#fff' }}>
-                      <td style={{ padding:'6px 10px', fontWeight:700 }}>{d.name}{d.description && <div style={{ fontWeight:500, color:'var(--ink2)', fontSize:11.5 }}>{d.description}</div>}</td>
+                      <td style={{ padding:'6px 10px', fontWeight:700 }}>{d.name}{d.description && <div style={{ fontWeight:500, color:'var(--ink2)', fontSize:11.5 }}>{d.description}</div>}
+                        {Object.entries(localFor(d) || {}).map(([code, f]) => (
+                          <div key={code} lang={code} dir={langInfo(code)?.rtl ? 'rtl' : undefined} style={{ fontFamily: fontFor(code), color:'#6D28D9', fontWeight:700, fontSize:12.5, marginTop:2 }}>
+                            {f.name || ''}{f.description ? <span style={{ fontWeight:500, fontSize:11.5 }}> · {f.description}</span> : null}</div>
+                        ))}</td>
                       <td style={{ padding:'6px 10px' }}>{d.category}</td>
                       {showCourses && <td style={{ padding:'6px 10px', color: d.courseOut || !isMs ? 'inherit' : '#B45309', fontWeight: d.courseOut || !isMs ? 500 : 800 }}>{d.courseOut || (isMs ? 'none' : '–')}</td>}
                       <td style={{ padding:'6px 10px', color: d.is_veg ? '#16A34A' : '#DC2626', fontWeight:800 }}>{d.is_veg ? 'Veg' : 'Non-veg'}</td>

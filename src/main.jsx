@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './lib/langFonts.css'
 import App from './App.jsx'
 import LaptopServerAsk from './components/guest/LaptopServerAsk.jsx'
 import { startupServerCheck, isLaptopOrigin, goToSavedLaptop, getSavedLaptop } from './lib/serverSwitch'

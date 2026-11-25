@@ -2,6 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { readMenu, saveMenu } from '../../lib/cache'
 import janusLogo from '../../assets/janus_logo.jpg'
+import { Loc, Bi } from '../MenuLang'
+import { useLocal } from '../menuLangCtx'
+import { fontFor } from '../../lib/menuLang'
 
 // Categories may be stored session-prefixed ("Lunch - Starters") so the
 // supervisor can show or hide a whole meal. Guests only ever see the
@@ -133,6 +136,7 @@ function HeaderCarousel({ eventData, tableNumber, isOnline, captain, onSwitchCap
 // captain is read by the bottom bar below - without it here the whole
 // menu screen crashes with "captain is not defined" the moment it renders.
 function MenuModal({ categories, items, onSelect, courseTiles, courseNow, onSelectCourse, cartCount, hasActiveOrders, onShowStatus, menuSheetOpen, onMenuSheetChange, onBack, captain }) {
+  const L = useLocal()
   const open = menuSheetOpen
   const setOpen = onMenuSheetChange
   return (
@@ -170,7 +174,7 @@ function MenuModal({ categories, items, onSelect, courseTiles, courseNow, onSele
             padding:'11px 20px', fontSize:14, fontWeight:800, cursor:'pointer',
             display:'flex', alignItems:'center', gap:6, flexShrink:0
           }}>
-            📦 Track
+            📦 <Bi en="Track" stack>Track</Bi>
           </button>
         )}
 
@@ -182,7 +186,7 @@ function MenuModal({ categories, items, onSelect, courseTiles, courseNow, onSele
           display:'flex', alignItems:'center', gap:8, letterSpacing:'0.5px', flexShrink:0
         }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-          MENU
+          <Bi en="Menu" stack>MENU</Bi>
         </button>
       </div>
       )}
@@ -195,7 +199,7 @@ function MenuModal({ categories, items, onSelect, courseTiles, courseNow, onSele
             <div style={{ width:40, height:4, background:'#ddd', borderRadius:999, margin:'0 auto 16px' }}></div>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
               <div style={{ width:40 }}></div>
-              <h3 style={{ fontSize:18, fontWeight:800, textAlign:'center', flex:1 }}>Browse Menu</h3>
+              <h3 style={{ fontSize:18, fontWeight:800, textAlign:'center', flex:1 }}><Bi en="Browse Menu" stack>Browse Menu</Bi></h3>
               <button onClick={()=>setOpen(false)} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
             </div>
             {/* A menu with courses (each course is a counter, one KOT each): the
@@ -208,7 +212,7 @@ function MenuModal({ categories, items, onSelect, courseTiles, courseNow, onSele
                   style={{ gridColumn:'1 / -1', background: !courseNow ? '#1A0A0A' : '#F8F8F8', color: !courseNow ? '#fff' : '#1A1A1A',
                     border:'1.5px solid ' + (!courseNow ? '#1A0A0A' : '#EBEBEB'), borderRadius:14, padding:'13px 12px', cursor:'pointer',
                     display:'flex', justifyContent:'space-between', alignItems:'center', fontWeight:800, fontSize:14 }}>
-                  <span>All courses</span>
+                  <span><Bi en="All courses">All courses</Bi></span>
                   <span style={{ fontSize:12, fontWeight:600, opacity:0.7 }}>{items.length}</span>
                 </button>
                 {courseTiles.map(c => {
@@ -218,7 +222,8 @@ function MenuModal({ categories, items, onSelect, courseTiles, courseNow, onSele
                       style={{ background: on ? '#FFF4E5' : '#F8F8F8', border:'1.5px solid ' + (on ? '#E8890C' : '#EBEBEB'), borderRadius:14,
                         padding:'13px 12px', textAlign:'left', cursor:'pointer', display:'flex', flexDirection:'column', gap:4, minWidth:0 }}>
                       <span style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, width:'100%' }}>
-                        <span style={{ fontWeight:800, fontSize:14, color:'#1A1A1A', minWidth:0, overflowWrap:'anywhere' }}>{c.name}</span>
+                        <span style={{ fontWeight:800, fontSize:14, color:'#1A1A1A', minWidth:0, overflowWrap:'anywhere' }}>{c.name}
+                          <Loc text={L.course(c.name)} block style={{ fontSize:13.5, fontWeight:700, color:'#7A4A00', lineHeight:1.35 }} /></span>
                         <span style={{ fontSize:12, color:'#888', fontWeight:600, flexShrink:0 }}>{c.count}</span>
                       </span>
                       {c.cats.length > 0 && !(c.cats.length === 1 && c.cats[0] === c.name) && (
@@ -240,7 +245,8 @@ function MenuModal({ categories, items, onSelect, courseTiles, courseNow, onSele
                 return (
                   <button key={cat.id} onClick={()=>{ onSelect(cat.id); setOpen(false) }}
                     style={{ background:'#F8F8F8', border:'1.5px solid #EBEBEB', borderRadius:14, padding:'16px 12px', textAlign:'left', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                    <span style={{ fontWeight:700, fontSize:14, color:'#1A1A1A' }}>{catLabel(cat.name)}</span>
+                    <span style={{ fontWeight:700, fontSize:14, color:'#1A1A1A' }}>{catLabel(cat.name)}
+                      <Loc text={L.cat(cat)} block style={{ fontSize:13.5, fontWeight:700, color:'#7A4A00', lineHeight:1.35 }} /></span>
                     <span style={{ fontSize:12, color:'#888', fontWeight:600 }}>{count}</span>
                   </button>
                 )
@@ -248,7 +254,7 @@ function MenuModal({ categories, items, onSelect, courseTiles, courseNow, onSele
             </div>
             )}
             <button onClick={()=>setOpen(false)} style={{ width:'100%', marginTop:16, background:'#1A0A0A', color:'#fff', border:'none', borderRadius:14, padding:'15px', fontSize:15, fontWeight:800, cursor:'pointer' }}>
-              ✕ Close
+              ✕ <Bi en="Close">Close</Bi>
             </button>
           </div>
         </div>
@@ -261,6 +267,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
   // ss-menu-cache. Start from the last menu this device saw for the event
   // (src/lib/cache.js), so the dishes show at once. The fresh fetch below
   // always runs on open and replaces it.
+  const L = useLocal()
   const [initialMenu] = useState(() => readMenu(eventData?.id))
   const [categories, setCategories] = useState(initialMenu?.categories || [])
   const [items, setItems] = useState(initialMenu?.items || [])
@@ -355,7 +362,10 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
 
   const matchVegOf = i => vegMode === 'all' || (vegMode==='veg' ? i.is_veg!==false : i.is_veg===false)
   const filtered = items.filter(i => {
-    const matchSearch = search.length === 0 || i.name.toLowerCase().includes(search.toLowerCase()) || (i.description||'').toLowerCase().includes(search.toLowerCase())
+    const sq = search.toLowerCase()
+    // the event's language too: a guest may type the dish in Gujarati
+    const matchSearch = search.length === 0 || i.name.toLowerCase().includes(sq) || (i.description||'').toLowerCase().includes(sq)
+      || (L.on && (L.dish(i).toLowerCase().includes(sq) || L.dishDesc(i).toLowerCase().includes(sq)))
     // a search looks through the whole menu; the category and course filters are for browsing
     if (search.length > 0) return matchSearch && matchVegOf(i)
     return matchVegOf(i) && (!courseNow || courseOf(i) === courseNow)
@@ -405,14 +415,18 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         {(item.is_live_counter || qty > 0) && (
           <div style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:4, minHeight:16 }}>
             {item.is_live_counter && <span style={{ fontSize:10, color:'#92400E', fontWeight:800, background:'#FEF3C7', padding:'1px 6px', borderRadius:4 }}>⏱ Live</span>}
-            {qty > 0 && <span style={{ marginLeft:'auto', fontSize:10.5, color:'#9A5B00', fontWeight:800 }}>{qty} added</span>}
+            {qty > 0 && <span style={{ marginLeft:'auto', fontSize:10.5, color:'#9A5B00', fontWeight:800 }}><Bi en="added">{qty} added</Bi></span>}
           </div>
         )}
         <div style={{ display:'flex', alignItems:'flex-start', gap:6, minWidth:0 }}>
           <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:12, height:12, borderRadius:2, border:'1.5px solid '+(isVeg?'#16A34A':'#DC2626'), flexShrink:0, marginTop:3 }}>
             <span style={{ width:5, height:5, borderRadius:'50%', background:isVeg?'#16A34A':'#DC2626', display:'block' }}></span>
           </span>
-          <div style={{ fontWeight:700, fontSize:14, color:'#1A1A1A', lineHeight:1.24, display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden', overflowWrap:'anywhere', minWidth:0 }}>{item.name}</div>
+          <div style={{ minWidth:0 }}>
+            <div style={{ fontWeight:700, fontSize:14, color:'#1A1A1A', lineHeight:1.24, display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden', overflowWrap:'anywhere', minWidth:0 }}>{item.name}</div>
+            {/* the dish in the event's language, right under the English */}
+            <Loc text={L.dish(item)} block clamp={2} style={{ fontWeight:700, fontSize:13.5, color:'#7A4A00', lineHeight:1.4, marginTop:2, overflowWrap:'anywhere' }} />
+          </div>
         </div>
         {item.description && <div style={{ fontSize:11, color:'#888', lineHeight:1.3, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', paddingLeft:18 }}>{item.description}</div>}
         <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'flex-end', marginTop:'auto', paddingTop:4 }}>
@@ -436,20 +450,25 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
             ? <img src={item.photo_url} alt={item.name} loading="lazy" decoding="async" style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} onError={e=>e.target.style.display='none'} />
             : <div style={{ width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:40 }}>🍽️</div>
           }
-          {item.is_live_counter && <span style={{ position:'absolute', top:8, left:8, fontSize:10, color:'#92400E', fontWeight:800, background:'#FEF3C7', padding:'2px 8px', borderRadius:999 }}>⏱ Live counter</span>}
-          {qty > 0 && <span style={{ position:'absolute', top:8, right:8, fontSize:12, color:'#fff', fontWeight:900, background:'#E8890C', padding:'2px 9px', borderRadius:999 }}>{qty} added</span>}
+          {item.is_live_counter && <span style={{ position:'absolute', top:8, left:8, fontSize:10, color:'#92400E', fontWeight:800, background:'#FEF3C7', padding:'2px 8px', borderRadius:999 }}>⏱ <Bi en="Live counter">Live counter</Bi></span>}
+          {qty > 0 && <span style={{ position:'absolute', top:8, right:8, fontSize:12, color:'#fff', fontWeight:900, background:'#E8890C', padding:'2px 9px', borderRadius:999 }}><Bi en="added">{qty} added</Bi></span>}
         </div>
         <div style={{ padding:'10px 11px 11px', display:'flex', flexDirection:'column', flex:1, minWidth:0 }}>
           <div style={{ display:'flex', alignItems:'flex-start', gap:6, marginBottom:4 }}>
             <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:15, height:15, borderRadius:3, border:'2px solid '+(isVeg?'#16A34A':'#DC2626'), flexShrink:0, marginTop:2 }}>
               <span style={{ width:6, height:6, borderRadius:'50%', background:isVeg?'#16A34A':'#DC2626', display:'block' }}></span>
             </span>
-            <div style={{ fontWeight:800, fontSize:15, color:'#1A1A1A', lineHeight:1.3, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{item.name}</div>
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontWeight:800, fontSize:15, color:'#1A1A1A', lineHeight:1.3, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{item.name}</div>
+              {/* the dish in the event's language, right under the English */}
+              <Loc text={L.dish(item)} block clamp={2} style={{ fontWeight:800, fontSize:15, color:'#7A4A00', lineHeight:1.4, marginTop:2 }} />
+            </div>
           </div>
-          {item.description && <div style={{ fontSize:12, color:'#888', lineHeight:1.45, marginBottom:8, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{item.description}</div>}
+          {item.description && <div style={{ fontSize:12, color:'#888', lineHeight:1.45, marginBottom: L.dishDesc(item) ? 3 : 8, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{item.description}</div>}
+          <Loc text={L.dishDesc(item)} block clamp={2} style={{ fontSize:12.5, color:'#8A6A3A', lineHeight:1.5, marginBottom:8 }} />
           <div style={{ marginTop:'auto', paddingTop:4 }}>
           {qty===0
-            ? <button onClick={()=>addToCart(item)} style={{ width:'100%', background:'#fff', color:'#E8890C', border:'1.5px solid #E8890C', borderRadius:9, padding:'9px 0', fontSize:14, fontWeight:800, cursor:'pointer', letterSpacing:'0.3px' }}>ADD +</button>
+            ? <button onClick={()=>addToCart(item)} style={{ width:'100%', background:'#fff', color:'#E8890C', border:'1.5px solid #E8890C', borderRadius:9, padding: L.ph('Add') ? '6px 0' : '9px 0', fontSize:14, fontWeight:800, cursor:'pointer', letterSpacing:'0.3px' }}><Bi en="Add" stack>ADD +</Bi></button>
             : <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:'#E8890C', borderRadius:9, overflow:'hidden' }}>
                 <button onClick={()=>removeFromCart(item.id)} style={{ background:'none', border:'none', color:'#fff', fontSize:22, fontWeight:800, cursor:'pointer', padding:'5px 18px', lineHeight:1 }}>−</button>
                 <span style={{ color:'#fff', fontWeight:800, fontSize:15, minWidth:22, textAlign:'center' }}>{qty}</span>
@@ -489,7 +508,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
             history and their rating are not the captain's to give. */}
         <button onClick={onShowHistory} style={{ display: captain ? 'none' : 'inline-block', flexShrink:0, background:'#fff', color:'#333',
           border:'1.5px solid #ddd', borderRadius:999, padding:'8px 14px', fontSize:12,
-          fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>📋 History</button>
+          fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>📋 <Bi en="History" stack>History</Bi></button>
 
         {/* ss-help-guest-only. Help was opened to captains in 46c and closed
             again here at the caterer's request - a captain standing at the
@@ -497,7 +516,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         {eventData?.call_waiter_enabled!==false && !captain && (
           <button onClick={onShowSOS} style={{ flexShrink:0, background:'#FEF3C7', color:'#92400E',
             border:'1.5px solid #FCD34D', borderRadius:999, padding:'8px 14px', fontSize:12,
-            fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>🔔 Help</button>
+            fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>🔔 <Bi en="Help" stack>Help</Bi></button>
         )}
 
         {/* Feedback - opens the detailed page directly, no face popup first */}
@@ -506,13 +525,13 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
             Order Now. Add ss-cta on its own to make it flash. */}
         <button onClick={onShowFeedback} className="ss-cta ss-cta-still"
           style={{ display: captain ? 'none' : 'inline-flex', flexShrink:0, borderRadius:999,
-            padding:'8px 15px', fontSize:12, whiteSpace:'nowrap' }}>⭐ Feedback</button>
+            padding:'8px 15px', fontSize:12, whiteSpace:'nowrap', alignItems:'center', gap:4 }}>⭐ <Bi en="Feedback" stack>Feedback</Bi></button>
 
         {/* Contact us - guest tablets only, never a captain's */}
         {!captain && onShowContact && (
           <button data-testid="contact-btn" onClick={onShowContact} style={{ flexShrink:0, background:'#1B2559', color:'#fff',
             border:'1.5px solid #1B2559', borderRadius:999, padding:'8px 14px', fontSize:12,
-            fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>📞 Contact us</button>
+            fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>📞 <Bi en="Contact us" stack>Contact us</Bi></button>
         )}
 
         {/* ss-menu-chat-button. Up here rather than in the bottom bar: that
@@ -540,9 +559,9 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
         <div style={{ flex:1, minWidth:0, background:'#F5F5F5', borderRadius:999,
           padding:'7px 14px', display:'flex', alignItems:'center', gap:6 }}>
           <span style={{ fontSize:14 }}>🔍</span>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search dishes..."
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder={L.ph('Search dishes') ? 'Search dishes · ' + L.ph('Search dishes') : 'Search dishes...'}
             style={{ border:'none', outline:'none', flex:1, minWidth:0, fontSize:13,
-              fontFamily:'Manrope', background:'transparent' }} />
+              fontFamily: L.on ? fontFor(L.info) : 'Manrope', background:'transparent' }} />
           {search.length>0 && (
             <button onClick={()=>setSearch('')} style={{ background:'none', border:'none',
               fontSize:15, color:'#999', cursor:'pointer', padding:0 }}>✕</button>
@@ -560,27 +579,29 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
             <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:7, padding:'0 14px' }}>
               {showCourses && (
                 <div className="ss-frow" style={{ display:'flex', alignItems:'center', gap:7, overflowX:'auto', scrollbarWidth:'none', flex:1, minWidth:0 }}>
-                  <span style={rowLbl}>Course</span>
-                  <button style={chip(!courseNow)} onClick={() => pickCourse(null)}>All</button>
+                  <span style={rowLbl}><Bi en="Course">Course</Bi></span>
+                  <button style={chip(!courseNow)} onClick={() => pickCourse(null)}><Bi en="All">All</Bi></button>
                   {courseList.map(c => (
-                    <button key={c} style={chip(courseNow === c)} onClick={() => pickCourse(courseNow === c ? null : c)}>{c}</button>
+                    <button key={c} style={chip(courseNow === c)} onClick={() => pickCourse(courseNow === c ? null : c)}>{c}<Loc text={L.course(c)} sep=" · " /></button>
                   ))}
                 </div>
               )}
               {hasVeg && hasNonVeg && (
                 <div style={{ display:'flex', gap:6, flexShrink:0, marginLeft: showCourses ? 0 : 0 }}>
+                  {/* the green and red dots say Veg / Non-Veg in any language: no second line here,
+                      so the course chips keep the room */}
                   {[['all','🍽️ All'],['veg','🟢 Veg'],['nonveg','🔴 Non-Veg']].map(([val,label]) => (
-                    <button key={val} onClick={()=>setVegMode(val)} style={{ flexShrink:0, padding:'5px 12px', borderRadius:999, fontSize:12, fontWeight:700, border:'1.5px solid', cursor:'pointer', background:vegMode===val?(val==='veg'?'#16A34A':val==='nonveg'?'#DC2626':'#1A0A0A'):'#fff', color:vegMode===val?'#fff':'#555', borderColor:vegMode===val?'transparent':'#ddd' }}>{label}</button>
+                    <button key={val} onClick={()=>setVegMode(val)} style={{ flexShrink:0, padding:'5px 12px', borderRadius:999, fontSize:12, fontWeight:700, border:'1.5px solid', cursor:'pointer', background:vegMode===val?(val==='veg'?'#16A34A':val==='nonveg'?'#DC2626':'#1A0A0A'):'#fff', color:vegMode===val?'#fff':'#555', borderColor:vegMode===val?'transparent':'#ddd', whiteSpace:'nowrap' }}>{label}</button>
                   ))}
                 </div>
               )}
             </div>
           )}
           <div className="ss-frow" style={{ display:'flex', alignItems:'center', gap:7, padding:'0 14px', overflowX:'auto', scrollbarWidth:'none' }}>
-            <span style={rowLbl}>Category</span>
-            <button style={chip(!catNow)} onClick={() => pickCat(null)}>All</button>
+            <span style={rowLbl}><Bi en="Category">Category</Bi></span>
+            <button style={chip(!catNow)} onClick={() => pickCat(null)}><Bi en="All">All</Bi></button>
             {catsShown.map(cat => (
-              <button key={cat.id} style={chip(catNow === cat.id)} onClick={() => pickCat(catNow === cat.id ? null : cat.id)}>{catLabel(cat.name)}</button>
+              <button key={cat.id} style={chip(catNow === cat.id)} onClick={() => pickCat(catNow === cat.id ? null : cat.id)}>{catLabel(cat.name)}<Loc text={L.cat(cat)} sep=" · " /></button>
             ))}
           </div>
         </div>
@@ -593,13 +614,13 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
       <div ref={scrollRef} style={{ flex:1, overflowY:'auto',
         paddingBottom: 110 }}>
         {loading ? (
-          <div style={{ textAlign:'center', padding:60, color:'#888' }}>Loading menu...</div>
+          <div style={{ textAlign:'center', padding:60, color:'#888' }}><Bi en="Loading menu" stack>Loading menu...</Bi></div>
         ) : search.length>0 ? (
           // SEARCH RESULTS — flat list
           <>
             <div style={{ padding:'10px 16px 6px', fontSize:13, color:'#888', fontWeight:600 }}>{filtered.length} results for "{search}"</div>
             {filtered.length===0
-              ? <div style={{ textAlign:'center', padding:60 }}><div style={{ fontSize:40, marginBottom:12 }}>🔍</div><div style={{ color:'#888', fontWeight:600 }}>No dishes found</div></div>
+              ? <div style={{ textAlign:'center', padding:60 }}><div style={{ fontSize:40, marginBottom:12 }}>🔍</div><div style={{ color:'#888', fontWeight:600 }}><Bi en="No dishes found" stack>No dishes found</Bi></div></div>
               : <div className={TILE_CLASS} style={TILE_GRID}>{filtered.map(item => <ItemCard key={item.id} item={item} />)}</div>
             }
           </>
@@ -612,6 +633,7 @@ export default function MenuScreen({ tableNumber, eventData, cart, addToCart, re
                 {/* Sticky category header — dark, bold, unmissable */}
                 <div style={{ position:'sticky', top:0, zIndex:10, background:'#1A0A0A', padding:'10px 16px', display:'flex', alignItems:'center', gap:10 }}>
                   <span style={{ fontWeight:900, fontSize:15, color:'#E8890C', letterSpacing:'0.5px', textTransform:'uppercase' }}>{catLabel(cat.name)}</span>
+                  <Loc text={L.cat(cat)} style={{ fontWeight:800, fontSize:15, color:'#FFD9A0' }} />
                   <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)', background:'rgba(255,255,255,0.1)', padding:'2px 8px', borderRadius:999, fontWeight:600 }}>{catItems.length} item{catItems.length!==1?'s':''}</span>
                 </div>
                 <div className={TILE_CLASS} style={TILE_GRID}>{catItems.map(item => <ItemCard key={item.id} item={item} />)}</div>

@@ -9,6 +9,8 @@
    added to the app's download. Unzipping uses the browser's own
    DecompressionStream. */
 
+import { langInHeader } from './menuLang.js'
+
 // ---------------------------------------------------------------- text / CSV
 
 /* Rows from pasted or CSV text. Tab separated when the text has tabs (a paste
@@ -159,6 +161,22 @@ export function detectColumns(header) {
   const h = header.map(norm)
   const cols = {}
   const used = new Set()
+  // Columns in another language first ("Dish (Gujarati)", "ગુજરાતી", "Local
+  // description", "Course - Hindi"), so "Dish (Gujarati)" is never read as
+  // the English dish name. cols.locals = { gu: { name, description, category, course } };
+  // 'local' = the event's own language.
+  header.forEach((raw, j) => {
+    const code = langInHeader(raw)
+    if (!code) return
+    const x = h[j]
+    const field = /\b(description|desc|details|ingredients)\b/.test(x) ? 'description'
+      : /\bcourse\b/.test(x) ? 'course'
+      : /\b(cuisine|category|section|counter|station)\b/.test(x) ? 'category'
+      : 'name'
+    cols.locals = cols.locals || {}
+    cols.locals[code] = cols.locals[code] || {}
+    if (cols.locals[code][field] == null) { cols.locals[code][field] = j; used.add(j) }
+  })
   const keys = Object.entries(HEADS).map(([k, names]) => [k, names.map(norm)])
   // exact header names first, for every column; only then "contains" matches,
   // so "Course Name" is never taken as the dish when "Menu Item Name" is there
@@ -201,7 +219,7 @@ export function menuRows(rows) {
   let hi = -1, best = 0
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
     const c = detectColumns(rows[r])
-    const n = Object.keys(c).length
+    const n = Object.keys(c).filter(k => k !== 'locals').length
     if (c.name != null && n > best) { hi = r; best = n }
   }
   if (hi < 0) return { dishes: [], cols: {}, problems: ['No dish name column found. Put a header row with Dish (or Name), and optionally Cuisine, Course, Description, Veg.'], headings: [] }
@@ -210,6 +228,17 @@ export function menuRows(rows) {
   const problems = []
   const headings = []
   const cell = (row, k) => cols[k] != null ? String(row[cols[k]] ?? '').trim() : ''
+  // the same dish in the sheet's other language(s): { gu: { name, description, category, course } }
+  const localCells = row => {
+    if (!cols.locals) return null
+    const out = {}
+    for (const [code, fields] of Object.entries(cols.locals)) {
+      const one = {}
+      for (const [f, j] of Object.entries(fields)) { const v = String(row[j] ?? '').trim(); if (v) one[f] = v }
+      if (Object.keys(one).length) out[code] = one
+    }
+    return Object.keys(out).length ? out : null
+  }
   const body = rows.slice(hi + 1)
   // A line in capitals with nothing else filled in is a heading ("SOUPS"), unless
   // the sheet writes most dish names in capitals anyway.
@@ -227,7 +256,7 @@ export function menuRows(rows) {
       if (cell(row, 'course')) lastCourse = cell(row, 'course')
       continue
     }
-    const others = Object.keys(cols).filter(k => k !== 'name').some(k => cell(row, k))
+    const others = Object.keys(cols).filter(k => k !== 'name' && k !== 'locals').some(k => cell(row, k))
     if (!capsSheet && !others && caps(name) && name.length < 40) { section = name; headings.push(name); lastCat = ''; lastCourse = ''; continue }
     if (cell(row, 'category')) lastCat = cell(row, 'category')
     if (cell(row, 'course')) lastCourse = cell(row, 'course')
@@ -242,6 +271,7 @@ export function menuRows(rows) {
       barker: /^b$/i.test(cell(row, 'barker')) ? 'B' : /^a$/i.test(cell(row, 'barker')) ? 'A' : null,
       is_live_counter: /^(y|yes|true|1)$/i.test(cell(row, 'live')),
       photo_url: cell(row, 'photo') || null,
+      local: localCells(row),
     })
   }
   if (!dishes.length) problems.push('No dishes found under the header row.')
@@ -249,7 +279,7 @@ export function menuRows(rows) {
 }
 
 /* A template people can fill in, as CSV text */
-export function menuTemplateCsv(courses) {
+export function menuTemplateCsv(courses, langName) {
   const c = courses.length ? courses : ['Soup', 'Starters', 'Mains', 'Dessert']
   // the event's own course names for a soup, a starter, a main and a dessert
   const pick = (names, i) => names.map(n => matchCourse(n, c)).find(Boolean) || c[Math.min(i, c.length - 1)]
@@ -262,5 +292,10 @@ export function menuTemplateCsv(courses) {
     ['Oriental', main, 'Thai Green Curry', 'Jasmine rice', 'Veg', 'B'],
     ['Italian', sweet, 'Tiramisu', '', 'Veg', ''],
   ]
+  // the event's menu language: its columns at the end, left empty for the caterer's own words
+  if (langName) {
+    const extra = ['Dish (' + langName + ')', 'Description (' + langName + ')', 'Cuisine (' + langName + ')', 'Course (' + langName + ')']
+    lines.forEach((l, i) => l.push(...(i === 0 ? extra : extra.map(() => ''))))
+  }
   return lines.map(l => l.map(v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v).join(',')).join('\r\n') + '\r\n'
 }

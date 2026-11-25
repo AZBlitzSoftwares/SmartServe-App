@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { Loc, Bi } from '../MenuLang'
+import { useLocal } from '../menuLangCtx'
 
 function mapStatus(raw) {
   if (!raw) return { label:'Order Received', color:'#D97706' }
@@ -11,6 +13,7 @@ function mapStatus(raw) {
 }
 
 export default function OrderHistory({ tableData, eventData, onClose, addToCart, onReordered }) {
+  const L = useLocal()
   const [orders, setOrders] = useState([])
   const [notice, setNotice] = useState(null)
   const [busyId, setBusyId] = useState(null)
@@ -91,7 +94,7 @@ export default function OrderHistory({ tableData, eventData, onClose, addToCart,
       <div style={{ width:'100%', background:'#fff', borderRadius:'24px 24px 0 0', padding:'24px 20px 40px', maxHeight:'85vh', overflowY:'auto' }}>
         <div style={{ width:40, height:4, background:'#E5E7EB', borderRadius:999, margin:'0 auto 20px' }} />
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
-          <h3 style={{ fontSize:20, fontWeight:800 }}>Order History</h3>
+          <h3 style={{ fontSize:20, fontWeight:800 }}><Bi en="Order History">Order History</Bi></h3>
           <button onClick={onClose} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:40, height:40, fontSize:19, fontWeight:800, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 8px rgba(0,0,0,0.25)' }}>✕</button>
         </div>
         {notice && (
@@ -143,7 +146,7 @@ export default function OrderHistory({ tableData, eventData, onClose, addToCart,
               </div>
               {order.order_items?.map((oi, i) => (
                 <div key={i} style={{ display:'flex', justifyContent:'space-between', fontSize:13, padding:'4px 0', borderBottom:'1px solid #EDEDED' }}>
-                  <span style={{ fontWeight:600 }}>{oi.menu_items?.name}</span>
+                  <span style={{ fontWeight:600 }}>{oi.menu_items?.name}<Loc text={L.byName(oi.menu_items?.name)} block style={{ fontSize:13, color:'#7A4A00', fontWeight:700 }} /></span>
                   <span style={{ color:'#888' }}>x{oi.quantity}</span>
                 </div>
               ))}

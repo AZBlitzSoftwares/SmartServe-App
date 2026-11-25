@@ -24,6 +24,7 @@ import FeedbackModal from '../components/guest/FeedbackModal'
 import ExitGate from '../components/guest/ExitGate'
 import NoEventScreen from '../components/guest/NoEventScreen'
 import { lazyPage } from '../lib/lazyPage'
+import { MenuLangProvider } from '../components/MenuLang'
 import { setUnsavedCheck, setSignOutReason, hideUpdatePill } from '../lib/appUpdate'
 import {
   entryFor, loadTodaysEvents, sessionStillCurrent, isCaptainEvent,
@@ -1147,7 +1148,10 @@ export default function GuestApp() {
   // hour after an order is delivered (it shows when the order came)
   const hasActiveOrders = activeOrders.length > 0 || activeHelp.length > 0 || doneOrders.length > 0
 
+  // v2.18: the event's menu language under the English - dish names on every
+  // tablet, the fixed buttons on guest tablets only (a captain reads English)
   return (
+    <MenuLangProvider eventData={eventData} buttons={!captain}>
     <div style={{minHeight:'100vh',background:'var(--bg)',position:'relative'}}>
       {appState === 'welcome' && (
         <WelcomeScreen tableNumber={tableNumber} onStart={() => goTo('menu')}
@@ -1283,5 +1287,6 @@ export default function GuestApp() {
         </div>
       )}
     </div>
+    </MenuLangProvider>
   )
 }

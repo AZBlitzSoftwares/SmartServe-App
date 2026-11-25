@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import CaptainTablePrompt from './CaptainTablePrompt'
+import { Loc, Bi } from '../MenuLang'
+import { useLocal } from '../menuLangCtx'
 
 /* Help panel.
 
@@ -25,6 +27,8 @@ import CaptainTablePrompt from './CaptainTablePrompt'
 const REQUEST_UNBLOCK_MS = 3 * 60 * 1000
 
 export default function SOSPanel({ tableData, eventData, onClose, captain }) {
+  // v2.18: help items and headings in the event's menu language too (guest tablets)
+  const L = useLocal()
   const [items, setItems] = useState([])
   const [qty, setQty] = useState({})
   const [loading, setLoading] = useState(true)
@@ -247,7 +251,7 @@ export default function SOSPanel({ tableData, eventData, onClose, captain }) {
 
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
           <h3 style={{ fontSize:20, fontWeight:800, margin:0 }}>
-            {captainMode ? 'What does the table need?' : 'What do you need?'}
+            {captainMode ? 'What does the table need?' : <Bi en="What do you need?" stack start>What do you need?</Bi>}
           </h3>
           <button onClick={onClose} style={{ background:'#1A0A0A', border:'none', borderRadius:999, width:38, height:38, fontSize:18, fontWeight:800, color:'#fff', cursor:'pointer', flexShrink:0 }}>✕</button>
         </div>
@@ -260,7 +264,7 @@ export default function SOSPanel({ tableData, eventData, onClose, captain }) {
             <div style={{ fontWeight:800, fontSize:17, color:'#16A34A', marginBottom:4 }}>
               {captainMode
                 ? 'Request Sent' + (sentTable != null ? ' \u00B7 Table ' + sentTable : '')
-                : 'Request Sent'}
+                : <Bi en="Request Sent" stack>Request Sent</Bi>}
             </div>
             <div style={{ fontSize:14, color:'#15803D', lineHeight:1.5, fontWeight:600 }}>
               {captainMode
@@ -340,7 +344,7 @@ export default function SOSPanel({ tableData, eventData, onClose, captain }) {
                   borderRadius:14, padding:'11px 14px', marginBottom:8 }}>
 
                   <span style={{ flex:1, fontWeight:700, fontSize:15,
-                    color: on ? '#C06A00' : '#1A1A1A' }}>{item.name}</span>
+                    color: on ? '#C06A00' : '#1A1A1A' }}>{item.name}<Loc text={L.ph(item.name)} block style={{ fontSize:14, color:'#7A4A00', fontWeight:700 }} /></span>
 
                   {item.has_quantity ? (
                     <div style={{ display:'flex', alignItems:'center', gap:10 }}>
@@ -374,16 +378,16 @@ export default function SOSPanel({ tableData, eventData, onClose, captain }) {
                 cursor: (sending || totalPicked === 0 || !canRaiseAnother) ? 'not-allowed' : 'pointer' }}>
               {sending ? 'Sending...'
                 : !canRaiseAnother ? 'A waiter is already on the way'
-                : totalPicked === 0 ? 'Select what you need'
+                : totalPicked === 0 ? <Bi en="Select what you need" stack>Select what you need</Bi>
                 : captainMode ? 'Choose Table (' + totalPicked + ') \u2192'
-                : 'Send Request (' + totalPicked + ')'}
+                : <Bi en="Send Request" stack>{'Send Request (' + totalPicked + ')'}</Bi>}
             </button>
 
             <button onClick={onClose}
               style={{ width:'100%', marginTop:8, background:'#f5f5f5', border:'none',
                 borderRadius:12, padding:'13px', fontSize:14, fontWeight:600,
                 color:'#888', cursor:'pointer' }}>
-              Cancel
+              <Bi en="Cancel" stack>Cancel</Bi>
             </button>
           </>
         )}

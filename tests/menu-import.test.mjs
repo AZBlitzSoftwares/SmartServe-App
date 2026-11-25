@@ -46,4 +46,21 @@ ok(menuRows([['Price', 'Qty']]).problems.length === 1, 'no dish column -> clear 
   const heads = menuRows(parseDelimited('Dish\tVeg\nSOUPS\t\nMinestrone\tVeg\nMAINS\t\nRisotto\tVeg\n'))
   ok(heads.headings.join(',') === 'SOUPS,MAINS' && heads.dishes[1].section === 'MAINS', 'heading rows are reported')
 }
+{
+  // v2.18: a second language in the sheet
+  const g = menuRows(parseDelimited('Cuisine\tCourse\tDish\tDish (Gujarati)\tDescription\tDescription (Gujarati)\tCuisine (Gujarati)\tVeg\nGujarati\tMains\tUndhiyu\tઊંધિયું\tWinter vegetables\tશિયાળુ શાક\tગુજરાતી\tVeg\n\t\tKadhi\tકઢી\t\t\t\tVeg\n'))
+  ok(g.cols.name === 2 && g.cols.description === 4 && g.cols.category === 0 && JSON.stringify(g.cols.locals) === JSON.stringify({ gu: { name: 3, description: 5, category: 6 } }), 'Gujarati columns found, English ones untouched: ' + JSON.stringify(g.cols))
+  ok(g.dishes[0].local.gu.name === 'ઊંધિયું' && g.dishes[0].local.gu.description === 'શિયાળુ શાક' && g.dishes[0].local.gu.category === 'ગુજરાતી', 'Gujarati name, description, cuisine read')
+  ok(g.dishes[1].name === 'Kadhi' && g.dishes[1].local.gu.name === 'કઢી' && !g.dishes[1].local.gu.description, 'second dish: its own Gujarati name, no description')
+  const only = menuRows(parseDelimited('Dish (Gujarati)\tDish\nઢોકળા\tDhokla\n'))
+  ok(only.cols.name === 1 && only.dishes[0].name === 'Dhokla' && only.dishes[0].local.gu.name === 'ઢોકળા', 'Gujarati column first: the English column is still the dish')
+  const loc = menuRows(parseDelimited('Dish,Local name,Local description\nPaneer Tikka,पनीर टिक्का,\n'))
+  ok(loc.dishes[0].local.local.name === 'पनीर टिक्का', '"Local name" = the event\'s language')
+  const multi = detectColumns(['Dish', 'Hindi', 'Marathi name', 'ગુજરાતી'])
+  ok(multi.locals.hi.name === 1 && multi.locals.mr.name === 2 && multi.locals.gu.name === 3, 'several languages in one sheet')
+  const plain = menuRows(parseDelimited('Dish,Description\nSoup,Hot\n'))
+  ok(plain.dishes[0].local === null && !plain.cols.locals, 'English-only sheet: no local part')
+  const tg = menuRows(parseDelimited(menuTemplateCsv(C, 'Gujarati')))
+  ok(tg.dishes.length === 5 && tg.cols.locals?.gu?.name === 6 && tg.cols.locals.gu.course === 9, 'template with Gujarati columns round-trips')
+}
 console.log(fails ? fails + ' FAILED' : 'all passed'); process.exitCode = fails ? 1 : 0

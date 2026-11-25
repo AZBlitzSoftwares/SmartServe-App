@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import janusLogo from '../../assets/janus_logo.jpg'
 import { isLaptopMedia, localMediaUrl } from '../../lib/mediaCache'
+import { Bi } from '../MenuLang'
 
 
 // ─── Event Status Helper ───────────────────────────────────────────────────
@@ -354,7 +355,7 @@ export default function WelcomeScreen({ tableNumber, onStart, eventData, onEvent
               style={{ marginTop:14,
                 padding:'clamp(12px, 1.6vw + 6px, 20px) clamp(40px, 5vw + 22px, 78px)',
                 fontSize:'clamp(15px, 1.7vw + 7px, 23px)', whiteSpace:'nowrap' }}>
-              Start
+              <Bi en="Start" stack>Start</Bi>
             </button>
           ) : (
             <button onClick={openEventPicker}

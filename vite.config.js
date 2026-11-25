@@ -33,7 +33,9 @@ function swBuildManifest() {
         if (c.type !== 'chunk') return
         ;(c.imports || []).forEach(visit)
         c.viteMetadata?.importedCss?.forEach(f => entry.add('/' + f))
-        c.viteMetadata?.importedAssets?.forEach(f => entry.add('/' + f))
+        // fonts are not first-screen files: the menu-language fonts (src/lib/langFonts.css)
+        // are fetched only when that script is on screen, then kept like any /assets file
+        c.viteMetadata?.importedAssets?.forEach(f => { if (!/\.woff2?$/i.test(f)) entry.add('/' + f) })
       }
       Object.values(bundle).filter(c => c.type === 'chunk' && c.isEntry).forEach(c => visit(c.fileName))
 

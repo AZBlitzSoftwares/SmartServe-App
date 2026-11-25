@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { LANGS, langInfo } from '../../lib/menuLang'
 
 // Auto-compute event status from date
 function eventStatus(dateStr) {
@@ -1511,6 +1512,25 @@ export default function EventManager({ onEventChange }) {
                     borderRadius:999, padding:'8px 18px', fontSize:13, fontWeight:800, cursor:'pointer' }}>
                   {ev.video_sound_enabled===false ? 'OFF' : 'ON'}
                 </button>
+              </div>
+
+              {/* v2.18: the menu's second language - guests and captains see every dish in English and in this */}
+              <div style={{ background:'var(--bg)', borderRadius:12, padding:'12px 14px', marginBottom:12,
+                display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
+                <div>
+                  <div style={{ fontSize:11, fontWeight:700, color:'var(--ink2)', textTransform:'uppercase' }}>🌐 Menu Language</div>
+                  <div style={{ fontSize:12, color:'#888', marginTop:3 }}>Dishes show in English with this language under them. KOTs stay English. Names: Menu › 🌐</div>
+                </div>
+                <select value={langInfo(ev.menu_lang)?.code || ''} data-testid="event-menu-lang"
+                  onChange={async e => {
+                    const { error } = await supabase.from('events').update({ menu_lang: e.target.value || null }).eq('id', ev.id)
+                    if (error) alert('Could not set the menu language: ' + error.message + (/menu_lang/.test(error.message || '') ? '\n\nRun db/2026-11-26_menu_language.sql in Supabase first.' : ''))
+                    loadAll()
+                  }}
+                  style={{ border:'1.5px solid var(--line)', borderRadius:10, padding:'8px 12px', fontSize:13, fontWeight:700, fontFamily:'Manrope', background:'#fff' }}>
+                  <option value="">English only</option>
+                  {LANGS.map(l => <option key={l.code} value={l.code}>{l.name} · {l.native}</option>)}
+                </select>
               </div>
 
               {/* Welcome Note + Banner Image edit */}
