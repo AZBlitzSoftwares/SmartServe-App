@@ -155,8 +155,12 @@ export default function GuestApp() {
   // of the hundred-odd buttons, which would guarantee some got missed.
   useEffect(() => installTapFx(), [])
   // In a browser (not the APK): full screen from the first tap, so no address
-  // bar shows and Back cannot drop a captain out of the app (lib/kioskScreen.js).
-  useEffect(() => installKioskScreen(), [])
+  // bar shows, and Back is caught from the moment the page opens and handled
+  // like any other back press, so it cannot drop a captain out of the app
+  // (lib/kioskScreen.js).
+  useEffect(() => installKioskScreen({
+    onBack: () => { if (!allowExitRef.current) backHandlerRef.current() },
+  }), [])
 
   function goTo(screen) {
     appStateRef.current = screen
