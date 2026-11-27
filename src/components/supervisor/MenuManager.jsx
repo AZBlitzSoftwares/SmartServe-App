@@ -226,6 +226,22 @@ export default function MenuManager({ eventData, onEventChange }) {
     loadMenu()
   }
 
+  // Show or hide a whole course in one tap: every category of the course (catCourse) at once.
+  // Guest and captain tablets leave out hidden categories, so a course whose categories are
+  // all hidden drops off their course row and MENU sheet (live via Realtime).
+  // Any category of the course still showing → hide them all; all hidden → show them all.
+  const courseCats = course => categories.filter(c => catCourse(c.id) === course)
+  async function toggleCourseVisible(course) {
+    const cats = courseCats(course)
+    if (!cats.length) return
+    const show = cats.every(c => c.is_visible === false)
+    const ids = cats.map(c => c.id)
+    setCategories(p => p.map(c => ids.includes(c.id) ? { ...c, is_visible: show } : c))
+    const { error } = await supabase.from('menu_categories').update({ is_visible: show }).in('id', ids)
+    if (error) alert('Could not ' + (show ? 'show ' : 'hide ') + course + ': ' + error.message)
+    loadMenu()
+  }
+
   // Show one meal session and hide the others in a single tap.
   // "All Day Items" always stays visible.
   async function showSessionOnly(session) {
@@ -404,11 +420,28 @@ export default function MenuManager({ eventData, onEventChange }) {
             .filter(([k, , n]) => k !== '__none' || n > 0)
             .map(([k, label, n]) => {
               const on = courseFilter === k, warn = k === '__none'
+              // a real course with categories gets the same LIVE / HIDDEN switch as a category
+              const cc = k === 'all' || warn ? [] : courseCats(k)
+              const shown = cc.filter(c => c.is_visible !== false).length
+              const vis = !cc.length ? null : shown === cc.length ? 'live' : shown === 0 ? 'hidden' : 'part'
               return (
-                <button key={k} onClick={() => setCourseFilter(k)} style={{ borderRadius:999, padding:'6px 13px', fontSize:12.5, fontWeight:800, cursor:'pointer',
+                <button key={k} onClick={() => setCourseFilter(k)} data-course={k} style={{ borderRadius:999, padding:'6px 13px', fontSize:12.5, fontWeight:800, cursor:'pointer',
                   border:'1.5px solid ' + (on ? (warn ? '#B45309' : '#B8862B') : warn ? '#FED7AA' : 'var(--line)'),
-                  background: on ? (warn ? '#B45309' : '#F6E7C8') : warn ? '#FFF7ED' : '#fff', color: on && warn ? '#fff' : warn ? '#B45309' : 'var(--ink)' }}>
-                  {label} <span style={{ opacity:.65 }}>{n}</span></button>
+                  background: on ? (warn ? '#B45309' : '#F6E7C8') : warn ? '#FFF7ED' : '#fff', color: on && warn ? '#fff' : warn ? '#B45309' : 'var(--ink)',
+                  opacity: vis === 'hidden' && !on ? 0.75 : 1 }}>
+                  {label} <span style={{ opacity:.65 }}>{n}</span>
+                  {vis && (
+                    <span onClick={e => { e.stopPropagation(); toggleCourseVisible(k) }} data-testid="course-visibility"
+                      title={vis === 'live' ? 'Showing on the tablets: tap to hide this whole course'
+                        : vis === 'hidden' ? 'Hidden from the tablets: tap to show this whole course'
+                        : shown + ' of ' + cc.length + ' categories showing: tap to hide the whole course'}
+                      style={{ marginLeft:7, fontSize:10.5, fontWeight:800, padding:'2px 7px', borderRadius:999,
+                        background: vis === 'live' ? '#F0FDF4' : vis === 'hidden' ? '#FEF2F2' : '#FFFBEB',
+                        color: vis === 'live' ? '#16A34A' : vis === 'hidden' ? '#DC2626' : '#B45309' }}>
+                      {vis === 'live' ? 'LIVE' : vis === 'hidden' ? 'HIDDEN' : shown + '/' + cc.length + ' LIVE'}
+                    </span>
+                  )}
+                </button>
               )
             })}
           {/* guest / captain events: a new course right here, like + Category (Maestro courses: Control) */}
